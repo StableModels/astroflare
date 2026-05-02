@@ -1,0 +1,33 @@
+{
+  "name": "astroflare",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Cloudflare-native, Astro-compatible content framework",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "packageManager": "pnpm@10.28.2",
+  "scripts": {
+    "build": "tsc -b",
+    "clean": "tsc -b --clean && rimraf 'packages/*/dist' 'examples/*/dist'",
+    "typecheck": "tsc -b",
+    "lint": "biome check .",
+    "format": "biome format --write .",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "1.9.4",
+    "@types/node": "^22.10.0",
+    "@vitest/coverage-v8": "2.1.8",
+    "rimraf": "^6.0.1",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": ["@biomejs/biome", "esbuild", "workerd"]
+  }
+}
