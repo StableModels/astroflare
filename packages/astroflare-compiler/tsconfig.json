@@ -1,10 +1,10 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "rootDir": "./src",
+    "rootDir": ".",
     "outDir": "./dist",
     "tsBuildInfoFile": "./dist/.tsbuildinfo"
   },
-  "include": ["src/**/*"],
-  "references": [{ "path": "../astroflare-core" }]
+  "include": ["src/**/*", "test/**/*"],
+  "references": [{ "path": "../astroflare-core" }, { "path": "../astroflare-runtime" }]
 }

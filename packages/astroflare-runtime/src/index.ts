@@ -1,2 +1,10 @@
-// Phase 3: server render(), Astro.* surface, hydration custom element, HMR client.
-export const RUNTIME_VERSION = "0.0.0";
+export const RUNTIME_VERSION = "0.1.0";
+export {
+  attr,
+  attrs,
+  createResult,
+  escape,
+  renderComponent,
+  renderSlot,
+} from "./render.js";
+export type { AstroComponent, AstroResult, SlotFn, SlotsRecord } from "./render.js";
