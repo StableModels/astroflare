@@ -10,6 +10,8 @@
   "references": [
     { "path": "../astroflare-core" },
     { "path": "../astroflare-compiler" },
-    { "path": "../astroflare-runtime" }
+    { "path": "../astroflare-preview" },
+    { "path": "../astroflare-runtime" },
+    { "path": "../astroflare-test-utils" }
   ]
 }

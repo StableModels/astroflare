@@ -17,9 +17,11 @@
   "dependencies": {
     "@astroflare/core": "workspace:*",
     "@astroflare/compiler": "workspace:*",
+    "@astroflare/preview": "workspace:*",
     "@astroflare/runtime": "workspace:*"
   },
   "devDependencies": {
+    "@astroflare/test-utils": "workspace:*",
     "vitest": "^2.1.8"
   }
 }

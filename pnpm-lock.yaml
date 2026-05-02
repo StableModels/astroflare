@@ -35,10 +35,16 @@ importers:
       '@astroflare/core':
         specifier: workspace:*
         version: link:../astroflare-core
+      '@astroflare/preview':
+        specifier: workspace:*
+        version: link:../astroflare-preview
       '@astroflare/runtime':
         specifier: workspace:*
         version: link:../astroflare-runtime
     devDependencies:
+      '@astroflare/test-utils':
+        specifier: workspace:*
+        version: link:../astroflare-test-utils
       vitest:
         specifier: ^2.1.8
         version: 2.1.8(@types/node@22.19.17)(happy-dom@15.11.7)
