@@ -49,6 +49,7 @@ import {
 import { HMR_CLIENT_SOURCE } from "@astroflare/runtime";
 import { inlineBundle } from "./bundle.js";
 import { type EndpointContext, runEndpoint } from "./endpoint.js";
+import { renderErrorPage } from "./error-page.js";
 import { injectHmrScript } from "./inject-hmr.js";
 import { type MiddlewareContext, type MiddlewareFn, loadMiddleware } from "./middleware.js";
 import { ModuleGraph, type ModuleInfo } from "./module-graph.js";
@@ -237,9 +238,13 @@ export function createPreviewServer(opts: PreviewServerOptions): PreviewServer {
 					url: req.url,
 					message: (err as Error).message,
 				});
-				return new Response(`Preview error: ${(err as Error).message}`, {
+				const errorHtml = renderErrorPage({
+					error: err as Error,
+					requestUrl: req.url,
+				});
+				return new Response(injectHmrScript(errorHtml, HMR_CLIENT_SOURCE), {
 					status: 500,
-					headers: { "content-type": "text/plain;charset=utf-8" },
+					headers: { "content-type": "text/html;charset=utf-8" },
 				});
 			}
 		},

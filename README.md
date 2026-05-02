@@ -16,27 +16,43 @@ Astroflare runs an Astro-shaped project (`src/pages/`, `.astro`/`.md`/`.mdx`,
 
 ## Status
 
-Phase 5 complete — the dev-loop is reactive end-to-end (Layer A). Browser HMR
-client, HMR script injection, preview-server HMR pipeline (forward to
-`Transport.broadcastHmr`), reactive route discovery on `/src/pages/` changes.
-Hibernatable WebSockets + latency budgets defer to the host implementation
-phase per Phase 2.5 findings. 293 tests across 5 test pools.
+Phases 0–9 shipped (with stated carve-outs in each retrospective). The framework
+runs end-to-end:
 
-See [`docs/phases/`](./docs/phases/) for phase-by-phase progress and retrospectives.
+- **Live preview** — file-based routing, `.astro` + `.md`, multi-file
+  composition, HMR over WebSocket, content-hashed compile cache, reactive
+  route discovery, server endpoints, middleware, dev error overlay.
+- **Content collections** — `defineCollection` + Zod schemas + `getCollection` +
+  `getEntry`, walking `src/content/<name>/`.
+- **Deploy pipeline** — planner, render fan-out, manifest, atomic flip,
+  runtime serving shim.
+- **`examples/minimal-blog`** — exercises every Tier 0/1 capability through
+  preview and deploy.
+
+353 tests across 5 test pools. Significant carve-outs (the
+`@astroflare/host-cloudflare` implementation, scoped CSS, image transforms,
+TS support throughout, framework integrations, client-island hydration,
+view transitions, `getStaticPaths`, latency / soak / coverage gates) are
+each documented per-phase under [`docs/phases/`](./docs/phases/).
 
 ## Layout
 
 ```
 packages/
-  astroflare-core/             # framework types + host interfaces
-  astroflare-compiler/         # .astro / mdx / jsx / sfc compilers
-  astroflare-runtime/          # server render() + browser hydration
-  astroflare-preview/          # dev-loop heart: module graph, HMR, transform-on-demand
-  astroflare-build/            # deploy: planner, bundle, render fan-out, artifact
-  astroflare-test-utils/       # in-memory host impls + fixtures (substrate of all framework tests)
+  astroflare-core/             # framework types + host interfaces + path/hash/glob primitives
+  astroflare-compiler/         # .astro parser/emitter + .md compiler (remark/rehype)
+  astroflare-runtime/          # render() + $component/$render ABI + HMR client
+  astroflare-preview/          # router + module graph + bundler + HMR + endpoints + middleware
+  astroflare-build/            # planner + render fan-out + artifact + atomic flip
+  astroflare-content/          # content collections (Zod-typed, Astro-shaped surface)
+  astroflare-test-utils/       # MemoryStorage + MapCoordinator + InProcessExecutor + fixtures
   astroflare-host-cloudflare/  # ONLY package allowed to import @cloudflare/* and cloudflare:
+                               # (skeleton only — host implementation phase blocked on Phase 2.5)
 tests/
-  integration/                 # end-to-end Miniflare tests
+  workerd/                     # Layer B: framework code under workerd via vitest-pool-workers
+  integration/                 # Layer C: end-to-end Miniflare tests
+examples/
+  minimal-blog/                # acceptance §11.1 fixture — Tier 0/1 features end-to-end
 ```
 
 ## The framework / host boundary (load-bearing)
