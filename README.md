@@ -16,10 +16,11 @@ Astroflare runs an Astro-shaped project (`src/pages/`, `.astro`/`.md`/`.mdx`,
 
 ## Status
 
-Phase 4 substantially complete (module graph + per-module compile cache +
-closure walker + inline bundler — multi-file `.astro` composition end-to-end).
-The `/_aflare/mod` browser endpoint deferred to Phase 5 alongside the HMR
-client that will be its first consumer. 268 tests across 5 test pools.
+Phase 5 complete — the dev-loop is reactive end-to-end (Layer A). Browser HMR
+client, HMR script injection, preview-server HMR pipeline (forward to
+`Transport.broadcastHmr`), reactive route discovery on `/src/pages/` changes.
+Hibernatable WebSockets + latency budgets defer to the host implementation
+phase per Phase 2.5 findings. 293 tests across 5 test pools.
 
 See [`docs/phases/`](./docs/phases/) for phase-by-phase progress and retrospectives.
 

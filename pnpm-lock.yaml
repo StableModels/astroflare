@@ -16,7 +16,7 @@ importers:
         version: 22.19.17
       '@vitest/coverage-v8':
         specifier: 2.1.8
-        version: 2.1.8(vitest@2.1.8(@types/node@22.19.17))
+        version: 2.1.8(vitest@2.1.8(@types/node@22.19.17)(happy-dom@15.11.7))
       rimraf:
         specifier: ^6.0.1
         version: 6.1.3
@@ -25,7 +25,7 @@ importers:
         version: 5.9.3
       vitest:
         specifier: ^2.1.8
-        version: 2.1.8(@types/node@22.19.17)
+        version: 2.1.8(@types/node@22.19.17)(happy-dom@15.11.7)
 
   packages/astroflare-build:
     dependencies:
@@ -41,7 +41,7 @@ importers:
     devDependencies:
       vitest:
         specifier: ^2.1.8
-        version: 2.1.8(@types/node@22.19.17)
+        version: 2.1.8(@types/node@22.19.17)(happy-dom@15.11.7)
 
   packages/astroflare-compiler:
     dependencies:
@@ -57,13 +57,13 @@ importers:
         version: link:../astroflare-test-utils
       vitest:
         specifier: ^2.1.8
-        version: 2.1.8(@types/node@22.19.17)
+        version: 2.1.8(@types/node@22.19.17)(happy-dom@15.11.7)
 
   packages/astroflare-core:
     devDependencies:
       vitest:
         specifier: ^2.1.8
-        version: 2.1.8(@types/node@22.19.17)
+        version: 2.1.8(@types/node@22.19.17)(happy-dom@15.11.7)
 
   packages/astroflare-host-cloudflare:
     dependencies:
@@ -82,13 +82,13 @@ importers:
     devDependencies:
       '@cloudflare/vitest-pool-workers':
         specifier: ^0.5.40
-        version: 0.5.41(@cloudflare/workers-types@4.20260502.1)(@vitest/runner@2.1.8)(@vitest/snapshot@2.1.8)(vitest@2.1.8(@types/node@22.19.17))
+        version: 0.5.41(@cloudflare/workers-types@4.20260502.1)(@vitest/runner@2.1.8)(@vitest/snapshot@2.1.8)(vitest@2.1.8(@types/node@22.19.17)(happy-dom@15.11.7))
       '@cloudflare/workers-types':
         specifier: ^4.20241224.0
         version: 4.20260502.1
       vitest:
         specifier: 2.1.8
-        version: 2.1.8(@types/node@22.19.17)
+        version: 2.1.8(@types/node@22.19.17)(happy-dom@15.11.7)
       wrangler:
         specifier: ^3.99.0
         version: 3.114.17(@cloudflare/workers-types@4.20260502.1)
@@ -110,7 +110,7 @@ importers:
         version: link:../astroflare-test-utils
       vitest:
         specifier: ^2.1.8
-        version: 2.1.8(@types/node@22.19.17)
+        version: 2.1.8(@types/node@22.19.17)(happy-dom@15.11.7)
 
   packages/astroflare-runtime:
     dependencies:
@@ -118,9 +118,12 @@ importers:
         specifier: workspace:*
         version: link:../astroflare-core
     devDependencies:
+      happy-dom:
+        specifier: ^15.11.7
+        version: 15.11.7
       vitest:
         specifier: ^2.1.8
-        version: 2.1.8(@types/node@22.19.17)
+        version: 2.1.8(@types/node@22.19.17)(happy-dom@15.11.7)
 
   packages/astroflare-test-utils:
     dependencies:
@@ -130,7 +133,7 @@ importers:
     devDependencies:
       vitest:
         specifier: ^2.1.8
-        version: 2.1.8(@types/node@22.19.17)
+        version: 2.1.8(@types/node@22.19.17)(happy-dom@15.11.7)
 
   tests/integration:
     dependencies:
@@ -146,13 +149,13 @@ importers:
     devDependencies:
       '@cloudflare/vitest-pool-workers':
         specifier: ^0.5.40
-        version: 0.5.41(@cloudflare/workers-types@4.20260502.1)(@vitest/runner@2.1.8)(@vitest/snapshot@2.1.8)(vitest@2.1.8(@types/node@22.19.17))
+        version: 0.5.41(@cloudflare/workers-types@4.20260502.1)(@vitest/runner@2.1.8)(@vitest/snapshot@2.1.8)(vitest@2.1.8(@types/node@22.19.17)(happy-dom@15.11.7))
       '@cloudflare/workers-types':
         specifier: ^4.20241224.0
         version: 4.20260502.1
       vitest:
         specifier: 2.1.8
-        version: 2.1.8(@types/node@22.19.17)
+        version: 2.1.8(@types/node@22.19.17)(happy-dom@15.11.7)
       wrangler:
         specifier: ^3.99.0
         version: 3.114.17(@cloudflare/workers-types@4.20260502.1)
@@ -171,13 +174,13 @@ importers:
     devDependencies:
       '@cloudflare/vitest-pool-workers':
         specifier: ^0.5.40
-        version: 0.5.41(@cloudflare/workers-types@4.20260502.1)(@vitest/runner@2.1.8)(@vitest/snapshot@2.1.8)(vitest@2.1.8(@types/node@22.19.17))
+        version: 0.5.41(@cloudflare/workers-types@4.20260502.1)(@vitest/runner@2.1.8)(@vitest/snapshot@2.1.8)(vitest@2.1.8(@types/node@22.19.17)(happy-dom@15.11.7))
       '@cloudflare/workers-types':
         specifier: ^4.20241224.0
         version: 4.20260502.1
       vitest:
         specifier: 2.1.8
-        version: 2.1.8(@types/node@22.19.17)
+        version: 2.1.8(@types/node@22.19.17)(happy-dom@15.11.7)
       wrangler:
         specifier: ^3.99.0
         version: 3.114.17(@cloudflare/workers-types@4.20260502.1)
@@ -1118,6 +1121,10 @@ packages:
   emoji-regex@9.2.2:
     resolution: {integrity: sha512-L18DaJsXSUk2+42pv8mLs5jJT2hqFkFE4j21wOmgbUqsZ2hL72NsUU785g9RXgo3s0ZNgVl42TiHp3ZtOv/Vyg==}
 
+  entities@4.5.0:
+    resolution: {integrity: sha512-V0hjH4dGPh9Ao5p0MoRY6BVqtwCjhz6vI5LT8AJ55H+4g9/4vbHx1I54fS0XuclLhDHArPQCiMjDxjaL8fPxhw==}
+    engines: {node: '>=0.12'}
+
   es-errors@1.3.0:
     resolution: {integrity: sha512-Zf5H2Kxt2xjTvbJvP2ZWLEICxA6j+hAmMzIlypy4xcBg1vKVnx89Wy0GbS+kf5cwCVFFzdCFh2XSCFNULS6csw==}
     engines: {node: '>= 0.4'}
@@ -1182,6 +1189,10 @@ packages:
   glob@13.0.6:
     resolution: {integrity: sha512-Wjlyrolmm8uDpm/ogGyXZXb1Z+Ca2B8NbJwqBVg0axK9GbBeoS7yGV6vjXnYdGm6X53iehEuxxbyiKp8QmN4Vw==}
     engines: {node: 18 || 20 || >=22}
+
+  happy-dom@15.11.7:
+    resolution: {integrity: sha512-KyrFvnl+J9US63TEzwoiJOQzZBJY7KgBushJA8X61DMbNsH+2ONkDuLDnCnwUiPTF42tLoEmrPyoqbenVA5zrg==}
+    engines: {node: '>=18.0.0'}
 
   has-flag@4.0.0:
     resolution: {integrity: sha512-EykJT/Q1KjTWctppgIAgfSO0tKVuZUjhgMr17kqTumMl6Afv3EISleU7qZUzoXDFTAHTDC4NOoG/ZxU3EvlMPQ==}
@@ -1565,6 +1576,14 @@ packages:
       jsdom:
         optional: true
 
+  webidl-conversions@7.0.0:
+    resolution: {integrity: sha512-VwddBukDzu71offAQR975unBIGqfKZpM+8ZX6ySk8nYhVoo5CYaZyzt3YBvYtRtO+aoGlqxPg/B87NGVZ/fu6g==}
+    engines: {node: '>=12'}
+
+  whatwg-mimetype@3.0.0:
+    resolution: {integrity: sha512-nt+N2dzIutVRxARx1nghPKGv1xHikU7HKdfafKkLNLindmPU/ch3U31NOCGGA/dmPcmb1VlofO0vnKAcsm0o/Q==}
+    engines: {node: '>=12'}
+
   which@2.0.2:
     resolution: {integrity: sha512-BLI3Tl1TW3Pvl70l3yq3Y64i+awpwXqsGBYWkkqMtnbXgrMD+yj7rhW0kuEDxzJaYXGjEW5ogapKNMEKNMjibA==}
     engines: {node: '>= 8'}
@@ -1717,7 +1736,7 @@ snapshots:
     optionalDependencies:
       workerd: 1.20250718.0
 
-  '@cloudflare/vitest-pool-workers@0.5.41(@cloudflare/workers-types@4.20260502.1)(@vitest/runner@2.1.8)(@vitest/snapshot@2.1.8)(vitest@2.1.8(@types/node@22.19.17))':
+  '@cloudflare/vitest-pool-workers@0.5.41(@cloudflare/workers-types@4.20260502.1)(@vitest/runner@2.1.8)(@vitest/snapshot@2.1.8)(vitest@2.1.8(@types/node@22.19.17)(happy-dom@15.11.7))':
     dependencies:
       '@vitest/runner': 2.1.8
       '@vitest/snapshot': 2.1.8
@@ -1727,7 +1746,7 @@ snapshots:
       esbuild: 0.17.19
       miniflare: 3.20241230.0
       semver: 7.7.4
-      vitest: 2.1.8(@types/node@22.19.17)
+      vitest: 2.1.8(@types/node@22.19.17)(happy-dom@15.11.7)
       wrangler: 3.100.0(@cloudflare/workers-types@4.20260502.1)
       zod: 3.25.76
     transitivePeerDependencies:
@@ -2117,7 +2136,7 @@ snapshots:
     dependencies:
       undici-types: 6.21.0
 
-  '@vitest/coverage-v8@2.1.8(vitest@2.1.8(@types/node@22.19.17))':
+  '@vitest/coverage-v8@2.1.8(vitest@2.1.8(@types/node@22.19.17)(happy-dom@15.11.7))':
     dependencies:
       '@ampproject/remapping': 2.3.0
       '@bcoe/v8-coverage': 0.2.3
@@ -2131,7 +2150,7 @@ snapshots:
       std-env: 3.10.0
       test-exclude: 7.0.2
       tinyrainbow: 1.2.0
-      vitest: 2.1.8(@types/node@22.19.17)
+      vitest: 2.1.8(@types/node@22.19.17)(happy-dom@15.11.7)
     transitivePeerDependencies:
       - supports-color
 
@@ -2297,6 +2316,8 @@ snapshots:
 
   emoji-regex@9.2.2: {}
 
+  entities@4.5.0: {}
+
   es-errors@1.3.0: {}
 
   es-module-lexer@1.7.0: {}
@@ -2397,6 +2418,12 @@ snapshots:
       minimatch: 10.2.5
       minipass: 7.1.3
       path-scurry: 2.0.2
+
+  happy-dom@15.11.7:
+    dependencies:
+      entities: 4.5.0
+      webidl-conversions: 7.0.0
+      whatwg-mimetype: 3.0.0
 
   has-flag@4.0.0: {}
 
@@ -2799,7 +2826,7 @@ snapshots:
       '@types/node': 22.19.17
       fsevents: 2.3.3
 
-  vitest@2.1.8(@types/node@22.19.17):
+  vitest@2.1.8(@types/node@22.19.17)(happy-dom@15.11.7):
     dependencies:
       '@vitest/expect': 2.1.8
       '@vitest/mocker': 2.1.8(vite@5.4.21(@types/node@22.19.17))
@@ -2823,6 +2850,7 @@ snapshots:
       why-is-node-running: 2.3.0
     optionalDependencies:
       '@types/node': 22.19.17
+      happy-dom: 15.11.7
     transitivePeerDependencies:
       - less
       - lightningcss
@@ -2833,6 +2861,10 @@ snapshots:
       - sugarss
       - supports-color
       - terser
+
+  webidl-conversions@7.0.0: {}
+
+  whatwg-mimetype@3.0.0: {}
 
   which@2.0.2:
     dependencies:

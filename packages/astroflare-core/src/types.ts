@@ -189,7 +189,14 @@ export interface HmrSocketContext {
 
 /** Phase 5 fills out edge cases (granular hot updates, error overlays). */
 export type HmrMessage =
-	| { type: "update"; updates: HmrUpdate[] }
+	| {
+			type: "update";
+			/** Path the user actually touched. Matches one entry in `updates`,
+			 *  but is split out so listeners can distinguish "this file changed"
+			 *  from "this file was transitively-affected." */
+			trigger?: string;
+			updates: HmrUpdate[];
+	  }
 	| { type: "prune"; paths: readonly string[] }
 	| { type: "error"; error: HmrError }
 	| { type: "full-reload"; reason: string };

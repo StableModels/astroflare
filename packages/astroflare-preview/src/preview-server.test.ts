@@ -60,6 +60,19 @@ async function fixture(files: Record<string, string>): Promise<Fixture> {
 	return f;
 }
 
+/** Strip the injected `<script type="module">…</script>` so tests can compare
+ * against the raw rendered HTML the user authored. The HMR injection itself is
+ * verified separately under "preview server: HMR script injection". */
+function stripHmr(html: string): string {
+	return html.replace(/<script type="module">[\s\S]*?<\/script>/g, "");
+}
+
+/** `await response.text()`, with the HMR script stripped — matches the
+ * pre-Phase-5 contract of "exactly the rendered HTML." */
+async function bodyWithoutHmr(r: Response): Promise<string> {
+	return stripHmr(await r.text());
+}
+
 // ---------------------------------------------------------------------------
 // Routing
 // ---------------------------------------------------------------------------
@@ -80,7 +93,7 @@ describe("preview server: routing", () => {
 		const r = await server.fetch(new Request("https://app/"));
 		expect(r.status).toBe(200);
 		expect(r.headers.get("content-type")).toMatch(/text\/html/);
-		expect(await r.text()).toBe("<h1>home</h1>");
+		expect(await bodyWithoutHmr(r)).toBe("<h1>home</h1>");
 	});
 
 	it("renders a static nested route", async () => {
@@ -88,7 +101,7 @@ describe("preview server: routing", () => {
 			"/src/pages/about.astro": "<p>about</p>",
 		});
 		const r = await server.fetch(new Request("https://app/about"));
-		expect(await r.text()).toBe("<p>about</p>");
+		expect(await bodyWithoutHmr(r)).toBe("<p>about</p>");
 	});
 });
 
@@ -103,7 +116,7 @@ describe("preview server: Astro.* surface", () => {
 			"/src/pages/posts/[slug].astro": src,
 		});
 		const r = await server.fetch(new Request("https://app/posts/hello-world"));
-		expect(await r.text()).toBe("<p>slug=hello-world</p>");
+		expect(await bodyWithoutHmr(r)).toBe("<p>slug=hello-world</p>");
 	});
 
 	it("exposes Astro.url and Astro.request", async () => {
@@ -117,7 +130,7 @@ describe("preview server: Astro.* surface", () => {
 			"/src/pages/about.astro": src,
 		});
 		const r = await server.fetch(new Request("https://app/about"));
-		expect(await r.text()).toBe("<p>/about/GET</p>");
+		expect(await bodyWithoutHmr(r)).toBe("<p>/about/GET</p>");
 	});
 
 	it("exposes Astro.site from config", async () => {
@@ -126,7 +139,7 @@ describe("preview server: Astro.* surface", () => {
 			"/src/pages/index.astro": src,
 		});
 		const r = await server.fetch(new Request("https://app/"));
-		expect(await r.text()).toBe("<p>site=https://example.com</p>");
+		expect(await bodyWithoutHmr(r)).toBe("<p>site=https://example.com</p>");
 	});
 
 	it("HTML-escapes interpolated values from Astro.params", async () => {
@@ -135,7 +148,7 @@ describe("preview server: Astro.* surface", () => {
 			"/src/pages/users/[name].astro": src,
 		});
 		const r = await server.fetch(new Request(`https://app/users/${encodeURIComponent("<bob>")}`));
-		expect(await r.text()).toBe("<p>&lt;bob&gt;</p>");
+		expect(await bodyWithoutHmr(r)).toBe("<p>&lt;bob&gt;</p>");
 	});
 });
 
@@ -189,7 +202,7 @@ describe("preview server: multi-module composition", () => {
 		});
 		const r = await server.fetch(new Request("https://app/"));
 		expect(r.status).toBe(200);
-		expect(await r.text()).toBe("<header><button>Click</button></header>");
+		expect(await bodyWithoutHmr(r)).toBe("<header><button>Click</button></header>");
 	});
 
 	it("supports diamond imports (two parents share one child)", async () => {
@@ -205,7 +218,7 @@ describe("preview server: multi-module composition", () => {
 			"/src/components/Shared.astro": "<i>shared</i>",
 		});
 		const r = await server.fetch(new Request("https://app/"));
-		expect(await r.text()).toBe("<i>shared</i><i>shared</i>");
+		expect(await bodyWithoutHmr(r)).toBe("<i>shared</i><i>shared</i>");
 	});
 
 	it("invalidates the bundle cache when a dep's source changes", async () => {
@@ -214,12 +227,159 @@ describe("preview server: multi-module composition", () => {
 			"/src/components/L.astro": "<p>v1</p>",
 		});
 		const r1 = await server.fetch(new Request("https://app/"));
-		expect(await r1.text()).toBe("<p>v1</p>");
+		expect(await bodyWithoutHmr(r1)).toBe("<p>v1</p>");
 
 		await host.storage.write("/src/components/L.astro", new TextEncoder().encode("<p>v2</p>"));
 
 		const r2 = await server.fetch(new Request("https://app/"));
-		expect(await r2.text()).toBe("<p>v2</p>");
+		expect(await bodyWithoutHmr(r2)).toBe("<p>v2</p>");
+	});
+});
+
+// ---------------------------------------------------------------------------
+// HMR (Phase 5)
+// ---------------------------------------------------------------------------
+
+describe("preview server: HMR script injection", () => {
+	it("injects the HMR client into <head> when present", async () => {
+		const { server } = await fixture({
+			"/src/pages/index.astro": "<html><head><title>x</title></head><body><p>x</p></body></html>",
+		});
+		const r = await server.fetch(new Request("https://app/"));
+		const body = await r.text();
+		expect(body).toContain('<script type="module">');
+		// Script lands inside the head (immediately before </head>).
+		expect(body.indexOf('<script type="module">')).toBeLessThan(body.indexOf("</head>"));
+	});
+
+	it("injects before </body> when no head", async () => {
+		const { server } = await fixture({
+			"/src/pages/index.astro": "<body><p>fragment</p></body>",
+		});
+		const r = await server.fetch(new Request("https://app/"));
+		const body = await r.text();
+		expect(body).toContain('<script type="module">');
+		expect(body.indexOf('<script type="module">')).toBeLessThan(body.indexOf("</body>"));
+	});
+
+	it("appends when neither head nor body", async () => {
+		const { server } = await fixture({
+			"/src/pages/index.astro": "<p>fragment</p>",
+		});
+		const r = await server.fetch(new Request("https://app/"));
+		const body = await r.text();
+		expect(body.startsWith("<p>fragment</p>")).toBe(true);
+		expect(body).toContain('<script type="module">');
+	});
+});
+
+describe("preview server: HMR endpoint", () => {
+	it("delegates /_aflare/hmr to the transport", async () => {
+		const { host, server } = await fixture({
+			"/src/pages/index.astro": "<p>x</p>",
+		});
+		// Ensure the server initialised (route discovery happens on first request).
+		await server.fetch(new Request("https://app/"));
+		expect(host.transport.accepted).toHaveLength(0);
+
+		await server.fetch(new Request("https://app/_aflare/hmr"));
+		expect(host.transport.accepted).toHaveLength(1);
+		expect(host.transport.accepted[0]?.workspaceId).toBe("default");
+	});
+
+	it("respects a custom workspaceId", async () => {
+		const host = createTestHost();
+		fixtureCleanups.push(host);
+		await host.storage.write("/src/pages/index.astro", new TextEncoder().encode("<p>x</p>"));
+		const server = createPreviewServer({
+			config: {},
+			host,
+			runtimeImport: RUNTIME_URL,
+			workspaceId: "tenant-42",
+		});
+		await server.fetch(new Request("https://app/"));
+		await server.fetch(new Request("https://app/_aflare/hmr"));
+		expect(host.transport.accepted[0]?.workspaceId).toBe("tenant-42");
+	});
+});
+
+describe("preview server: file-change → broadcast", () => {
+	it("forwards coordinator HMR updates to transport.broadcastHmr", async () => {
+		const { host, server } = await fixture({
+			"/src/pages/index.astro": "<p>x</p>",
+		});
+		// First request discovers routes and installs the HMR subscription.
+		await server.fetch(new Request("https://app/"));
+		await host.coordinator.onFileChanged("/src/pages/index.astro", "h-new");
+		expect(host.transport.broadcasts).toHaveLength(1);
+		const broadcast = host.transport.broadcasts[0];
+		expect(broadcast?.workspaceId).toBe("default");
+		expect(broadcast?.msg.type).toBe("update");
+		if (broadcast?.msg.type === "update") {
+			expect(broadcast.msg.updates.map((u) => u.path)).toContain("/src/pages/index.astro");
+		}
+	});
+
+	it("multi-module: changing a dep broadcasts updates for the dep + its transitive importers", async () => {
+		const { host, server } = await fixture({
+			"/src/pages/index.astro": '---\nimport L from "../components/L.astro";\n---\n<L/>',
+			"/src/components/L.astro": "<p>v1</p>",
+		});
+		// First request walks the closure, populating Coordinator graph edges.
+		const r = await server.fetch(new Request("https://app/"));
+		expect(await r.text()).toContain("<p>v1</p>");
+
+		await host.coordinator.onFileChanged("/src/components/L.astro", "h-new");
+
+		expect(host.transport.broadcasts).toHaveLength(1);
+		const broadcast = host.transport.broadcasts[0];
+		if (broadcast?.msg.type !== "update") throw new Error("expected update");
+		const paths = broadcast.msg.updates.map((u) => u.path).sort();
+		expect(paths).toEqual(["/src/components/L.astro", "/src/pages/index.astro"]);
+	});
+
+	it("dispose() stops broadcasting further updates", async () => {
+		const { host, server } = await fixture({
+			"/src/pages/index.astro": "<p>x</p>",
+		});
+		await server.fetch(new Request("https://app/"));
+		server.dispose();
+		await host.coordinator.onFileChanged("/src/pages/index.astro", "h-new");
+		expect(host.transport.broadcasts).toHaveLength(0);
+	});
+});
+
+describe("preview server: reactive route discovery", () => {
+	it("re-discovers routes when a /src/pages/ file appears", async () => {
+		const { host, server } = await fixture({
+			"/src/pages/index.astro": "<p>home</p>",
+		});
+		// Before discovery refresh, /about doesn't exist.
+		await server.fetch(new Request("https://app/"));
+		const r404 = await server.fetch(new Request("https://app/about"));
+		expect(r404.status).toBe(404);
+
+		// Add a new page and notify the coordinator.
+		await host.storage.write("/src/pages/about.astro", new TextEncoder().encode("<p>about</p>"));
+		await host.coordinator.onFileChanged("/src/pages/about.astro", "h");
+		// Drain microtasks (HMR subscriber kicks off discovery; we await routes
+		// implicitly on the next request).
+		const r = await server.fetch(new Request("https://app/about"));
+		expect(r.status).toBe(200);
+		expect(await r.text()).toContain("<p>about</p>");
+
+		// One of the events should record the invalidation.
+		expect(host.logger.byName("preview.routes.invalidated")).toHaveLength(1);
+	});
+
+	it("does NOT re-discover when a non-pages file changes", async () => {
+		const { host, server } = await fixture({
+			"/src/pages/index.astro": '---\nimport L from "../components/L.astro";\n---\n<L/>',
+			"/src/components/L.astro": "<p>v1</p>",
+		});
+		await server.fetch(new Request("https://app/"));
+		await host.coordinator.onFileChanged("/src/components/L.astro", "h-new");
+		expect(host.logger.byName("preview.routes.invalidated")).toHaveLength(0);
 	});
 });
 

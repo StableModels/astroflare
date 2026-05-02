@@ -81,7 +81,7 @@ export class MapCoordinator implements Coordinator {
 			hash: this.#graph.get(p)?.hash ?? hash,
 			kind: p.endsWith(".css") ? "css" : "module",
 		}));
-		await this.publish("hmr", { type: "update", updates });
+		await this.publish("hmr", { type: "update", trigger: path, updates });
 	}
 
 	async publish(channel: string, message: HmrMessage): Promise<void> {

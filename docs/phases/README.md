@@ -10,4 +10,5 @@ next phase's planner.
 - [`phase-02_5-workerd-test-pool.md`](./phase-02_5-workerd-test-pool.md) — runtime tests moved to workerd Layer B + architectural findings on Vite/Miniflare/Worker Loader.
 - [`phase-03-preview-server.md`](./phase-03-preview-server.md) — `AstroGlobal`, `render()`, file-based router, preview server, 25 new tests covering the full request→render pipeline.
 - [`phase-04-module-graph.md`](./phase-04-module-graph.md) — module graph + closure walker + inline bundler + per-module compile cache; multi-file `.astro` composition unblocked.
+- [`phase-05-hmr.md`](./phase-05-hmr.md) — HMR client + script injection + preview-server HMR pipeline + reactive route discovery; the dev-loop is now reactive end-to-end (Layer A).
 - (later phases land here as they complete)
