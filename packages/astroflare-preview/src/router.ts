@@ -1,26 +1,27 @@
 /**
  * File-based router for `src/pages/`.
  *
- * Phase 3 scope (Tier 0 of the brief):
- *   - file extensions: `.astro` only (md/mdx is Phase 6, .ts/.js endpoints are Phase 8)
- *   - mapping: `src/pages/index.astro` → `/`,
- *              `src/pages/about.astro` → `/about`,
- *              `src/pages/posts/[slug].astro` → `/posts/<slug>`
- *   - dynamic single-segment params (`[name]`)
- *   - trailing-slash tolerance (request path with or without is matched)
+ * Tier 0 scope (Phase 3): static routes, `[name]` dynamic single-segment,
+ * trailing-slash tolerance, static-before-dynamic precedence.
+ * Tier 1 (Phase 6) adds `.md` files alongside `.astro`.
  *
  * Deferred:
  *   - catchall `[...rest]`
- *   - non-`.astro` extensions
- *   - rest-param patterns inside groups (`[...path]`)
- *   - route precedence beyond "static before dynamic" (Astro has more nuance)
+ *   - `.mdx` (Phase 6 stretch / future)
+ *   - `.ts`/`.js` endpoints (Phase 8)
+ *   - rest-param patterns inside groups
+ *   - finer-grained precedence (Astro has more nuance)
  */
 
 import type { Storage } from "@astroflare/core";
 
+export type RouteKind = "astro" | "markdown";
+
 export interface Route {
 	/** Full file path within the workspace, e.g. `/src/pages/posts/[slug].astro`. */
 	filePath: string;
+	/** Which compiler should handle this file. */
+	kind: RouteKind;
 	/** Compiled regex matching request pathnames. */
 	pattern: RegExp;
 	/** Names of dynamic parameters in declaration order. */
@@ -38,7 +39,10 @@ export interface RouteMatch {
 }
 
 const PAGES_PREFIX = "/src/pages";
-const PAGES_GLOB = "/src/pages/**/*.astro";
+const PAGE_EXTENSIONS: ReadonlyArray<{ ext: string; kind: RouteKind }> = [
+	{ ext: ".astro", kind: "astro" },
+	{ ext: ".md", kind: "markdown" },
+];
 
 export class Router {
 	#routes: Route[] = [];
@@ -50,13 +54,20 @@ export class Router {
 	/** Walk the workspace and rebuild the route table. Idempotent. */
 	async discover(storage: Storage): Promise<void> {
 		const found: Route[] = [];
-		for await (const filePath of storage.glob(PAGES_GLOB)) {
-			const route = routeFromFilePath(filePath);
-			if (route) found.push(route);
+		const seen = new Set<string>();
+		for (const { ext } of PAGE_EXTENSIONS) {
+			for await (const filePath of storage.glob(`${PAGES_PREFIX}/**/*${ext}`)) {
+				if (seen.has(filePath)) continue;
+				seen.add(filePath);
+				const route = routeFromFilePath(filePath);
+				if (route) found.push(route);
+			}
 		}
 		// Static before dynamic so `/about.astro` wins over `/[slug].astro`.
+		// Within a tie, .astro wins over .md (matches Astro's precedence).
 		found.sort((a, b) => {
 			if (a.isStatic !== b.isStatic) return a.isStatic ? -1 : 1;
+			if (a.kind !== b.kind) return a.kind === "astro" ? -1 : 1;
 			return a.filePath.localeCompare(b.filePath);
 		});
 		this.#routes = found;
@@ -89,9 +100,10 @@ const RE_PARAM_SEGMENT = /^\[([A-Za-z_$][\w$]*)\]$/;
 export function routeFromFilePath(filePath: string): Route | null {
 	if (!filePath.startsWith(`${PAGES_PREFIX}/`)) return null;
 	const relative = filePath.slice(PAGES_PREFIX.length); // "/about.astro"
-	if (!relative.endsWith(".astro")) return null;
+	const matchedExt = PAGE_EXTENSIONS.find(({ ext }) => relative.endsWith(ext));
+	if (!matchedExt) return null;
 
-	let withoutExt = relative.slice(0, -".astro".length); // "/about"
+	let withoutExt = relative.slice(0, -matchedExt.ext.length); // "/about"
 
 	// Index files: `/foo/index` → `/foo`, `/index` → `/` (sentinel below).
 	if (withoutExt === "/index") {
@@ -119,6 +131,7 @@ export function routeFromFilePath(filePath: string): Route | null {
 
 	return {
 		filePath,
+		kind: matchedExt.kind,
 		pattern: new RegExp(regexBody),
 		paramNames,
 		isStatic: paramNames.length === 0,

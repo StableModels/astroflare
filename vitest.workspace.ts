@@ -15,6 +15,7 @@ export default [
 	"./packages/astroflare-preview/vitest.config.ts",
 	"./packages/astroflare-build/vitest.config.ts",
 	"./packages/astroflare-test-utils/vitest.config.ts",
+	"./packages/astroflare-content/vitest.config.ts",
 	"./packages/astroflare-host-cloudflare/vitest.config.ts",
 	"./tests/workerd/vitest.config.ts",
 	"./tests/integration/vitest.config.ts",

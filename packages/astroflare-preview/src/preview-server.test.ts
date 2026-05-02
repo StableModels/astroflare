@@ -237,6 +237,43 @@ describe("preview server: multi-module composition", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Markdown routes (Phase 6)
+// ---------------------------------------------------------------------------
+
+describe("preview server: markdown routes", () => {
+	it("renders a .md page", async () => {
+		const { server } = await fixture({
+			"/src/pages/about.md": "---\ntitle: About\n---\n# Hello\n\nA paragraph.\n",
+		});
+		const r = await server.fetch(new Request("https://app/about"));
+		expect(r.status).toBe(200);
+		const body = await bodyWithoutHmr(r);
+		expect(body).toContain("<h1>Hello</h1>");
+		expect(body).toContain("<p>A paragraph.</p>");
+	});
+
+	it("dynamic params work for .md too", async () => {
+		const { server } = await fixture({
+			"/src/pages/posts/[slug].md": "# Static body\n",
+		});
+		const r = await server.fetch(new Request("https://app/posts/hello-world"));
+		const body = await bodyWithoutHmr(r);
+		expect(body).toContain("<h1>Static body</h1>");
+	});
+
+	it("static .astro wins over .md at the same path", async () => {
+		const { server } = await fixture({
+			"/src/pages/index.astro": "<p>astro-wins</p>",
+			"/src/pages/index.md": "# md-loses",
+		});
+		const r = await server.fetch(new Request("https://app/"));
+		const body = await bodyWithoutHmr(r);
+		expect(body).toContain("astro-wins");
+		expect(body).not.toContain("md-loses");
+	});
+});
+
+// ---------------------------------------------------------------------------
 // HMR (Phase 5)
 // ---------------------------------------------------------------------------
 

@@ -1,5 +1,5 @@
 {
-  "name": "@astroflare/compiler",
+  "name": "@astroflare/content",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -12,19 +12,14 @@
     }
   },
   "scripts": {
-    "test": "vitest run --project compiler"
+    "test": "vitest run --project content"
   },
   "dependencies": {
     "@astroflare/core": "workspace:*",
-    "rehype-stringify": "^10.0.0",
-    "remark-parse": "^11.0.0",
-    "remark-rehype": "^11.1.0",
-    "unified": "^11.0.5",
-    "vfile-matter": "^5.0.0",
-    "yaml": "^2.6.0"
+    "yaml": "^2.6.0",
+    "zod": "^3.23.8"
   },
   "devDependencies": {
-    "@astroflare/runtime": "workspace:*",
     "@astroflare/test-utils": "workspace:*",
     "vitest": "^2.1.8"
   }

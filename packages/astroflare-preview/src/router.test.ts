@@ -37,9 +37,15 @@ describe("routeFromFilePath", () => {
 		expect(routeFromFilePath("/src/pages/_layout.tsx")).toBeNull();
 	});
 
-	it("ignores non-.astro extensions for Phase 3", () => {
-		expect(routeFromFilePath("/src/pages/post.md")).toBeNull();
+	it("recognises .md as a markdown route (Phase 6)", () => {
+		const r = routeFromFilePath("/src/pages/post.md");
+		expect(r?.kind).toBe("markdown");
+	});
+
+	it("ignores extensions that aren't yet supported", () => {
+		// `.ts` endpoints are Phase 8, `.mdx` is deferred.
 		expect(routeFromFilePath("/src/pages/api.ts")).toBeNull();
+		expect(routeFromFilePath("/src/pages/post.mdx")).toBeNull();
 	});
 });
 

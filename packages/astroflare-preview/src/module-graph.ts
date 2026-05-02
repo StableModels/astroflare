@@ -34,7 +34,7 @@
  *     `.css`, etc.) are not compiled or bundled — Phase 6/8 work.
  */
 
-import { COMPILER_VERSION, compileAstro } from "@astroflare/compiler";
+import { COMPILER_VERSION, compileAstro, compileMarkdown } from "@astroflare/compiler";
 import {
 	type Host,
 	type ModuleNode,
@@ -113,17 +113,7 @@ export class ModuleGraph {
 			this.#host.logger.event("module-graph.cache.hit", { path, compileKey });
 		} else {
 			const source = dec.decode(sourceBytes);
-			const result = compileAstro(source, {
-				runtimeImport: this.#opts.runtimeImport,
-				filename: path,
-			});
-			if (result.errors.length > 0) {
-				const first = result.errors[0];
-				throw new Error(
-					`compile error in ${path} at ${first?.start.line}:${first?.start.column}: ${first?.message}`,
-				);
-			}
-			compiled = result.code;
+			compiled = await this.#compileSource(path, source);
 			await this.#host.storage.cacheWrite(compileKey, enc.encode(compiled));
 			this.#host.logger.event("module-graph.compile", { path, compileKey });
 		}
@@ -139,6 +129,28 @@ export class ModuleGraph {
 		await this.#host.coordinator.graphPut(node);
 
 		return { path, sourceHash, compileKey, compiled, resolvedImports };
+	}
+
+	/** Dispatch source to the right compiler based on file extension. */
+	async #compileSource(path: string, source: string): Promise<string> {
+		if (path.endsWith(".md")) {
+			const result = await compileMarkdown(source, {
+				runtimeImport: this.#opts.runtimeImport,
+				filename: path,
+			});
+			return result.code;
+		}
+		const result = compileAstro(source, {
+			runtimeImport: this.#opts.runtimeImport,
+			filename: path,
+		});
+		if (result.errors.length > 0) {
+			const first = result.errors[0];
+			throw new Error(
+				`compile error in ${path} at ${first?.start.line}:${first?.start.column}: ${first?.message}`,
+			);
+		}
+		return result.code;
 	}
 
 	/**

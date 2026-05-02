@@ -7,6 +7,7 @@
     { "path": "./packages/astroflare-preview" },
     { "path": "./packages/astroflare-build" },
     { "path": "./packages/astroflare-test-utils" },
-    { "path": "./packages/astroflare-host-cloudflare" }
+    { "path": "./packages/astroflare-host-cloudflare" },
+    { "path": "./packages/astroflare-content" }
   ]
 }
