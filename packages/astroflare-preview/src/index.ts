@@ -14,6 +14,8 @@ export * from "./module-graph.js";
 export * from "./bundle.js";
 export * from "./url-rewrite.js";
 export * from "./inject-hmr.js";
+export * from "./endpoint.js";
+export * from "./middleware.js";
 export * from "./preview-server.js";
 
 export const PREVIEW_VERSION = "0.0.0";

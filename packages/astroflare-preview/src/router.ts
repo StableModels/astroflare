@@ -15,7 +15,7 @@
 
 import type { Storage } from "@astroflare/core";
 
-export type RouteKind = "astro" | "markdown";
+export type RouteKind = "astro" | "markdown" | "endpoint";
 
 export interface Route {
 	/** Full file path within the workspace, e.g. `/src/pages/posts/[slug].astro`. */
@@ -42,6 +42,11 @@ const PAGES_PREFIX = "/src/pages";
 const PAGE_EXTENSIONS: ReadonlyArray<{ ext: string; kind: RouteKind }> = [
 	{ ext: ".astro", kind: "astro" },
 	{ ext: ".md", kind: "markdown" },
+	// Phase 8: server endpoints. JS-only until type-stripping lands;
+	// `.ts` endpoints work in production via the host's pre-build TS→JS
+	// pass, but in dev preview today they fail at module load. (See
+	// Phase 6 retro for the type-stripping carryover.)
+	{ ext: ".js", kind: "endpoint" },
 ];
 
 export class Router {

@@ -48,7 +48,9 @@ import {
 } from "@astroflare/core";
 import { HMR_CLIENT_SOURCE } from "@astroflare/runtime";
 import { inlineBundle } from "./bundle.js";
+import { type EndpointContext, runEndpoint } from "./endpoint.js";
 import { injectHmrScript } from "./inject-hmr.js";
+import { type MiddlewareContext, type MiddlewareFn, loadMiddleware } from "./middleware.js";
 import { ModuleGraph, type ModuleInfo } from "./module-graph.js";
 import { Router } from "./router.js";
 
@@ -92,6 +94,22 @@ export function createPreviewServer(opts: PreviewServerOptions): PreviewServer {
 	let hmrSub: Subscription | null = null;
 	let routeInvalidationSub: Subscription | null = null;
 	let disposed = false;
+	let middleware: MiddlewareFn | null | undefined; // undefined = unchecked, null = none, fn = loaded
+	let middlewareInvalidationSub: Subscription | null = null;
+
+	async function ensureMiddleware(): Promise<MiddlewareFn | null> {
+		if (middleware !== undefined) return middleware;
+		// Cache id covers source content; if /src/middleware.js changes, the
+		// route-invalidation subscriber clears `middleware` so we reload.
+		const stat = await opts.host.storage.stat("/src/middleware.js");
+		if (!stat) {
+			middleware = null;
+			return null;
+		}
+		const fn = await loadMiddleware(opts.host, `middleware:${stat.hash}`);
+		middleware = fn;
+		return middleware;
+	}
 
 	async function ensureRoutes(): Promise<void> {
 		if (!routesReady) {
@@ -122,6 +140,14 @@ export function createPreviewServer(opts: PreviewServerOptions): PreviewServer {
 				trigger: msg.trigger,
 			});
 		});
+		// Reset cached middleware when the user's middleware file changes.
+		middlewareInvalidationSub = opts.host.coordinator.subscribe("hmr", (msg: HmrMessage) => {
+			if (msg.type !== "update") return;
+			if (msg.trigger === "/src/middleware.js") {
+				middleware = undefined;
+				opts.host.logger.event("preview.middleware.invalidated", {});
+			}
+		});
 	}
 
 	return {
@@ -145,34 +171,67 @@ export function createPreviewServer(opts: PreviewServerOptions): PreviewServer {
 					});
 				}
 
-				const closure = await moduleGraph.closure(match.route.filePath);
+				const runInner = async (): Promise<Response> => {
+					if (match.route.kind === "endpoint") {
+						const sourceBytes = await opts.host.storage.read(match.route.filePath);
+						const cacheId = await contentIdWithConfig(sourceBytes, {
+							compiler: COMPILER_VERSION,
+							kind: "endpoint",
+						});
+						const ctx: EndpointContext = {
+							request: req,
+							url,
+							params: match.params,
+							site: opts.config.site,
+						};
+						return runEndpoint({
+							host: opts.host,
+							filePath: match.route.filePath,
+							cacheId,
+							context: ctx,
+						});
+					}
 
-				const html = await opts.host.executor.runCached<string>(
-					closure.bundleKey,
-					() => buildBundle(closure.modules, runtimeImport),
-					{
-						props: {},
-						params: match.params,
+					const closure = await moduleGraph.closure(match.route.filePath);
+					const html = await opts.host.executor.runCached<string>(
+						closure.bundleKey,
+						() => buildBundle(closure.modules, runtimeImport),
+						{
+							props: {},
+							params: match.params,
+							request: req,
+							url,
+							site: opts.config.site,
+						} satisfies RenderContext,
+					);
+					const htmlWithHmr = injectHmrScript(html, HMR_CLIENT_SOURCE);
+
+					opts.host.logger.event("preview.render", {
+						pathname: url.pathname,
+						filePath: match.route.filePath,
+						bundleKey: closure.bundleKey,
+						moduleCount: closure.modules.length,
+						ms: opts.host.clock.now() - start,
+					});
+
+					return new Response(htmlWithHmr, {
+						status: 200,
+						headers: { "content-type": "text/html;charset=utf-8" },
+					});
+				};
+
+				const mw = await ensureMiddleware();
+				if (mw) {
+					const mwCtx: MiddlewareContext = {
 						request: req,
 						url,
+						params: match.params,
 						site: opts.config.site,
-					} satisfies RenderContext,
-				);
-
-				const htmlWithHmr = injectHmrScript(html, HMR_CLIENT_SOURCE);
-
-				opts.host.logger.event("preview.render", {
-					pathname: url.pathname,
-					filePath: match.route.filePath,
-					bundleKey: closure.bundleKey,
-					moduleCount: closure.modules.length,
-					ms: opts.host.clock.now() - start,
-				});
-
-				return new Response(htmlWithHmr, {
-					status: 200,
-					headers: { "content-type": "text/html;charset=utf-8" },
-				});
+						locals: {},
+					};
+					return await mw(mwCtx, runInner);
+				}
+				return await runInner();
 			} catch (err) {
 				opts.host.logger.event("preview.error", {
 					url: req.url,
@@ -189,8 +248,10 @@ export function createPreviewServer(opts: PreviewServerOptions): PreviewServer {
 			disposed = true;
 			hmrSub?.unsubscribe();
 			routeInvalidationSub?.unsubscribe();
+			middlewareInvalidationSub?.unsubscribe();
 			hmrSub = null;
 			routeInvalidationSub = null;
+			middlewareInvalidationSub = null;
 		},
 	};
 }

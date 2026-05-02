@@ -421,6 +421,93 @@ describe("preview server: reactive route discovery", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Server endpoints + middleware (Phase 8)
+// ---------------------------------------------------------------------------
+
+describe("preview server: server endpoints", () => {
+	it("dispatches GET to a .js endpoint", async () => {
+		const { server } = await fixture({
+			"/src/pages/api/hello.js":
+				'export const GET = async () => new Response("hi", { headers: { "content-type": "application/json" } });',
+		});
+		const r = await server.fetch(new Request("https://app/api/hello"));
+		expect(r.status).toBe(200);
+		expect(await r.text()).toBe("hi");
+	});
+
+	it("405s when method has no handler", async () => {
+		const { server } = await fixture({
+			"/src/pages/api/getonly.js": 'export const GET = async () => new Response("ok");',
+		});
+		const r = await server.fetch(new Request("https://app/api/getonly", { method: "POST" }));
+		expect(r.status).toBe(405);
+	});
+
+	it("supports dynamic params in endpoint URLs", async () => {
+		const { server } = await fixture({
+			"/src/pages/api/[id].js":
+				'export const GET = async ({ params }) => new Response("id=" + params.id);',
+		});
+		const r = await server.fetch(new Request("https://app/api/42"));
+		expect(await r.text()).toBe("id=42");
+	});
+});
+
+describe("preview server: middleware", () => {
+	it("runs onRequest before the route handler", async () => {
+		const { server } = await fixture({
+			"/src/middleware.js":
+				'export const onRequest = async (ctx, next) => { const r = await next(); const h = new Headers(r.headers); h.set("x-mw", "yes"); return new Response(r.body, { status: r.status, headers: h }); };',
+			"/src/pages/index.astro": "<p>x</p>",
+		});
+		const r = await server.fetch(new Request("https://app/"));
+		expect(r.headers.get("x-mw")).toBe("yes");
+	});
+
+	it("middleware can short-circuit with its own Response", async () => {
+		const { server } = await fixture({
+			"/src/middleware.js":
+				'export const onRequest = async () => new Response("blocked", { status: 401 });',
+			"/src/pages/index.astro": "<p>should not render</p>",
+		});
+		const r = await server.fetch(new Request("https://app/"));
+		expect(r.status).toBe(401);
+		expect(await r.text()).toBe("blocked");
+	});
+
+	it("middleware also wraps endpoints", async () => {
+		const { server } = await fixture({
+			"/src/middleware.js":
+				'export const onRequest = async (ctx, next) => { const r = await next(); return new Response("[mw]" + (await r.text()), { status: r.status }); };',
+			"/src/pages/api/x.js": 'export const GET = async () => new Response("inner");',
+		});
+		const r = await server.fetch(new Request("https://app/api/x"));
+		expect(await r.text()).toBe("[mw]inner");
+	});
+
+	it("middleware reload after edit invalidates the cached function", async () => {
+		const { host, server } = await fixture({
+			"/src/middleware.js":
+				'export const onRequest = async (ctx, next) => { const r = await next(); return new Response("v1:" + (await r.text())); };',
+			"/src/pages/index.astro": "<p>x</p>",
+		});
+		const r1 = await server.fetch(new Request("https://app/"));
+		expect(await r1.text()).toContain("v1:");
+
+		await host.storage.write(
+			"/src/middleware.js",
+			new TextEncoder().encode(
+				'export const onRequest = async (ctx, next) => { const r = await next(); return new Response("v2:" + (await r.text())); };',
+			),
+		);
+		await host.coordinator.onFileChanged("/src/middleware.js", "h-new");
+
+		const r2 = await server.fetch(new Request("https://app/"));
+		expect(await r2.text()).toContain("v2:");
+	});
+});
+
+// ---------------------------------------------------------------------------
 // Errors
 // ---------------------------------------------------------------------------
 
