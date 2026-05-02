@@ -272,6 +272,41 @@ export interface AstroflareApp {
 }
 
 // -----------------------------------------------------------------------------
+// AstroGlobal — the user-visible `Astro.*` API surface (Tier 0)
+// -----------------------------------------------------------------------------
+
+/**
+ * The `Astro` object available to every `.astro` component's frontmatter and
+ * template. Tier 0 surface (per §3 of the brief). Phase 3 covers props,
+ * params, request, url, redirect, site. Cookies, locals, slots, self deferred.
+ */
+export interface AstroGlobal<P = Record<string, unknown>> {
+	/** Props passed to this component (route params from getStaticPaths or parent's render). */
+	props: P;
+	/** URL parameters from the matched route, e.g. `[slug]` → `{ slug: "..." }`. */
+	params: Record<string, string>;
+	/** The incoming `Request`. */
+	request: Request;
+	/** Parsed `URL` (same as `new URL(request.url)`). */
+	url: URL;
+	/** Site origin from config (`undefined` if not configured). */
+	site?: string;
+	/** Returns a `Response` that redirects to `to` with `status` (302 default). */
+	redirect(to: string, status?: 301 | 302 | 303 | 307 | 308): Response;
+}
+
+/**
+ * Context the framework supplies to `render()` to build the AstroGlobal.
+ */
+export interface RenderContext<P = Record<string, unknown>> {
+	props: P;
+	params: Record<string, string>;
+	request: Request;
+	url: URL;
+	site?: string;
+}
+
+// -----------------------------------------------------------------------------
 // Configuration (Astro-shaped — see §3 Tier 0 / §9.10)
 // -----------------------------------------------------------------------------
 
