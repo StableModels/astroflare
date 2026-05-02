@@ -35,5 +35,9 @@ export function createApp(config: AstroflareConfig, host: Host): AstroflareApp {
 		async notifyFileChanged(path: string, hash: string): Promise<void> {
 			await host.coordinator.onFileChanged(path, hash);
 		},
+
+		async notifyFileRemoved(path: string): Promise<void> {
+			await host.coordinator.onFileRemoved(path);
+		},
 	};
 }

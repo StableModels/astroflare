@@ -49,6 +49,23 @@ describe("outputPathFor", () => {
 	])("%s → %s", (input, want) => {
 		expect(outputPathFor(input)).toBe(want);
 	});
+
+	it("substitutes [param] segments when params are supplied", () => {
+		expect(outputPathFor("/src/pages/posts/[slug].astro", { slug: "hello" })).toBe(
+			"posts/hello/index.html",
+		);
+		expect(outputPathFor("/src/pages/[a]/[b].astro", { a: "x", b: "y" })).toBe("x/y/index.html");
+	});
+
+	it("URL-encodes param values that contain special characters", () => {
+		expect(outputPathFor("/src/pages/[slug].astro", { slug: "hello world" })).toBe(
+			"hello%20world/index.html",
+		);
+	});
+
+	it("throws when a [param] is missing from the supplied params", () => {
+		expect(() => outputPathFor("/src/pages/[slug].astro", {})).toThrow(/missing param 'slug'/);
+	});
 });
 
 // -----------------------------------------------------------------------------
@@ -56,18 +73,60 @@ describe("outputPathFor", () => {
 // -----------------------------------------------------------------------------
 
 describe("plan", () => {
-	it("classifies static and dynamic routes", async () => {
+	it("classifies static and dynamic routes (storage-only signature)", async () => {
 		const host = await fixture({
 			"/src/pages/index.astro": "<p>home</p>",
 			"/src/pages/about.astro": "<p>about</p>",
 			"/src/pages/posts/[slug].astro": "<p>post</p>",
 			"/src/pages/blog.md": "# blog",
 		});
+		// Bare-storage form skips dynamic routes (no host → no executor → no
+		// way to invoke `getStaticPaths`).
 		const p = await plan(host.storage);
 		expect(p.staticCount).toBe(3);
 		expect(p.skippedCount).toBe(1);
 		const skipped = p.routes.find((r) => r.kind === "skipped");
 		expect(skipped?.route.filePath).toBe("/src/pages/posts/[slug].astro");
+	});
+
+	it("expands dynamic routes via getStaticPaths when given {host, runtimeImport}", async () => {
+		const host = await fixture({
+			"/src/pages/posts/[slug].astro": [
+				"---",
+				"export async function getStaticPaths() {",
+				"  return [{ params: { slug: 'a' } }, { params: { slug: 'b' } }];",
+				"}",
+				"const { slug } = Astro.params;",
+				"---",
+				"<p>{slug}</p>",
+			].join("\n"),
+		});
+		const p = await plan({ host, runtimeImport: RUNTIME_URL });
+		expect(p.staticPathsCount).toBe(2);
+		expect(p.skippedCount).toBe(0);
+		const expanded = p.routes.filter((r) => r.kind === "static-paths");
+		expect(expanded.map((r) => (r.kind === "static-paths" ? r.outputPath : null))).toEqual([
+			"posts/a/index.html",
+			"posts/b/index.html",
+		]);
+		expect(expanded.map((r) => (r.kind === "static-paths" ? r.params.slug : null))).toEqual([
+			"a",
+			"b",
+		]);
+	});
+
+	it("skips dynamic routes that don't export getStaticPaths", async () => {
+		const host = await fixture({
+			"/src/pages/[slug].astro": "<p>dynamic</p>",
+		});
+		const p = await plan({ host, runtimeImport: RUNTIME_URL });
+		expect(p.staticCount).toBe(0);
+		expect(p.staticPathsCount).toBe(0);
+		expect(p.skippedCount).toBe(1);
+		const skipped = p.routes[0];
+		expect(skipped?.kind).toBe("skipped");
+		if (skipped?.kind !== "skipped") return;
+		expect(skipped.reason).toMatch(/no getStaticPaths/);
 	});
 });
 
@@ -109,7 +168,7 @@ describe("deploy", () => {
 		expect(await readCurrent(host.storage)).toBe(result.deployHash);
 	});
 
-	it("skips dynamic routes and reports them in the result", async () => {
+	it("skips dynamic routes that lack a getStaticPaths export", async () => {
 		const host = await fixture({
 			"/src/pages/index.astro": "<p>home</p>",
 			"/src/pages/[slug].astro": "<p>dynamic</p>",
@@ -117,6 +176,59 @@ describe("deploy", () => {
 		const result = await deploy({ host, runtimeImport: RUNTIME_URL });
 		expect(result.skipped).toHaveLength(1);
 		expect(result.skipped[0]?.kind).toBe("skipped");
+	});
+
+	it("expands and renders dynamic routes via getStaticPaths", async () => {
+		const host = await fixture({
+			"/src/pages/posts/[slug].astro": [
+				"---",
+				"export async function getStaticPaths() {",
+				"  return [",
+				"    { params: { slug: 'first' } },",
+				"    { params: { slug: 'second' } },",
+				"  ];",
+				"}",
+				"const { slug } = Astro.params;",
+				"---",
+				"<p>post:{slug}</p>",
+			].join("\n"),
+		});
+		const result = await deploy({ host, runtimeImport: RUNTIME_URL });
+		expect(result.rendered).toHaveLength(2);
+		expect(result.skipped).toHaveLength(0);
+		const html = result.rendered.map((r) => r.html).sort();
+		expect(html).toEqual(["<p>post:first</p>", "<p>post:second</p>"]);
+		// Each writes to its substituted output path.
+		const outputs = result.rendered
+			.map((r) => (r.route.kind === "static-paths" ? r.route.outputPath : null))
+			.filter((o): o is string => o !== null)
+			.sort();
+		expect(outputs).toEqual(["posts/first/index.html", "posts/second/index.html"]);
+	});
+
+	it("threads getStaticPaths props into Astro.props", async () => {
+		const host = await fixture({
+			"/src/pages/posts/[slug].astro": [
+				"---",
+				"export async function getStaticPaths() {",
+				"  return [{ params: { slug: 'a' }, props: { title: 'A title' } }];",
+				"}",
+				"const { title } = Astro.props;",
+				"---",
+				"<h1>{title}</h1>",
+			].join("\n"),
+		});
+		const result = await deploy({ host, runtimeImport: RUNTIME_URL });
+		expect(result.rendered).toHaveLength(1);
+		expect(result.rendered[0]?.html).toContain("<h1>A title</h1>");
+	});
+
+	it("skips a route that returns Astro.redirect from frontmatter", async () => {
+		const host = await fixture({
+			"/src/pages/index.astro": "---\nreturn Astro.redirect('/home');\n---",
+		});
+		const result = await deploy({ host, runtimeImport: RUNTIME_URL });
+		expect(result.rendered).toHaveLength(0);
 	});
 
 	it("rendered HTML matches what the preview would produce", async () => {

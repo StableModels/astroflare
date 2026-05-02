@@ -107,9 +107,210 @@ export function emitDocument(doc: AstroDocument, opts: EmitOptions = {}): EmitRe
 	const runtime = opts.runtimeImport ?? DEFAULT_RUNTIME_IMPORT;
 	const importLine = `import { ${RUNTIME_SYMBOLS.join(", ")} } from ${JSON.stringify(runtime)};`;
 	const fm = doc.frontmatter ?? "";
+	// Hoist any top-level `export ...` declarations (e.g. `getStaticPaths`)
+	// out of the frontmatter to module scope. The remainder runs inside the
+	// component arrow.
+	const { hoisted, remaining } = hoistTopLevelExports(fm);
 	const body = emitChildren(doc.body, "$$slots");
-	const code = `${importLine}\nexport default $component(async ({ Astro, ...$$props }, $$slots) => {\n${fm}\nreturn $render\`${body}\`;\n});\n`;
+	const hoistedBlock = hoisted.length > 0 ? `${hoisted.join("\n")}\n` : "";
+	const code = `${importLine}\n${hoistedBlock}export default $component(async ({ Astro, ...$$props }, $$slots) => {\n${remaining}\nreturn $render\`${body}\`;\n});\n`;
 	return { code, map: null };
+}
+
+/**
+ * Extract top-level `export ...` declarations from frontmatter source so they
+ * land at module scope rather than inside the component arrow.
+ *
+ * Recognised forms (parity with Astro):
+ *   - `export async function NAME(...) { … }`
+ *   - `export function NAME(...) { … }`
+ *   - `export class NAME { … }`
+ *   - `export (const|let|var) NAME = …;`     // semicolon-terminated
+ *
+ * Other top-level `export`s (re-exports, `export type`, default exports)
+ * are left in place — the emitter does not own a real JS parser.
+ *
+ * Walks character-by-character with brace/paren/bracket-depth tracking and
+ * simple string/template handling so we can find depth-0 statement
+ * boundaries reliably without a full parser.
+ */
+export function hoistTopLevelExports(source: string): {
+	hoisted: string[];
+	remaining: string;
+} {
+	const hoisted: string[] = [];
+	const keep: string[] = [];
+	let i = 0;
+	while (i < source.length) {
+		const lineStart = i;
+		// Find next newline or end-of-string.
+		const nl = source.indexOf("\n", i);
+		const lineEnd = nl < 0 ? source.length : nl;
+		const line = source.slice(lineStart, lineEnd);
+		const trimmed = line.trimStart();
+		const exportMatch = matchExportDeclaration(trimmed);
+		if (exportMatch) {
+			// Find the end of the statement (depth-0 `;` for const/let/var,
+			// matching `}` for function/class). Start scanning from after the
+			// `export ` keyword in the original source.
+			const stmtStart = lineStart + (line.length - trimmed.length);
+			const stmtEnd = findStatementEnd(source, stmtStart, exportMatch.kind);
+			if (stmtEnd > stmtStart) {
+				hoisted.push(source.slice(stmtStart, stmtEnd));
+				i = stmtEnd;
+				// Skip the trailing newline if present so we don't emit a
+				// blank line where the export used to be.
+				if (source[i] === "\n") i++;
+				continue;
+			}
+		}
+		keep.push(line);
+		i = lineEnd;
+		if (i < source.length) {
+			keep.push("\n");
+			i++;
+		}
+	}
+	return { hoisted, remaining: keep.join("") };
+}
+
+interface ExportMatch {
+	kind: "fn" | "class" | "decl";
+}
+
+const EXPORT_FN_RE =
+	/^export[ \t]+(?:async[ \t]+)?function[ \t]+(?:\*[ \t]*)?[A-Za-z_$][\w$]*[ \t]*\(/;
+const EXPORT_CLASS_RE = /^export[ \t]+class[ \t]+[A-Za-z_$][\w$]*\b/;
+const EXPORT_DECL_RE = /^export[ \t]+(?:const|let|var)[ \t]+[A-Za-z_$][\w$]*/;
+
+function matchExportDeclaration(line: string): ExportMatch | null {
+	if (EXPORT_FN_RE.test(line)) return { kind: "fn" };
+	if (EXPORT_CLASS_RE.test(line)) return { kind: "class" };
+	if (EXPORT_DECL_RE.test(line)) return { kind: "decl" };
+	return null;
+}
+
+/**
+ * Find the byte offset where an export statement ends, starting from
+ * `start`. For function/class declarations: the index just past the
+ * matching depth-0 `}`. For const/let/var: the index just past the
+ * depth-0 `;` (or end-of-source).
+ */
+function findStatementEnd(source: string, start: number, kind: ExportMatch["kind"]): number {
+	let i = start;
+	let braceDepth = 0;
+	let parenDepth = 0;
+	let bracketDepth = 0;
+	let openedBraces = false;
+	while (i < source.length) {
+		const ch = source[i];
+		// Strings + template literals + comments — skip past them so we don't
+		// mistake their internal punctuation for statement boundaries.
+		if (ch === '"' || ch === "'") {
+			i = skipString(source, i, ch);
+			continue;
+		}
+		if (ch === "`") {
+			i = skipTemplate(source, i);
+			continue;
+		}
+		if (ch === "/" && source[i + 1] === "/") {
+			i = source.indexOf("\n", i);
+			if (i < 0) return source.length;
+			i++;
+			continue;
+		}
+		if (ch === "/" && source[i + 1] === "*") {
+			const end = source.indexOf("*/", i + 2);
+			i = end < 0 ? source.length : end + 2;
+			continue;
+		}
+		if (ch === "(") parenDepth++;
+		else if (ch === ")") parenDepth--;
+		else if (ch === "[") bracketDepth++;
+		else if (ch === "]") bracketDepth--;
+		else if (ch === "{") {
+			braceDepth++;
+			openedBraces = true;
+		} else if (ch === "}") {
+			braceDepth--;
+			if (
+				(kind === "fn" || kind === "class") &&
+				braceDepth === 0 &&
+				parenDepth === 0 &&
+				bracketDepth === 0 &&
+				openedBraces
+			) {
+				return i + 1;
+			}
+		} else if (
+			ch === ";" &&
+			kind === "decl" &&
+			braceDepth === 0 &&
+			parenDepth === 0 &&
+			bracketDepth === 0
+		) {
+			return i + 1;
+		} else if (
+			ch === "\n" &&
+			kind === "decl" &&
+			braceDepth === 0 &&
+			parenDepth === 0 &&
+			bracketDepth === 0
+		) {
+			// Auto-semicolon: `export const x = expr` followed by newline (no `;`).
+			return i;
+		}
+		i++;
+	}
+	return source.length;
+}
+
+function skipString(source: string, start: number, quote: string): number {
+	let i = start + 1;
+	while (i < source.length) {
+		const ch = source[i];
+		if (ch === "\\") {
+			i += 2;
+			continue;
+		}
+		if (ch === quote) return i + 1;
+		i++;
+	}
+	return source.length;
+}
+
+function skipTemplate(source: string, start: number): number {
+	let i = start + 1;
+	while (i < source.length) {
+		const ch = source[i];
+		if (ch === "\\") {
+			i += 2;
+			continue;
+		}
+		if (ch === "`") return i + 1;
+		if (ch === "$" && source[i + 1] === "{") {
+			// Skip the interpolation block — recurse-via-loop with brace depth.
+			i += 2;
+			let depth = 1;
+			while (i < source.length && depth > 0) {
+				const c = source[i];
+				if (c === "{") depth++;
+				else if (c === "}") depth--;
+				else if (c === '"' || c === "'") {
+					i = skipString(source, i, c);
+					continue;
+				} else if (c === "`") {
+					i = skipTemplate(source, i);
+					continue;
+				}
+				i++;
+			}
+			continue;
+		}
+		i++;
+	}
+	return source.length;
 }
 
 // ---------------------------------------------------------------------------

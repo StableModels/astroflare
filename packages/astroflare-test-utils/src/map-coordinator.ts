@@ -84,6 +84,15 @@ export class MapCoordinator implements Coordinator {
 		await this.publish("hmr", { type: "update", trigger: path, updates });
 	}
 
+	async onFileRemoved(path: string): Promise<void> {
+		// Snapshot reverse closure BEFORE the node disappears — once
+		// graphRemove runs, the importedBy edges are gone.
+		const importers = this.#transitiveImporters(path);
+		await this.graphRemove(path);
+		const paths = [path, ...importers];
+		await this.publish("hmr", { type: "prune", paths });
+	}
+
 	async publish(channel: string, message: HmrMessage): Promise<void> {
 		const handlers = this.#subs.get(channel);
 		if (!handlers) return;

@@ -19,7 +19,7 @@
  */
 
 import { env } from "cloudflare:test";
-import type { Host } from "@astroflare/core";
+import type { Host, RenderResult } from "@astroflare/core";
 import { WorkerdExecutor } from "@astroflare/host-cloudflare";
 import { ModuleGraph, inlineBundle } from "@astroflare/preview";
 // Subpath import avoids pulling InProcessExecutor (which uses node:os/fs/url
@@ -33,13 +33,15 @@ import {
 } from "@astroflare/test-utils/in-memory";
 import { describe, expect, it } from "vitest";
 
+/* eslint-disable @typescript-eslint/ban-ts-comment */
+// @ts-expect-error — Vite ?raw default-exports string; type not carried.
+import RUNTIME_COOKIES_SRC from "../../packages/astroflare-runtime/dist/cookies.js?raw";
 // @ts-expect-error
 import RUNTIME_HMR_SRC from "../../packages/astroflare-runtime/dist/hmr-client.js?raw";
 // Vite's `?raw` plugin works inside vitest-pool-workers. The relative
 // path bypasses the runtime package's `exports` map (which doesn't expose
 // `dist/`). The pretest `tsc -b` step builds the dist artifacts.
-/* eslint-disable @typescript-eslint/ban-ts-comment */
-// @ts-expect-error — Vite ?raw default-exports string; type not carried.
+// @ts-expect-error
 import RUNTIME_INDEX_SRC from "../../packages/astroflare-runtime/dist/index.js?raw";
 // @ts-expect-error
 import RUNTIME_INTERNAL_SRC from "../../packages/astroflare-runtime/dist/internal.js?raw";
@@ -51,6 +53,7 @@ const RUNTIME_BUNDLE_MODULES: Record<string, string> = {
 	"runtime/internal.js": RUNTIME_INTERNAL_SRC as string,
 	"runtime/render.js": RUNTIME_RENDER_SRC as string,
 	"runtime/hmr-client.js": RUNTIME_HMR_SRC as string,
+	"runtime/cookies.js": RUNTIME_COOKIES_SRC as string,
 };
 
 const RUNTIME_IMPORT = "./runtime/index.js";
@@ -97,7 +100,7 @@ async function renderViaWorkerd(
 	const closure = await graph.closure(rootPath);
 	const bundleCode = inlineBundle(closure.modules, RUNTIME_IMPORT);
 
-	return host.executor.runOnce<string>(
+	const result = await host.executor.runOnce<RenderResult>(
 		{
 			mainModule: "main.js",
 			modules: {
@@ -107,6 +110,10 @@ async function renderViaWorkerd(
 		},
 		input,
 	);
+	if (result.kind !== "html") {
+		throw new Error(`expected html render, got ${result.kind}`);
+	}
+	return result.html;
 }
 
 describe("compiler+runtime end-to-end inside workerd", () => {

@@ -69,7 +69,10 @@ export interface DeployResult {
  */
 export async function deploy(opts: DeployOptions): Promise<DeployResult> {
 	const start = (opts.now ?? Date.now)();
-	const buildPlan: BuildPlan = await plan(opts.host.storage);
+	const buildPlan: BuildPlan = await plan({
+		host: opts.host,
+		runtimeImport: opts.runtimeImport,
+	});
 
 	// Hash every page source so deploys with the same content collapse
 	// (deduplicated) and deploys with different content get distinct
@@ -77,8 +80,11 @@ export async function deploy(opts: DeployOptions): Promise<DeployResult> {
 	// imports — Phase 7+ when we run the closure walker before deploying;
 	// for now a page-only hash is enough for the test fixtures.
 	const fingerprintParts: string[] = [];
+	const seenFiles = new Set<string>();
 	for (const r of buildPlan.routes) {
-		if (r.kind !== "static") continue;
+		if (r.kind !== "static" && r.kind !== "static-paths") continue;
+		if (seenFiles.has(r.route.filePath)) continue;
+		seenFiles.add(r.route.filePath);
 		const stat = await opts.host.storage.stat(r.route.filePath);
 		fingerprintParts.push(`${r.route.filePath}:${stat?.hash ?? ""}`);
 	}
@@ -95,8 +101,8 @@ export async function deploy(opts: DeployOptions): Promise<DeployResult> {
 		deployHash,
 		createdAt: start,
 		routes: rendered.map((r) => {
-			if (r.route.kind !== "static") {
-				throw new Error("renderForRoutes returned a non-static plan");
+			if (r.route.kind !== "static" && r.route.kind !== "static-paths") {
+				throw new Error("renderForRoutes returned a non-renderable plan");
 			}
 			return {
 				url: deployUrlFor(r.route.outputPath),

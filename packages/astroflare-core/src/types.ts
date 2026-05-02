@@ -126,6 +126,15 @@ export interface Coordinator {
 	 */
 	onFileChanged(path: string, hash: string): Promise<void>;
 
+	/**
+	 * Notify the coordinator that a file was removed. Implementations should
+	 * collect the set of transitively-importing modules first (because the
+	 * graph node is about to disappear), then `graphRemove(path)`, then
+	 * publish an HMR `prune` whose `paths` is `[path, ...transitiveImporters]`
+	 * — every module the browser may have cached that's now stale.
+	 */
+	onFileRemoved(path: string): Promise<void>;
+
 	/** Look up a node in the module graph. */
 	graphGet(path: string): Promise<ModuleNode | null>;
 	/** Insert or replace a node in the module graph. */
@@ -281,6 +290,12 @@ export interface AstroflareApp {
 	 * Implementations propagate to the coordinator and trigger HMR fan-out.
 	 */
 	notifyFileChanged(path: string, hash: string): Promise<void>;
+
+	/**
+	 * Notify the framework that a file was removed. Symmetric with
+	 * `notifyFileChanged`; produces an HMR `prune` rather than `update`.
+	 */
+	notifyFileRemoved(path: string): Promise<void>;
 }
 
 // -----------------------------------------------------------------------------
@@ -289,10 +304,14 @@ export interface AstroflareApp {
 
 /**
  * The `Astro` object available to every `.astro` component's frontmatter and
- * template. Tier 0 surface (per §3 of the brief). Phase 3 covers props,
- * params, request, url, redirect, site. Cookies, locals, slots, self deferred.
+ * template. Tier 0 surface (per §3 of the brief). Phase 10 closes out the
+ * carry-overs from Phase 3: cookies, locals, slots, redirect propagation.
+ *
+ * `Astro.self` (recursive components) remains deferred — it's listed as a
+ * Tier 0 niche feature in the brief but `docs/next-phases.md` carves it
+ * out explicitly.
  */
-export interface AstroGlobal<P = Record<string, unknown>> {
+export interface AstroGlobal<P = Record<string, unknown>, L = Record<string, unknown>> {
 	/** Props passed to this component (route params from getStaticPaths or parent's render). */
 	props: P;
 	/** URL parameters from the matched route, e.g. `[slug]` → `{ slug: "..." }`. */
@@ -305,18 +324,102 @@ export interface AstroGlobal<P = Record<string, unknown>> {
 	site?: string;
 	/** Returns a `Response` that redirects to `to` with `status` (302 default). */
 	redirect(to: string, status?: 301 | 302 | 303 | 307 | 308): Response;
+	/**
+	 * Per-request cookie helper. Reads parse `Cookie` header lazily; writes
+	 * accumulate `Set-Cookie` headers that the framework merges into the
+	 * outgoing response.
+	 */
+	cookies: AstroCookies;
+	/**
+	 * Per-request scratch bag set by middleware and read by pages. Astro
+	 * exposes a typed `App.Locals` declaration; we use a generic for now.
+	 */
+	locals: L;
+	/** Imperative slot rendering API (frontmatter-side). */
+	slots: AstroSlots;
+}
+
+/**
+ * Cookie helper — Astro-shaped surface (`get`, `set`, `delete`, `has`).
+ * Implementations parse `Cookie` lazily on first read and stage writes
+ * (a list of `Set-Cookie` strings) until the framework calls `headers()`
+ * to merge them into the outgoing response.
+ */
+export interface AstroCookies {
+	get(name: string): AstroCookieValue | undefined;
+	has(name: string): boolean;
+	set(name: string, value: string, options?: AstroCookieSetOptions): void;
+	delete(name: string, options?: AstroCookieSetOptions): void;
+	/**
+	 * Snapshot of `Set-Cookie` headers staged by `set`/`delete` calls so far.
+	 * Each entry is a single `Set-Cookie` value (no `Set-Cookie: ` prefix).
+	 */
+	headers(): readonly string[];
+}
+
+export interface AstroCookieValue {
+	/** Raw decoded value. */
+	value: string;
+	/** Same as `value`, retained as `.json()` for parity with Astro's API. */
+	json(): unknown;
+	/** Same as `value`, parity with Astro. */
+	number(): number;
+	boolean(): boolean;
+}
+
+export interface AstroCookieSetOptions {
+	domain?: string;
+	expires?: Date;
+	httpOnly?: boolean;
+	maxAge?: number;
+	path?: string;
+	sameSite?: "strict" | "lax" | "none" | boolean;
+	secure?: boolean;
+}
+
+/**
+ * Imperative slot API. The compiler maps frontmatter `Astro.slots.has(name)`
+ * to a lookup against the slot map passed in by the caller; `render(name)`
+ * runs the slot's render function and returns raw HTML.
+ */
+export interface AstroSlots {
+	has(name: string): boolean;
+	render(name: string, args?: readonly unknown[]): Promise<string>;
 }
 
 /**
  * Context the framework supplies to `render()` to build the AstroGlobal.
  */
-export interface RenderContext<P = Record<string, unknown>> {
+export interface RenderContext<P = Record<string, unknown>, L = Record<string, unknown>> {
 	props: P;
 	params: Record<string, string>;
 	request: Request;
 	url: URL;
 	site?: string;
+	/** Optional locals bag (set by middleware, read by pages). Defaults to `{}`. */
+	locals?: L;
 }
+
+/**
+ * What a render returns. JSON-serialisable so it crosses the executor's
+ * fetch-shaped RPC boundary intact.
+ *
+ *   - `kind: "html"` — the route rendered HTML normally; `cookies` is the
+ *     list of staged `Set-Cookie` strings (callers merge into the final
+ *     `Response`).
+ *   - `kind: "response"` — the route returned a `Response` (typically
+ *     `Astro.redirect(...)`). `status`, `headers`, and `body` reconstruct
+ *     it on the parent side; `cookies` rides along.
+ */
+export type RenderResult =
+	| { kind: "html"; html: string; cookies: readonly string[] }
+	| {
+			kind: "response";
+			status: number;
+			headers: Readonly<Record<string, string>>;
+			body: string | null;
+			cookies: readonly string[];
+	  };
 
 // -----------------------------------------------------------------------------
 // Configuration (Astro-shaped — see §3 Tier 0 / §9.10)

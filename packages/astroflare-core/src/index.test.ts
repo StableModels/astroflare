@@ -17,6 +17,7 @@ const noopHost = (overrides: Partial<Host> = {}): Host => ({
 	},
 	coordinator: {
 		onFileChanged: vi.fn(async () => undefined),
+		onFileRemoved: vi.fn(async () => undefined),
 		graphGet: vi.fn(async () => null),
 		graphPut: vi.fn(async () => undefined),
 		graphRemove: vi.fn(async () => undefined),
@@ -53,6 +54,13 @@ describe("@astroflare/core", () => {
 		);
 		await app.notifyFileChanged("/src/pages/index.astro", "abc123");
 		expect(host.coordinator.onFileChanged).toHaveBeenCalledWith("/src/pages/index.astro", "abc123");
+	});
+
+	it("createApp forwards file-removal to the coordinator", async () => {
+		const host = noopHost();
+		const app = createApp({}, host);
+		await app.notifyFileRemoved("/src/pages/old.astro");
+		expect(host.coordinator.onFileRemoved).toHaveBeenCalledWith("/src/pages/old.astro");
 	});
 
 	it("createApp forwards HMR upgrade to the transport", async () => {

@@ -26,6 +26,45 @@ describe("emitter — module shape", () => {
 		expect(code).toContain("import X from './X.astro';");
 		expect(code).toContain("const y = 1;");
 	});
+
+	it("hoists `export async function getStaticPaths` to module scope", () => {
+		const code = compile(
+			[
+				"---",
+				"export async function getStaticPaths() {",
+				"  return [{ params: { slug: 'a' } }];",
+				"}",
+				"const { slug } = Astro.params;",
+				"---",
+				"<p>{slug}</p>",
+			].join("\n"),
+		);
+		// The export sits BEFORE `export default $component(...)`.
+		const exportIdx = code.indexOf("export async function getStaticPaths");
+		const defaultIdx = code.indexOf("export default $component");
+		expect(exportIdx).toBeGreaterThan(-1);
+		expect(defaultIdx).toBeGreaterThan(-1);
+		expect(exportIdx).toBeLessThan(defaultIdx);
+		// The non-export frontmatter line stays inside the component body
+		// (i.e. AFTER the default export's arrow opens).
+		expect(code.indexOf("const { slug } = Astro.params;")).toBeGreaterThan(defaultIdx);
+	});
+
+	it("hoists `export const NAME = expr;` declarations", () => {
+		const code = compile("---\nexport const prerender = true;\nconst x = 1;\n---\n<p>x</p>");
+		const exportIdx = code.indexOf("export const prerender = true");
+		const defaultIdx = code.indexOf("export default $component");
+		expect(exportIdx).toBeGreaterThan(-1);
+		expect(exportIdx).toBeLessThan(defaultIdx);
+		expect(code.indexOf("const x = 1;")).toBeGreaterThan(defaultIdx);
+	});
+
+	it("does not hoist `export default` (reserved by the emitter)", () => {
+		// The user shouldn't typically write this, but it must not collide
+		// with the wrapper's own default export.
+		const code = compile("---\nconst x = 1;\n---\n<p>x</p>");
+		expect(code.match(/export default/g)?.length).toBe(1);
+	});
 });
 
 describe("emitter — text and expressions", () => {

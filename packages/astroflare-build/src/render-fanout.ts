@@ -17,7 +17,7 @@
  *     pieces ride along when needed.
  */
 
-import type { Host, RenderContext, Storage } from "@astroflare/core";
+import type { Host, RenderContext, RenderResult, Storage } from "@astroflare/core";
 import { ModuleGraph, inlineBundle } from "@astroflare/preview";
 import type { RoutePlan } from "./planner.js";
 
@@ -37,9 +37,14 @@ export interface RoutePlannedHtml {
 const enc = new TextEncoder();
 
 /**
- * Render every static route in `plans`, write each to
- * `${siteRoot}/${deployHash}/${plan.outputPath}`. Returns the list of
- * rendered routes for callers that want to assemble a manifest.
+ * Render every static and `getStaticPaths`-expanded route in `plans`, write
+ * each to `${siteRoot}/${deployHash}/${plan.outputPath}`. Returns the list
+ * of rendered routes for callers that want to assemble a manifest.
+ *
+ * If a route returns a `Response` (e.g. `Astro.redirect(...)` from
+ * frontmatter) the build skips it with a `redirect` event — Astro emits
+ * either a meta-refresh HTML or a `_redirects` manifest entry; for now we
+ * don't try to fabricate either.
  */
 export async function renderForRoutes(
 	plans: readonly RoutePlan[],
@@ -50,27 +55,37 @@ export async function renderForRoutes(
 	const out: RoutePlannedHtml[] = [];
 
 	for (const plan of plans) {
-		if (plan.kind !== "static") continue;
+		if (plan.kind === "skipped" || plan.kind === "redirect") continue;
 		const closure = await moduleGraph.closure(plan.route.filePath);
 		const code = inlineBundle(closure.modules, opts.runtimeImport);
 
 		const url = new URL(deployUrlFor(plan.outputPath), "https://deploy.local/");
 		const request = new Request(url);
 		const ctx: RenderContext = {
-			props: {},
-			params: {},
+			props: plan.kind === "static-paths" ? plan.props : {},
+			params: plan.kind === "static-paths" ? plan.params : {},
 			request,
 			url,
 		};
 
-		const html = await opts.host.executor.runOnce<string>(
+		const result = await opts.host.executor.runOnce<RenderResult>(
 			{ mainModule: "main.js", modules: { "main.js": code } },
 			ctx,
 		);
 
+		if (result.kind === "response") {
+			opts.host.logger.event("build.route.response", {
+				filePath: plan.route.filePath,
+				outputPath: plan.outputPath,
+				status: result.status,
+				location: result.headers.location ?? null,
+			});
+			continue;
+		}
+
 		const storagePath = `${siteRoot}/${opts.deployHash}/${plan.outputPath}`;
-		await opts.host.storage.write(storagePath, enc.encode(html));
-		out.push({ route: plan, html, storagePath });
+		await opts.host.storage.write(storagePath, enc.encode(result.html));
+		out.push({ route: plan, html: result.html, storagePath });
 	}
 
 	return out;

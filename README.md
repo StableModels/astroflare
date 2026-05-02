@@ -16,28 +16,35 @@ Astroflare runs an Astro-shaped project (`src/pages/`, `.astro`/`.md`/`.mdx`,
 
 ## Status
 
-Phases 0–9 shipped, plus Phase 2.5b which closes the original Phase 2.5
+Phases 0–10 shipped, plus Phase 2.5b which closed the original Phase 2.5
 deferral list (Miniflare v4 unblock + real `WorkerdExecutor` + real
 Hibernatable WS Transport + workerd-native compiler e2e + latency + soak).
-378 tests across 5 test pools.
+**424 tests across 5 test pools.**
 
 The framework runs end-to-end:
 
 - **Live preview** — file-based routing, `.astro` + `.md`, multi-file
   composition, HMR over WebSocket, content-hashed compile cache, reactive
-  route discovery, server endpoints, middleware, dev error overlay.
+  route discovery (additions + removals), server endpoints, middleware,
+  dev error overlay.
+- **Tier 0 Astro surface complete** — `Astro.props/params/request/url/
+  site/redirect/cookies/locals/slots`, plus `getStaticPaths()` for
+  dynamic routes (`Astro.self` deferred). Component-returned `Response`
+  short-circuits to a real HTTP response.
 - **Content collections** — `defineCollection` + Zod schemas + `getCollection` +
   `getEntry`, walking `src/content/<name>/`.
-- **Deploy pipeline** — planner, render fan-out, manifest, atomic flip,
-  runtime serving shim.
+- **Deploy pipeline** — planner (with `getStaticPaths` expansion),
+  render fan-out, manifest, atomic flip, runtime serving shim.
 - **`examples/minimal-blog`** — exercises every Tier 0/1 capability through
   preview and deploy.
 
-353 tests across 5 test pools. Significant carve-outs (the
-`@astroflare/host-cloudflare` implementation, scoped CSS, image transforms,
-TS support throughout, framework integrations, client-island hydration,
-view transitions, `getStaticPaths`, latency / soak / coverage gates) are
-each documented per-phase under [`docs/phases/`](./docs/phases/).
+Significant carve-outs remain: the `@astroflare/host-cloudflare`
+implementation (Storage, Coordinator DO, Project Worker), scoped CSS,
+image transforms, TS support throughout, framework integrations,
+client-island hydration, view transitions, latency / soak / coverage
+gates. Each carryover lives per-phase under
+[`docs/phases/`](./docs/phases/), and the next set is consolidated
+in [`docs/next-phases.md`](./docs/next-phases.md).
 
 ## Layout
 

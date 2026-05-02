@@ -7,22 +7,24 @@ MVP = Tier 0 + Tier 1).
 
 ## Where we are
 
-**Done:** Phases 0–9 plus 2.5b. Framework runs end-to-end. Live preview with
-HMR, multi-file `.astro` composition, markdown + content collections, server
-endpoints + middleware, static deploy with atomic flip, real Worker Loader-
-backed Executor and Hibernatable WS Transport in `@astroflare/host-cloudflare`,
-`minimal-blog` fixture exercising every shipped Tier 0/1 capability.
+**Done:** Phases 0–10 plus 2.5b. Framework runs end-to-end. Live preview
+with HMR (additions + removals), multi-file `.astro` composition,
+markdown + content collections, server endpoints + middleware, static
+deploy with atomic flip including dynamic routes via `getStaticPaths`,
+full Tier 0 `Astro.*` surface (`cookies`, `locals`, `slots`, `redirect`
+propagation), real Worker Loader-backed Executor and Hibernatable WS
+Transport in `@astroflare/host-cloudflare`, `minimal-blog` fixture.
 
-**378 tests / 36 files / 5 pools all green.** Framework boundary holds.
+**424 tests / 38 files / 5 pools all green.** Framework boundary holds.
 
 ## Outstanding work, categorized
 
 ### A — Tier 0 carryovers (must land for MVP)
-- `getStaticPaths()` — currently Phase 7 deploy skips dynamic routes
-- `Astro.cookies` / `Astro.locals` (middleware sets, page reads)
-- `Astro.redirect` propagation (component returns Response → framework passes through)
-- `Astro.slots` imperative API (component-side slot rendering)
-- `Astro.self` (recursive components)
+- ~~`getStaticPaths()`~~ ✓ Phase 10
+- ~~`Astro.cookies` / `Astro.locals`~~ ✓ Phase 10
+- ~~`Astro.redirect` propagation~~ ✓ Phase 10
+- ~~`Astro.slots` imperative API~~ ✓ Phase 10
+- `Astro.self` (recursive components — niche, deferred)
 
 ### B — Tier 1 finishers
 - TS support throughout (frontmatter + endpoints) via esbuild-wasm in a Compile DW
@@ -81,15 +83,12 @@ backed Executor and Hibernatable WS Transport in `@astroflare/host-cloudflare`,
 Ordered by dependency + brief priority (close Tier 0/1 first, then host, then
 Tier 2). Each phase ≈ one focused work session, with explicit carve-outs.
 
-### Phase 10 — Tier 0 close-out: getStaticPaths + Astro.* finishers
+### Phase 10 — Tier 0 close-out: getStaticPaths + Astro.* finishers ✓
 
-`getStaticPaths()` enumerated at module load, threaded into the deploy
-planner so dynamic routes prerender. `Astro.cookies` (request-cookie
-parser + response-cookie helpers). `Astro.locals` (middleware sets,
-page reads via `AsyncLocalStorage`-stored context). `Astro.redirect`
-detection (if a component returns a `Response`, framework propagates
-without `renderToString`). `Astro.slots` imperative API for components
-that render slots from frontmatter.
+**Done.** Retro: [`docs/phases/phase-10-tier0-closeout.md`](./phases/phase-10-tier0-closeout.md).
+46 new tests; 424 total. `getStaticPaths`, `Astro.cookies`,
+`Astro.locals`, `Astro.slots`, `Astro.redirect` propagation, plus the
+cross-cutting `graphRemove` → `prune` HMR wiring.
 
 **Defer:** `Astro.self` (recursive components — niche).
 
@@ -218,7 +217,7 @@ naturally touches them:
 
 - **Modal HMR overlay** — fits inside Phase 16 (when we touch the HMR
   client for hydration anyway)
-- **`graphRemove → prune`** — fits inside Phase 10 (cleaning up `Astro.*`)
+- ~~**`graphRemove → prune`** — fits inside Phase 10~~ ✓ Phase 10
 - **Source maps** — fits inside Phase 13 (asset pipeline touches the
   compiler's emit path)
 - **`is:raw` proper handling** — fits inside Phase 14 (MDX touches the

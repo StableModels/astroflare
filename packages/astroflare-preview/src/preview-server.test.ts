@@ -150,6 +150,38 @@ describe("preview server: Astro.* surface", () => {
 		const r = await server.fetch(new Request(`https://app/users/${encodeURIComponent("<bob>")}`));
 		expect(await bodyWithoutHmr(r)).toBe("<p>&lt;bob&gt;</p>");
 	});
+
+	it("Astro.cookies.get reads request cookies", async () => {
+		const src =
+			"---\nconst v = Astro.cookies.get('session')?.value ?? '(none)';\n---\n<p>session={v}</p>";
+		const { server } = await fixture({
+			"/src/pages/index.astro": src,
+		});
+		const r = await server.fetch(
+			new Request("https://app/", { headers: { cookie: "session=abc" } }),
+		);
+		expect(await bodyWithoutHmr(r)).toBe("<p>session=abc</p>");
+	});
+
+	it("Astro.cookies.set writes Set-Cookie on the response", async () => {
+		const src = "---\nAstro.cookies.set('visited', 'yes', { path: '/' });\n---\n<p>ok</p>";
+		const { server } = await fixture({
+			"/src/pages/index.astro": src,
+		});
+		const r = await server.fetch(new Request("https://app/"));
+		expect(r.headers.get("set-cookie")).toContain("visited=yes");
+		expect(r.headers.get("set-cookie")).toContain("Path=/");
+	});
+
+	it("Astro.redirect from frontmatter short-circuits to a 302", async () => {
+		const src = "---\nreturn Astro.redirect('/login');\n---\n<p>never rendered</p>";
+		const { server } = await fixture({
+			"/src/pages/private.astro": src,
+		});
+		const r = await server.fetch(new Request("https://app/private"));
+		expect(r.status).toBe(302);
+		expect(r.headers.get("location")).toBe("/login");
+	});
 });
 
 // ---------------------------------------------------------------------------
@@ -418,6 +450,23 @@ describe("preview server: reactive route discovery", () => {
 		await host.coordinator.onFileChanged("/src/components/L.astro", "h-new");
 		expect(host.logger.byName("preview.routes.invalidated")).toHaveLength(0);
 	});
+
+	it("re-discovers routes when a /src/pages/ file is removed", async () => {
+		const { host, server } = await fixture({
+			"/src/pages/index.astro": "<p>home</p>",
+			"/src/pages/about.astro": "<p>about</p>",
+		});
+		// Initial discovery via a request.
+		const before = await server.fetch(new Request("https://app/about"));
+		expect(before.status).toBe(200);
+
+		await host.storage.remove("/src/pages/about.astro");
+		await host.coordinator.onFileRemoved("/src/pages/about.astro");
+
+		const after = await server.fetch(new Request("https://app/about"));
+		expect(after.status).toBe(404);
+		expect(host.logger.byName("preview.routes.invalidated")).toHaveLength(1);
+	});
 });
 
 // ---------------------------------------------------------------------------
@@ -483,6 +532,17 @@ describe("preview server: middleware", () => {
 		});
 		const r = await server.fetch(new Request("https://app/api/x"));
 		expect(await r.text()).toBe("[mw]inner");
+	});
+
+	it("middleware sets Astro.locals; the page reads them", async () => {
+		const { server } = await fixture({
+			"/src/middleware.js":
+				"export const onRequest = async (ctx, next) => { ctx.locals.user = { name: 'Alice' }; return next(); };",
+			"/src/pages/index.astro":
+				"---\nconst user = Astro.locals.user;\n---\n<p>user={user?.name}</p>",
+		});
+		const r = await server.fetch(new Request("https://app/"));
+		expect(await bodyWithoutHmr(r)).toBe("<p>user=Alice</p>");
 	});
 
 	it("middleware reload after edit invalidates the cached function", async () => {

@@ -148,6 +148,62 @@ describe("MapCoordinator onFileChanged", () => {
 });
 
 // ---------------------------------------------------------------------------
+// onFileRemoved → prune HMR (Phase 10)
+// ---------------------------------------------------------------------------
+
+describe("MapCoordinator onFileRemoved", () => {
+	it("removes the node and clears reverse edges", async () => {
+		const c = new MapCoordinator();
+		await c.graphPut(node("/b"));
+		await c.graphPut(node("/a", ["/b"]));
+		await c.onFileRemoved("/b");
+		expect(await c.graphGet("/b")).toBeNull();
+		expect((await c.graphGet("/a"))?.imports).toEqual([]);
+	});
+
+	it("publishes a prune message naming the removed path", async () => {
+		const c = new MapCoordinator();
+		await c.graphPut(node("/p"));
+		const seen: HmrMessage[] = [];
+		c.subscribe("hmr", (m) => seen.push(m));
+		await c.onFileRemoved("/p");
+		expect(seen).toHaveLength(1);
+		const msg = seen[0];
+		expect(msg?.type).toBe("prune");
+		if (msg?.type === "prune") {
+			expect(msg.paths).toContain("/p");
+		}
+	});
+
+	it("prune includes every transitively-importing module", async () => {
+		// /leaf  ← /mid  ← /top
+		const c = new MapCoordinator();
+		await c.graphPut(node("/leaf"));
+		await c.graphPut(node("/mid", ["/leaf"]));
+		await c.graphPut(node("/top", ["/mid"]));
+
+		const seen: HmrMessage[] = [];
+		c.subscribe("hmr", (m) => seen.push(m));
+		await c.onFileRemoved("/leaf");
+
+		const msg = seen[0];
+		if (msg?.type !== "prune") throw new Error("expected prune");
+		expect([...msg.paths].sort()).toEqual(["/leaf", "/mid", "/top"]);
+	});
+
+	it("removing a file with no graph node still publishes a single-path prune", async () => {
+		const c = new MapCoordinator();
+		const seen: HmrMessage[] = [];
+		c.subscribe("hmr", (m) => seen.push(m));
+		await c.onFileRemoved("/never-tracked.astro");
+		expect(seen).toHaveLength(1);
+		const msg = seen[0];
+		if (msg?.type !== "prune") throw new Error("expected prune");
+		expect(msg.paths).toEqual(["/never-tracked.astro"]);
+	});
+});
+
+// ---------------------------------------------------------------------------
 // Property test (§Phase 1.c, brief): random graphs + random edits, assert
 // every transitively-importing module is in the invalidation set.
 // ---------------------------------------------------------------------------

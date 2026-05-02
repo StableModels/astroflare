@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 /**
  * Runtime ABI — what the compiler emits imports against.
  *
@@ -33,7 +34,7 @@
  * is available in Node 22+ and in workerd under `nodejs_compat` (which
  * Astroflare requires).
  */
-import { AsyncLocalStorage } from "node:async_hooks";
+import type { AstroCookies, AstroSlots } from "@astroflare/core";
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -53,8 +54,25 @@ export type SlotMap = Record<string, SlotFn>;
 
 export type ComponentFn<P> = (props: P, slots: SlotMap) => unknown | Promise<unknown>;
 
-export type AstroComponent<P> = ((props: P, slots: SlotMap) => Promise<RawHtml>) &
+export type AstroComponent<P> = ((props: P, slots: SlotMap) => Promise<RawHtml | Response>) &
 	AstroComponentInstance;
+
+/**
+ * Sentinel error raised when a component returns a `Response` from its
+ * frontmatter (typically `Astro.redirect("/x")`). Caught by `render()`
+ * and translated into a structured `RenderResult` of kind `"response"`.
+ *
+ * Throwing is the cleanest non-local return — the alternative (typing
+ * the entire $renderComponent chain to forward `Response | RawHtml`)
+ * would force every caller to handle both branches.
+ */
+export class ResponseSignal extends Error {
+	readonly response: Response;
+	constructor(response: Response) {
+		super("astroflare:response-signal");
+		this.response = response;
+	}
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -143,11 +161,15 @@ export async function $render(
 /**
  * Wrap a render function so the compiler's default export tags itself as an
  * Astroflare component. The wrapper coerces whatever the user returns into a
- * `RawHtml` marker so downstream callers can rely on the shape.
+ * `RawHtml` marker so downstream callers can rely on the shape — except for
+ * `Response`, which short-circuits via `ResponseSignal`.
  */
 export function $component<P>(cb: ComponentFn<P>): AstroComponent<P> {
 	const fn = (async (props: P, slots: SlotMap) => {
 		const result = await cb(props, slots);
+		if (result instanceof Response) {
+			throw new ResponseSignal(result);
+		}
 		if (isRawHtml(result)) return result;
 		return { __astroRaw: true, html: await flatten(result) };
 	}) as AstroComponent<P>;
@@ -159,14 +181,15 @@ export async function $renderComponent<P>(
 	Component: AstroComponent<P>,
 	props: P,
 	slots: SlotMap = {},
-): Promise<RawHtml> {
+): Promise<RawHtml | Response> {
 	if (typeof Component !== "function") {
 		throw new TypeError(`$renderComponent: expected a component, got ${typeof Component}`);
 	}
 	// Each component gets its own `Astro` (different `props`, shared request
-	// context). The wrapper-level `render()` establishes the context via
-	// `withRenderContext`; nested calls reach for it via the ALS.
-	const componentArg = Object.assign({ Astro: makeChildAstro(props) }, props);
+	// context, child-specific slot map). The wrapper-level `render()`
+	// establishes the context via `withRenderContext`; nested calls reach
+	// for it via the ALS.
+	const componentArg = Object.assign({ Astro: makeChildAstro(props, slots) }, props);
 	return Component(componentArg as P, slots);
 }
 
@@ -174,12 +197,18 @@ export async function $renderComponent<P>(
 // Per-request context propagation (used by render() and $renderComponent)
 // ---------------------------------------------------------------------------
 
-/** Subset of `RenderContext` that's invariant across the render tree. */
+/**
+ * Subset of `RenderContext` that's invariant across the render tree.
+ * `cookies` is shared by reference so writes from one component are
+ * visible to siblings; `locals` is similarly shared.
+ */
 export interface SharedRenderContext {
 	request: Request;
 	url: URL;
 	params: Record<string, string>;
 	site?: string;
+	cookies?: AstroCookies;
+	locals?: Record<string, unknown>;
 }
 
 const renderContextStore = new AsyncLocalStorage<SharedRenderContext>();
@@ -201,9 +230,12 @@ interface AstroLike<P> {
 	url: URL | undefined;
 	site: string | undefined;
 	redirect: (to: string, status?: 301 | 302 | 303 | 307 | 308) => Response;
+	cookies: AstroCookies;
+	locals: Record<string, unknown>;
+	slots: AstroSlots;
 }
 
-function makeChildAstro<P>(props: P): AstroLike<P> {
+function makeChildAstro<P>(props: P, slots: SlotMap): AstroLike<P> {
 	const ctx = renderContextStore.getStore();
 	return {
 		props,
@@ -214,6 +246,43 @@ function makeChildAstro<P>(props: P): AstroLike<P> {
 		redirect(to, status = 302) {
 			return new Response(null, { status, headers: { location: to } });
 		},
+		cookies: ctx?.cookies ?? noopCookies(),
+		locals: ctx?.locals ?? {},
+		slots: makeAstroSlots(slots),
+	};
+}
+
+/**
+ * Build the `Astro.slots` imperative API from a slot map. `has(name)` is a
+ * presence check; `render(name)` invokes the slot's render function and
+ * flattens to an HTML string (parity with Astro).
+ */
+export function makeAstroSlots(slots: SlotMap): AstroSlots {
+	return {
+		has(name: string): boolean {
+			return Object.prototype.hasOwnProperty.call(slots, name);
+		},
+		async render(name: string): Promise<string> {
+			const fn = slots[name];
+			if (!fn) return "";
+			const result = await fn();
+			return flatten(result);
+		},
+	};
+}
+
+/**
+ * Default cookie surface used when no per-request `AstroCookies` is bound
+ * (e.g. a component renders outside `render()` in a one-off test). Reads
+ * are empty; writes are silently dropped.
+ */
+function noopCookies(): AstroCookies {
+	return {
+		get: () => undefined,
+		has: () => false,
+		set: () => {},
+		delete: () => {},
+		headers: () => [],
 	};
 }
 

@@ -42,6 +42,7 @@ import {
 	type HmrMessage,
 	type Host,
 	type RenderContext,
+	type RenderResult,
 	type Subscription,
 	type TaskBundle,
 	contentIdWithConfig,
@@ -131,20 +132,34 @@ export function createPreviewServer(opts: PreviewServerOptions): PreviewServer {
 			void opts.host.transport.broadcastHmr(workspaceId, msg);
 		});
 		routeInvalidationSub = opts.host.coordinator.subscribe("hmr", (msg: HmrMessage) => {
-			if (msg.type !== "update") return;
-			// Only re-discover when the user's originating change is under
-			// `/src/pages/` — transitive importers showing up in `updates`
-			// don't change the route table.
-			if (!msg.trigger || !msg.trigger.startsWith(PAGES_PREFIX)) return;
-			routesReady = router.discover(opts.host.storage);
-			opts.host.logger.event("preview.routes.invalidated", {
-				trigger: msg.trigger,
-			});
+			if (msg.type === "update") {
+				// Only re-discover when the user's originating change is under
+				// `/src/pages/` — transitive importers showing up in `updates`
+				// don't change the route table.
+				if (!msg.trigger || !msg.trigger.startsWith(PAGES_PREFIX)) return;
+				routesReady = router.discover(opts.host.storage);
+				opts.host.logger.event("preview.routes.invalidated", {
+					trigger: msg.trigger,
+				});
+			} else if (msg.type === "prune") {
+				// File removal: if any pruned path lives under /src/pages/
+				// the route table needs rebuilding (deleted page).
+				if (msg.paths.some((p) => p.startsWith(PAGES_PREFIX))) {
+					routesReady = router.discover(opts.host.storage);
+					opts.host.logger.event("preview.routes.invalidated", {
+						reason: "prune",
+						paths: msg.paths,
+					});
+				}
+			}
 		});
-		// Reset cached middleware when the user's middleware file changes.
+		// Reset cached middleware when the user's middleware file changes
+		// or is removed.
 		middlewareInvalidationSub = opts.host.coordinator.subscribe("hmr", (msg: HmrMessage) => {
-			if (msg.type !== "update") return;
-			if (msg.trigger === "/src/middleware.js") {
+			const triggered =
+				(msg.type === "update" && msg.trigger === "/src/middleware.js") ||
+				(msg.type === "prune" && msg.paths.includes("/src/middleware.js"));
+			if (triggered) {
 				middleware = undefined;
 				opts.host.logger.event("preview.middleware.invalidated", {});
 			}
@@ -194,33 +209,37 @@ export function createPreviewServer(opts: PreviewServerOptions): PreviewServer {
 					}
 
 					const closure = await moduleGraph.closure(match.route.filePath);
-					const html = await opts.host.executor.runCached<string>(
+					const ctx: RenderContext = {
+						props: {},
+						params: match.params,
+						request: req,
+						url,
+						site: opts.config.site,
+						locals: mwLocals ?? {},
+					};
+					const result = await opts.host.executor.runCached<RenderResult>(
 						closure.bundleKey,
 						() => buildBundle(closure.modules, runtimeImport),
-						{
-							props: {},
-							params: match.params,
-							request: req,
-							url,
-							site: opts.config.site,
-						} satisfies RenderContext,
+						ctx,
 					);
-					const htmlWithHmr = injectHmrScript(html, HMR_CLIENT_SOURCE);
 
 					opts.host.logger.event("preview.render", {
 						pathname: url.pathname,
 						filePath: match.route.filePath,
 						bundleKey: closure.bundleKey,
 						moduleCount: closure.modules.length,
+						kind: result.kind,
 						ms: opts.host.clock.now() - start,
 					});
 
-					return new Response(htmlWithHmr, {
-						status: 200,
-						headers: { "content-type": "text/html;charset=utf-8" },
-					});
+					if (result.kind === "response") {
+						return buildResponseFromResult(result);
+					}
+					const htmlWithHmr = injectHmrScript(result.html, HMR_CLIENT_SOURCE);
+					return buildHtmlResponse(htmlWithHmr, result.cookies);
 				};
 
+				let mwLocals: Record<string, unknown> | null = null;
 				const mw = await ensureMiddleware();
 				if (mw) {
 					const mwCtx: MiddlewareContext = {
@@ -230,6 +249,7 @@ export function createPreviewServer(opts: PreviewServerOptions): PreviewServer {
 						site: opts.config.site,
 						locals: {},
 					};
+					mwLocals = mwCtx.locals;
 					return await mw(mwCtx, runInner);
 				}
 				return await runInner();
@@ -278,6 +298,33 @@ function buildBundle(modules: readonly ModuleInfo[], runtimeImport: string): Tas
 		mainModule: WRAPPER_NAME,
 		modules: { [WRAPPER_NAME]: code },
 	};
+}
+
+/**
+ * Build a 200 HTML `Response`, merging staged `Set-Cookie` headers from
+ * the render result.
+ */
+function buildHtmlResponse(html: string, cookies: readonly string[]): Response {
+	const headers = new Headers({ "content-type": "text/html;charset=utf-8" });
+	for (const c of cookies) headers.append("set-cookie", c);
+	return new Response(html, { status: 200, headers });
+}
+
+/**
+ * Reconstruct a `Response` from a `RenderResult` of kind `"response"` — used
+ * when the route returned `Astro.redirect(...)` (or any other `Response`)
+ * from frontmatter. Cookies set during render are merged into `Set-Cookie`.
+ */
+function buildResponseFromResult(result: {
+	status: number;
+	headers: Readonly<Record<string, string>>;
+	body: string | null;
+	cookies: readonly string[];
+}): Response {
+	const headers = new Headers();
+	for (const [k, v] of Object.entries(result.headers)) headers.set(k, v);
+	for (const c of result.cookies) headers.append("set-cookie", c);
+	return new Response(result.body, { status: result.status, headers });
 }
 
 // Re-exports kept so downstream packages have a single import surface.
