@@ -167,13 +167,17 @@ export interface Subscription {
  */
 export interface Transport {
 	/**
-	 * Synchronous WebSocket upgrade response. Implementations return a
-	 * `Response` with `status: 101` and a paired socket attached, exactly
-	 * matching workerd's `WebSocketPair` model. Per-connection state is
-	 * persisted via `serializeAttachment()` (§9.8); HMR messages survive
-	 * Durable Object hibernation.
+	 * WebSocket upgrade response. Returns `Response` (or `Promise<Response>`)
+	 * with `status: 101` and a paired socket attached, matching workerd's
+	 * `WebSocketPair` model. Per-connection state is persisted via
+	 * `serializeAttachment()` (§9.8); HMR messages survive Durable Object
+	 * hibernation.
+	 *
+	 * Async return is needed for DO-routed transports (the upgrade has to
+	 * round-trip into a Durable Object via `stub.fetch`); in-memory test
+	 * transports return sync. Callers always `await` it.
 	 */
-	acceptHmrSocket(req: Request, ctx: HmrSocketContext): Response;
+	acceptHmrSocket(req: Request, ctx: HmrSocketContext): Response | Promise<Response>;
 
 	/**
 	 * Broadcast an HMR message to every active subscriber for `workspaceId`.
@@ -266,9 +270,10 @@ export interface AstroflareApp {
 	handlePreviewRequest(req: Request): Promise<Response>;
 
 	/**
-	 * Handle a WebSocket upgrade for HMR. Returns the upgrade `Response`.
+	 * Handle a WebSocket upgrade for HMR. Async because DO-routed transports
+	 * round-trip into a Durable Object before returning the upgrade response.
 	 */
-	handleHmrUpgrade(req: Request): Response;
+	handleHmrUpgrade(req: Request): Promise<Response>;
 
 	/**
 	 * Notify the framework that a file changed. The agent's `FsService.write`

@@ -26,7 +26,7 @@ export function createApp(config: AstroflareConfig, host: Host): AstroflareApp {
 			});
 		},
 
-		handleHmrUpgrade(req: Request): Response {
+		async handleHmrUpgrade(req: Request): Promise<Response> {
 			// Workspace identity is derived by the host before reaching this layer;
 			// for Phase 1a we use a placeholder. Phase 3+ wires per-tenant routing.
 			return host.transport.acceptHmrSocket(req, { workspaceId: "default" });

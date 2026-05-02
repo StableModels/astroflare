@@ -22,6 +22,11 @@ export default defineWorkersProject({
 		poolOptions: {
 			workers: {
 				singleWorker: true,
+				// Disable isolated-storage because Hibernatable WS DOs hold open
+				// sockets across test boundaries; vitest-pool-workers' default
+				// per-test storage stack frames conflict with that.
+				// See https://developers.cloudflare.com/workers/testing/vitest-integration/known-issues/#isolated-storage
+				isolatedStorage: false,
 				main: "./harness.ts",
 				miniflare: {
 					compatibilityDate: "2025-09-01",
@@ -31,6 +36,10 @@ export default defineWorkersProject({
 					// parser predates `worker_loaders` and ignores the field; the
 					// programmatic Miniflare option is wired through directly.
 					workerLoaders: { LOADER: {} },
+					// Hibernating HMR Durable Object (Phase 2.5e).
+					durableObjects: {
+						HMR_DO: { className: "HmrDurableObject" },
+					},
 				},
 			},
 		},

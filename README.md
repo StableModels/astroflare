@@ -16,8 +16,12 @@ Astroflare runs an Astro-shaped project (`src/pages/`, `.astro`/`.md`/`.mdx`,
 
 ## Status
 
-Phases 0–9 shipped (with stated carve-outs in each retrospective). The framework
-runs end-to-end:
+Phases 0–9 shipped, plus Phase 2.5b which closes the original Phase 2.5
+deferral list (Miniflare v4 unblock + real `WorkerdExecutor` + real
+Hibernatable WS Transport + workerd-native compiler e2e + latency + soak).
+378 tests across 5 test pools.
+
+The framework runs end-to-end:
 
 - **Live preview** — file-based routing, `.astro` + `.md`, multi-file
   composition, HMR over WebSocket, content-hashed compile cache, reactive

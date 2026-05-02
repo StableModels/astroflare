@@ -6,10 +6,11 @@
  * `[[worker_loaders]] binding = "LOADER"`.
  */
 
+import type { HmrDurableObject } from "@astroflare/host-cloudflare";
+
 declare module "cloudflare:test" {
 	interface ProvidedEnv {
 		LOADER: WorkerLoader;
+		HMR_DO: DurableObjectNamespace<HmrDurableObject>;
 	}
 }
-
-export {};

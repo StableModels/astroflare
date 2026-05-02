@@ -10,5 +10,6 @@
  * *only* one where `cloudflare:` and `@cloudflare/` imports are allowed.
  */
 export * from "./executor.js";
+export * from "./transport.js";
 
 export const HOST_CLOUDFLARE_VERSION = "0.0.0";

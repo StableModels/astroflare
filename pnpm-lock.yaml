@@ -236,9 +236,15 @@ importers:
       '@astroflare/host-cloudflare':
         specifier: workspace:*
         version: link:../../packages/astroflare-host-cloudflare
+      '@astroflare/preview':
+        specifier: workspace:*
+        version: link:../../packages/astroflare-preview
       '@astroflare/runtime':
         specifier: workspace:*
         version: link:../../packages/astroflare-runtime
+      '@astroflare/test-utils':
+        specifier: workspace:*
+        version: link:../../packages/astroflare-test-utils
     devDependencies:
       '@cloudflare/vitest-pool-workers':
         specifier: ^0.10.0

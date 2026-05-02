@@ -55,13 +55,13 @@ describe("@astroflare/core", () => {
 		expect(host.coordinator.onFileChanged).toHaveBeenCalledWith("/src/pages/index.astro", "abc123");
 	});
 
-	it("createApp forwards HMR upgrade to the transport", () => {
+	it("createApp forwards HMR upgrade to the transport", async () => {
 		const host = noopHost();
 		const app = createApp({}, host);
 		const req = new Request("https://example.com/_aflare/hmr", {
 			headers: { upgrade: "websocket" },
 		});
-		const res = app.handleHmrUpgrade(req);
+		const res = await app.handleHmrUpgrade(req);
 		expect(host.transport.acceptHmrSocket).toHaveBeenCalledWith(
 			req,
 			expect.objectContaining({ workspaceId: "default" }),

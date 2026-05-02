@@ -10,7 +10,9 @@
     "@astroflare/compiler": "workspace:*",
     "@astroflare/core": "workspace:*",
     "@astroflare/host-cloudflare": "workspace:*",
-    "@astroflare/runtime": "workspace:*"
+    "@astroflare/preview": "workspace:*",
+    "@astroflare/runtime": "workspace:*",
+    "@astroflare/test-utils": "workspace:*"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.10.0",

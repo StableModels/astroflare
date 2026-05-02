@@ -10,6 +10,10 @@
       "types": "./src/index.ts",
       "default": "./src/index.ts"
     },
+    "./in-memory": {
+      "types": "./src/in-memory.ts",
+      "default": "./src/in-memory.ts"
+    },
     "./fixtures": {
       "types": "./src/fixtures/index.ts",
       "default": "./src/fixtures/index.ts"
