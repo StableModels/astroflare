@@ -22,9 +22,13 @@ describe("HMR soak", () => {
 		const coordinator = new MapCoordinator();
 
 		// Wire coordinator → transport (mirrors what the preview server
-		// does in production).
+		// does in production). Capture each broadcast promise so the test
+		// can await drain at the DO layer; the subscribe callback itself
+		// is sync (per the Coordinator API), so we record the promises
+		// in a side array.
+		const inFlight: Promise<void>[] = [];
 		const sub = coordinator.subscribe("hmr", (msg) => {
-			void transport.broadcastHmr("soak", msg);
+			inFlight.push(transport.broadcastHmr("soak", msg));
 		});
 
 		// Open one client. Receive every broadcast into an array.
@@ -50,17 +54,26 @@ describe("HMR soak", () => {
 		const N = 1000;
 		const start = Date.now();
 		// Issue all changes in parallel — Coordinator's `onFileChanged`
-		// handles the publish; transport.broadcastHmr is awaited inside the
-		// subscriber.
+		// publishes to subscribers; the broadcast call is started but its
+		// promise is captured in `inFlight` for proper await drain below.
 		const writes: Promise<void>[] = [];
 		for (let i = 0; i < N; i++) {
 			writes.push(coordinator.onFileChanged(`/src/pages/p-${i}.astro`, `h-${i}`));
 		}
 		await Promise.all(writes);
+		// Wait for every broadcast at the DO layer to actually complete
+		// (HibernatingHmrTransport handles transient DO invalidations
+		// internally via retry, so this awaits the full retry chain).
+		await Promise.all(inFlight);
 		const elapsed = Date.now() - start;
 
-		// Wait briefly for in-flight broadcasts to drain.
-		await new Promise((r) => setTimeout(r, 200));
+		// Now poll briefly for the WS delivery side — `socket.send` is
+		// in-process here but the message dispatch still rides the JS
+		// event loop. Bail as soon as we have all messages.
+		const deadline = Date.now() + 5_000;
+		while (received.length < N && Date.now() < deadline) {
+			await new Promise((r) => setTimeout(r, 25));
+		}
 
 		expect(received.length).toBeGreaterThanOrEqual(N);
 		expect(drops).toBe(0);

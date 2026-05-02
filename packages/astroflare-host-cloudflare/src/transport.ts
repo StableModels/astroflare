@@ -120,30 +120,67 @@ export class HibernatingHmrTransport implements Transport {
 	}
 
 	async acceptHmrSocket(_req: Request, ctx: HmrSocketContext): Promise<Response> {
-		const stub = this.#stub(ctx.workspaceId);
-		return stub.fetch(
-			`https://hmr-internal${PATH_UPGRADE}?workspaceId=${encodeURIComponent(ctx.workspaceId)}`,
-			{ headers: { upgrade: "websocket" } },
+		return this.#fetchWithRetry(ctx.workspaceId, () =>
+			this.#stub(ctx.workspaceId).fetch(
+				`https://hmr-internal${PATH_UPGRADE}?workspaceId=${encodeURIComponent(ctx.workspaceId)}`,
+				{ headers: { upgrade: "websocket" } },
+			),
 		);
 	}
 
 	async broadcastHmr(workspaceId: string, msg: HmrMessage): Promise<void> {
-		const stub = this.#stub(workspaceId);
-		await stub.fetch(`https://hmr-internal${PATH_BROADCAST}`, {
-			method: "POST",
-			headers: { "content-type": "application/json" },
-			body: JSON.stringify(msg),
-		});
+		const body = JSON.stringify(msg);
+		await this.#fetchWithRetry(workspaceId, () =>
+			this.#stub(workspaceId).fetch(`https://hmr-internal${PATH_BROADCAST}`, {
+				method: "POST",
+				headers: { "content-type": "application/json" },
+				body,
+			}),
+		);
 	}
 
 	/** Number of currently-attached sockets (test affordance). */
 	async size(workspaceId: string): Promise<number> {
-		const stub = this.#stub(workspaceId);
-		const r = await stub.fetch(`https://hmr-internal${PATH_SIZE}`);
+		const r = await this.#fetchWithRetry(workspaceId, () =>
+			this.#stub(workspaceId).fetch(`https://hmr-internal${PATH_SIZE}`),
+		);
 		return Number.parseInt(await r.text(), 10);
 	}
 
 	#stub(workspaceId: string): DurableObjectStub<HmrDurableObject> {
 		return this.#namespace.get(this.#namespace.idFromName(workspaceId));
 	}
+
+	/**
+	 * Workerd may invalidate a Durable Object mid-flight when the worker
+	 * code (or a watched dependency) changes — common during dev / test
+	 * cold-starts. The thrown error explicitly says
+	 * "Please retry the DurableObjectStub#fetch() call." We honor that
+	 * contract here so callers don't see transient drops.
+	 *
+	 * Bounded at a few attempts; if the DO genuinely can't be reached,
+	 * the original error surfaces to the caller.
+	 */
+	async #fetchWithRetry(_workspaceId: string, op: () => Promise<Response>): Promise<Response> {
+		const maxAttempts = 5;
+		let lastErr: unknown;
+		for (let attempt = 0; attempt < maxAttempts; attempt++) {
+			try {
+				return await op();
+			} catch (err) {
+				lastErr = err;
+				if (!isInvalidatedDoError(err)) throw err;
+				// On an invalidation, the next get() returns a fresh stub backed
+				// by the freshly-loaded worker module — no extra wait needed.
+			}
+		}
+		throw lastErr;
+	}
+}
+
+function isInvalidatedDoError(err: unknown): boolean {
+	if (err instanceof Error) {
+		return /invalidating this Durable Object|broken\.inputGateBroken/i.test(err.message);
+	}
+	return false;
 }
