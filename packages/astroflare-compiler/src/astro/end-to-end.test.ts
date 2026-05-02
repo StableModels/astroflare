@@ -136,11 +136,10 @@ describe("e2e: source .astro → compiled module → HTML", () => {
 // in `emitter.test.ts`.
 describe("e2e: slot routing through the runtime", () => {
 	it("renders default + named slots in a single component call", async () => {
-		const { $component, $render, $renderSlot } = await import(
-			"@astroflare/runtime/internal"
-		);
-		const Layout = $component(async (_props, $$slots) =>
-			$render`<header>${await $renderSlot($$slots, "title")}</header><main>${await $renderSlot($$slots, "default")}</main>`,
+		const { $component, $render, $renderSlot } = await import("@astroflare/runtime/internal");
+		const Layout = $component(
+			async (_props, $$slots) =>
+				$render`<header>${await $renderSlot($$slots, "title")}</header><main>${await $renderSlot($$slots, "default")}</main>`,
 		);
 		const result = await Layout(
 			{},
@@ -153,11 +152,10 @@ describe("e2e: slot routing through the runtime", () => {
 	});
 
 	it("uses fallback content when a slot is not provided", async () => {
-		const { $component, $render, $renderSlot } = await import(
-			"@astroflare/runtime/internal"
-		);
-		const Layout = $component(async (_props, $$slots) =>
-			$render`<aside>${await $renderSlot($$slots, "aside", () => $render`(empty)`)}</aside>`,
+		const { $component, $render, $renderSlot } = await import("@astroflare/runtime/internal");
+		const Layout = $component(
+			async (_props, $$slots) =>
+				$render`<aside>${await $renderSlot($$slots, "aside", () => $render`(empty)`)}</aside>`,
 		);
 		const result = await Layout({}, {});
 		expect(result.html).toBe("<aside>(empty)</aside>");

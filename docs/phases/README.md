@@ -7,4 +7,5 @@ next phase's planner.
 - [`phase-00-bootstrap.md`](./phase-00-bootstrap.md) — workspace, tooling, CI.
 - [`phase-01-interfaces-and-test-harness.md`](./phase-01-interfaces-and-test-harness.md) — five host interfaces + in-memory test harness + property tests.
 - [`phase-02-astro-compiler.md`](./phase-02-astro-compiler.md) — `.astro` parser + emitter + working runtime ABI + 106 new tests.
+- [`phase-02_5-workerd-test-pool.md`](./phase-02_5-workerd-test-pool.md) — runtime tests moved to workerd Layer B + architectural findings on Vite/Miniflare/Worker Loader.
 - (later phases land here as they complete)
