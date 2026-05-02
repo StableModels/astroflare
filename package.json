@@ -15,9 +15,9 @@
     "typecheck": "tsc -b",
     "lint": "biome check .",
     "format": "biome format --write .",
-    "test": "vitest run",
+    "test": "tsc -b && vitest run",
     "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "tsc -b && vitest run --coverage"
   },
   "devDependencies": {
     "@biomejs/biome": "1.9.4",

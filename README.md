@@ -16,9 +16,8 @@ Astroflare runs an Astro-shaped project (`src/pages/`, `.astro`/`.md`/`.mdx`,
 
 ## Status
 
-Phase 1 complete (interfaces + in-memory test harness). 75 tests across all 4
-test pools (Layer A node, Layer B workerd, Layer C Miniflare integration,
-Layer D differential — empty until compiler fixtures land in Phase 2).
+Phase 2 complete (`.astro` parser, emitter, working runtime ABI, end-to-end
+compile→render pipeline). 181 tests across all 4 test pools.
 
 See [`docs/phases/`](./docs/phases/) for phase-by-phase progress and retrospectives.
 

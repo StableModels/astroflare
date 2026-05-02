@@ -18,6 +18,8 @@
     "@astroflare/core": "workspace:*"
   },
   "devDependencies": {
+    "@astroflare/runtime": "workspace:*",
+    "@astroflare/test-utils": "workspace:*",
     "vitest": "^2.1.8"
   }
 }

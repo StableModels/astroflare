@@ -9,4 +9,6 @@
  * No Cloudflare imports; no native bindings; no Vite. Compilers run inside
  * Compile DWs at preview time and inside the Workflow at deploy time.
  */
+export * from "./astro/index.js";
+
 export const COMPILER_VERSION = "0.0.0";
