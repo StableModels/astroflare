@@ -24,7 +24,16 @@
  * streaming model (async iterables of HTML chunks) for large pages; the
  * compiler's emit shape doesn't change. Phase 8 wires real client-island
  * hydration; for now the placeholder marker just emits a comment.
+ *
+ * Each component invocation gets its own `Astro` global. Per-request fields
+ * (request, url, params, site) are shared across the whole render tree;
+ * `Astro.props` differs per component. We thread the per-request context
+ * through `AsyncLocalStorage` so `$renderComponent` can build a child
+ * `Astro` without callers having to pass it explicitly. `node:async_hooks`
+ * is available in Node 22+ and in workerd under `nodejs_compat` (which
+ * Astroflare requires).
  */
+import { AsyncLocalStorage } from "node:async_hooks";
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -154,7 +163,58 @@ export async function $renderComponent<P>(
 	if (typeof Component !== "function") {
 		throw new TypeError(`$renderComponent: expected a component, got ${typeof Component}`);
 	}
-	return Component(props, slots);
+	// Each component gets its own `Astro` (different `props`, shared request
+	// context). The wrapper-level `render()` establishes the context via
+	// `withRenderContext`; nested calls reach for it via the ALS.
+	const componentArg = Object.assign({ Astro: makeChildAstro(props) }, props);
+	return Component(componentArg as P, slots);
+}
+
+// ---------------------------------------------------------------------------
+// Per-request context propagation (used by render() and $renderComponent)
+// ---------------------------------------------------------------------------
+
+/** Subset of `RenderContext` that's invariant across the render tree. */
+export interface SharedRenderContext {
+	request: Request;
+	url: URL;
+	params: Record<string, string>;
+	site?: string;
+}
+
+const renderContextStore = new AsyncLocalStorage<SharedRenderContext>();
+
+/** Read the current per-request context (set by `withRenderContext`). */
+export function getRenderContext(): SharedRenderContext | undefined {
+	return renderContextStore.getStore();
+}
+
+/** Run `fn` with the supplied per-request context bound. */
+export function withRenderContext<R>(ctx: SharedRenderContext, fn: () => R): R {
+	return renderContextStore.run(ctx, fn);
+}
+
+interface AstroLike<P> {
+	props: P;
+	params: Record<string, string>;
+	request: Request | undefined;
+	url: URL | undefined;
+	site: string | undefined;
+	redirect: (to: string, status?: 301 | 302 | 303 | 307 | 308) => Response;
+}
+
+function makeChildAstro<P>(props: P): AstroLike<P> {
+	const ctx = renderContextStore.getStore();
+	return {
+		props,
+		params: ctx?.params ?? {},
+		request: ctx?.request,
+		url: ctx?.url,
+		site: ctx?.site,
+		redirect(to, status = 302) {
+			return new Response(null, { status, headers: { location: to } });
+		},
+	};
 }
 
 export async function $renderSlot(

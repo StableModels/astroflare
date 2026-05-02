@@ -16,9 +16,10 @@ Astroflare runs an Astro-shaped project (`src/pages/`, `.astro`/`.md`/`.mdx`,
 
 ## Status
 
-Phase 3 complete (preview server: request → file-based route → compile via
-Executor.runCached → render → HTML, with the `Astro.*` API surface
-populated for Tier 0). 223 tests across 5 test pools.
+Phase 4 substantially complete (module graph + per-module compile cache +
+closure walker + inline bundler — multi-file `.astro` composition end-to-end).
+The `/_aflare/mod` browser endpoint deferred to Phase 5 alongside the HMR
+client that will be its first consumer. 268 tests across 5 test pools.
 
 See [`docs/phases/`](./docs/phases/) for phase-by-phase progress and retrospectives.
 

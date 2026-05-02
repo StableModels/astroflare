@@ -1,31 +1,34 @@
-import { COMPILER_VERSION, compileAstro } from "@astroflare/compiler";
 /**
  * Preview server — the dev-loop's request/response shape.
  *
- * Phase 3 minimum (per §7.3 of the brief): take a request, look up route,
- * compile via `Executor.runCached(contentHash, ...)`, render, return HTML.
- * No HMR, no module URL rewriting, no incremental graph — those are Phase 4+.
+ * Phase 3 wired single-file routes; Phase 4 walks the import closure so a
+ * route that imports other `.astro` modules renders correctly.
  *
  * Per-request flow:
  *   1. discover routes lazily on first request
  *   2. match URL pathname → route + params
- *   3. read source bytes from `host.storage`
- *   4. content-hash the source (mixed with the compiler version, per §9.4)
- *   5. `host.executor.runCached(hash, () => bundle(source), input)`:
- *        - factory builds a TaskBundle with the compiled `.astro` and a
- *          framework-side wrapper that calls `render()` for each invocation
- *        - input carries the per-request context (params, request, url)
- *        - returns the rendered HTML string
- *   6. wrap in a `Response` and return
+ *   3. `ModuleGraph.closure(routeFilePath)` — compile route + every transitive
+ *      `.astro` dep (each compile cache-checked via Storage.cacheRead/Write)
+ *   4. build TaskBundle:
+ *        - bundle path mirrors workspace path with `.astro → .js`
+ *        - imports between modules rewritten `.astro → .js` to match
+ *        - root wrapper imports the route + the runtime, default-exports
+ *          `(input) => render(Component, input)`
+ *   5. `host.executor.runCached(bundleKey, factory, input)` — bundleKey is
+ *      the closure's aggregate cache id, so a dep change invalidates the
+ *      cached isolate even when the route file itself didn't change
+ *   6. response: HTML wrapped in `Response`, content-type text/html
  *
- * Phase 3 carve-outs (documented in the retro):
- *   - User imports inside `.astro` frontmatter (`import Layout from "./Foo.astro"`)
- *     are not yet resolved. Single-file pages only. URL rewriting lands in
- *     Phase 4.
- *   - The `Request` is passed by reference into the executor; that works for
- *     `InProcessExecutor` (no serialisation) but won't survive a real Worker
- *     Loader spawn. Phase 4+ handles request-shape marshalling.
+ * Phase 4 carve-outs (documented in the retro):
+ *   - `Request` is still passed by reference into the executor; that works
+ *     for `InProcessExecutor` (no serialisation) but won't survive a real
+ *     Worker Loader spawn. Phase 5+ host work.
+ *   - Reactive route discovery (Coordinator.onFileChanged → invalidate) is
+ *     not wired yet. Routes are still cached forever after first request.
+ *   - The `/_aflare/mod` endpoint (browser-fetchable compiled modules) is
+ *     not wired here. Phase 4e or Phase 5 layer.
  */
+import { COMPILER_VERSION, compileAstro } from "@astroflare/compiler";
 import {
 	type AstroflareConfig,
 	type Host,
@@ -33,6 +36,8 @@ import {
 	type TaskBundle,
 	contentIdWithConfig,
 } from "@astroflare/core";
+import { inlineBundle } from "./bundle.js";
+import { ModuleGraph, type ModuleInfo } from "./module-graph.js";
 import { Router } from "./router.js";
 
 export interface PreviewServerOptions {
@@ -40,10 +45,9 @@ export interface PreviewServerOptions {
 	host: Host;
 	/**
 	 * Module specifier the compiled `.astro` modules import the runtime from.
-	 * Default `"@astroflare/runtime"` (which re-exports the internal ABI).
-	 * Tests typically pass an absolute `file://` URL pointing at
-	 * `astroflare-runtime/dist/index.js` so the InProcessExecutor's tmp-dir
-	 * imports resolve.
+	 * Default `"@astroflare/runtime"`. Tests typically pass an absolute
+	 * `file://` URL pointing at `astroflare-runtime/dist/index.js` so the
+	 * InProcessExecutor's tmp-dir imports resolve.
 	 */
 	runtimeImport?: string;
 }
@@ -53,10 +57,12 @@ export interface PreviewServer {
 }
 
 const DEFAULT_RUNTIME_IMPORT = "@astroflare/runtime";
+const WRAPPER_NAME = "main.js";
 
 export function createPreviewServer(opts: PreviewServerOptions): PreviewServer {
 	const router = new Router();
 	const runtimeImport = opts.runtimeImport ?? DEFAULT_RUNTIME_IMPORT;
+	const moduleGraph = new ModuleGraph(opts.host, { runtimeImport });
 	let routesReady: Promise<void> | null = null;
 
 	async function ensureRoutes(): Promise<void> {
@@ -81,18 +87,11 @@ export function createPreviewServer(opts: PreviewServerOptions): PreviewServer {
 					});
 				}
 
-				const sourceBytes = await opts.host.storage.read(match.route.filePath);
-				const source = new TextDecoder().decode(sourceBytes);
-
-				// §9.4: content + transform-config descriptor → cache id.
-				const cacheId = await contentIdWithConfig(source, {
-					compiler: COMPILER_VERSION,
-					runtimeImport,
-				});
+				const closure = await moduleGraph.closure(match.route.filePath);
 
 				const html = await opts.host.executor.runCached<string>(
-					cacheId,
-					() => buildRouteBundle(source, match.route.filePath, runtimeImport),
+					closure.bundleKey,
+					() => buildBundle(closure.modules, runtimeImport),
 					{
 						props: {},
 						params: match.params,
@@ -105,7 +104,8 @@ export function createPreviewServer(opts: PreviewServerOptions): PreviewServer {
 				opts.host.logger.event("preview.render", {
 					pathname: url.pathname,
 					filePath: match.route.filePath,
-					cacheId,
+					bundleKey: closure.bundleKey,
+					moduleCount: closure.modules.length,
 					ms: opts.host.clock.now() - start,
 				});
 
@@ -128,36 +128,24 @@ export function createPreviewServer(opts: PreviewServerOptions): PreviewServer {
 }
 
 /**
- * Build the per-route TaskBundle. Two modules:
- *   - `route.js`: the compiled `.astro` (default-exporting an `$component`).
- *   - `main.js`: a tiny wrapper that imports the route + the runtime's `render()`
- *     and default-exports `(input) => render(Component, input)`.
+ * Build the per-route TaskBundle from a compiled closure.
  *
- * The bundle's `mainModule` is `main.js`; `Executor.runCached(id, factory, input)`
- * invokes its default export with the per-request input every call.
+ * The bundle is a single ESM file produced by `inlineBundle` (see `bundle.ts`).
+ * Each compiled module is wrapped in an IIFE; `.astro` imports between them
+ * are rewritten to references to those IIFEs' return values; the runtime is
+ * the only outer `import`. This shape avoids the vite-node tmp-dir
+ * intercept that bites multi-file bundles in the test pool — see Phase 2.5
+ * retrospective and `bundle.ts` for the full reasoning.
  */
-function buildRouteBundle(source: string, filePath: string, runtimeImport: string): TaskBundle {
-	const { code, errors } = compileAstro(source, { runtimeImport, filename: filePath });
-	if (errors.length > 0) {
-		const first = errors[0];
-		if (first) {
-			throw new Error(
-				`compile error in ${filePath} at ${first.start.line}:${first.start.column}: ${first.message}`,
-			);
-		}
-	}
-
-	const wrapper = [
-		'import Component from "./route.js";',
-		`import { render } from ${JSON.stringify(runtimeImport)};`,
-		"export default async (context) => render(Component, context);",
-	].join("\n");
-
+function buildBundle(modules: readonly ModuleInfo[], runtimeImport: string): TaskBundle {
+	if (modules.length === 0) throw new Error("buildBundle: empty closure");
+	const code = inlineBundle(modules, runtimeImport);
 	return {
-		mainModule: "main.js",
-		modules: {
-			"main.js": wrapper,
-			"route.js": code,
-		},
+		mainModule: WRAPPER_NAME,
+		modules: { [WRAPPER_NAME]: code },
 	};
 }
+
+// Tiny re-export so callers don't have to dig — and we keep the symbols used
+// (helps with the lint check and gives downstream packages a clean import).
+export { compileAstro, COMPILER_VERSION, contentIdWithConfig };

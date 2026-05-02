@@ -154,8 +154,8 @@ describe("preview server: caching", () => {
 		// underlying compile factory should only have produced one TaskBundle.
 		const renders = host.logger.byName("preview.render");
 		expect(renders).toHaveLength(2);
-		// Both renders share the same cacheId.
-		expect(renders[0]?.fields.cacheId).toBe(renders[1]?.fields.cacheId);
+		// Both renders share the same bundleKey.
+		expect(renders[0]?.fields.bundleKey).toBe(renders[1]?.fields.bundleKey);
 	});
 
 	it("uses different cache ids for different routes", async () => {
@@ -166,7 +166,60 @@ describe("preview server: caching", () => {
 		await server.fetch(new Request("https://app/"));
 		await server.fetch(new Request("https://app/about"));
 		const renders = host.logger.byName("preview.render");
-		expect(renders[0]?.fields.cacheId).not.toBe(renders[1]?.fields.cacheId);
+		expect(renders[0]?.fields.bundleKey).not.toBe(renders[1]?.fields.bundleKey);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Multi-module composition (Phase 4)
+// ---------------------------------------------------------------------------
+
+describe("preview server: multi-module composition", () => {
+	it("renders a page that imports a layout and a child component", async () => {
+		const { server } = await fixture({
+			"/src/pages/index.astro":
+				"---\n" +
+				'import Layout from "../components/Layout.astro";\n' +
+				'import Button from "../components/Button.astro";\n' +
+				"---\n" +
+				'<Layout><Button label="Click" /></Layout>',
+			"/src/components/Layout.astro": "<header><slot /></header>",
+			"/src/components/Button.astro":
+				"---\nconst { label } = Astro.props;\n---\n<button>{label}</button>",
+		});
+		const r = await server.fetch(new Request("https://app/"));
+		expect(r.status).toBe(200);
+		expect(await r.text()).toBe("<header><button>Click</button></header>");
+	});
+
+	it("supports diamond imports (two parents share one child)", async () => {
+		const { server } = await fixture({
+			"/src/pages/index.astro":
+				"---\n" +
+				'import A from "../components/A.astro";\n' +
+				'import B from "../components/B.astro";\n' +
+				"---\n" +
+				"<A/><B/>",
+			"/src/components/A.astro": '---\nimport S from "./Shared.astro";\n---\n<S/>',
+			"/src/components/B.astro": '---\nimport S from "./Shared.astro";\n---\n<S/>',
+			"/src/components/Shared.astro": "<i>shared</i>",
+		});
+		const r = await server.fetch(new Request("https://app/"));
+		expect(await r.text()).toBe("<i>shared</i><i>shared</i>");
+	});
+
+	it("invalidates the bundle cache when a dep's source changes", async () => {
+		const { host, server } = await fixture({
+			"/src/pages/index.astro": '---\nimport L from "../components/L.astro";\n---\n<L/>',
+			"/src/components/L.astro": "<p>v1</p>",
+		});
+		const r1 = await server.fetch(new Request("https://app/"));
+		expect(await r1.text()).toBe("<p>v1</p>");
+
+		await host.storage.write("/src/components/L.astro", new TextEncoder().encode("<p>v2</p>"));
+
+		const r2 = await server.fetch(new Request("https://app/"));
+		expect(await r2.text()).toBe("<p>v2</p>");
 	});
 });
 

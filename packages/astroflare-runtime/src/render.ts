@@ -15,7 +15,13 @@
  * surface.
  */
 import type { AstroGlobal, RenderContext } from "@astroflare/core";
-import { type AstroComponent, type RawHtml, type SlotMap, renderToString } from "./internal.js";
+import {
+	type AstroComponent,
+	type RawHtml,
+	type SlotMap,
+	renderToString,
+	withRenderContext,
+} from "./internal.js";
 
 export interface RenderOptions {
 	/** Slots to pass into the component (default: empty). */
@@ -34,9 +40,24 @@ export async function render<P>(
 	context: RenderContext<P>,
 	options: RenderOptions = {},
 ): Promise<string> {
-	const astro = createAstroGlobal(context);
-	const result: RawHtml = await component({ Astro: astro, ...context.props }, options.slots ?? {});
-	return renderToString(result);
+	// Establish the per-request context so nested $renderComponent calls can
+	// build child Astros that share request/url/params with the route.
+	return withRenderContext(
+		{
+			request: context.request,
+			url: context.url,
+			params: context.params,
+			site: context.site,
+		},
+		async () => {
+			const astro = createAstroGlobal(context);
+			const result: RawHtml = await component(
+				{ Astro: astro, ...context.props },
+				options.slots ?? {},
+			);
+			return renderToString(result);
+		},
+	);
 }
 
 /**
