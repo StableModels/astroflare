@@ -24,8 +24,13 @@ export default defineWorkersProject({
 				singleWorker: true,
 				main: "./harness.ts",
 				miniflare: {
-					compatibilityDate: "2024-12-01",
+					compatibilityDate: "2025-09-01",
 					compatibilityFlags: ["nodejs_compat"],
+					// Worker Loader binding (Phase 2.5b unblock). Configured here
+					// rather than in wrangler.toml because vitest-pool-workers' TOML
+					// parser predates `worker_loaders` and ignores the field; the
+					// programmatic Miniflare option is wired through directly.
+					workerLoaders: { LOADER: {} },
 				},
 			},
 		},

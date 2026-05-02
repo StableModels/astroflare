@@ -1,4 +1,12 @@
 name = "astroflare-workerd-tests"
 main = "harness.ts"
-compatibility_date = "2024-12-01"
+# Miniflare v4 needs a recent compat date for the worker_loader binding
+# (Cloudflare's own codemode tests use late-2025 dates).
+compatibility_date = "2025-09-01"
 compatibility_flags = ["nodejs_compat"]
+
+# Worker Loader binding — lets tests dynamically spawn child Workers via
+# `env.LOADER.load(code)` / `env.LOADER.get(name, () => code)`.
+# This is the foundation for the WorkerdExecutor (Phase 2.5c).
+[[worker_loaders]]
+binding = "LOADER"
