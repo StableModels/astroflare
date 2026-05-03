@@ -40,6 +40,8 @@ import RUNTIME_ENV_SRC from "../../packages/astroflare-runtime/dist/env.js?raw";
 import RUNTIME_HMR_SRC from "../../packages/astroflare-runtime/dist/hmr-client.js?raw";
 // @ts-expect-error — Phase 16: runtime/index.js re-exports hydration-client.
 import RUNTIME_HYDRATION_SRC from "../../packages/astroflare-runtime/dist/hydration-client.js?raw";
+// @ts-expect-error — Phase 18: runtime/index.js re-exports i18n.
+import RUNTIME_I18N_SRC from "../../packages/astroflare-runtime/dist/i18n.js?raw";
 /* eslint-disable @typescript-eslint/ban-ts-comment */
 // @ts-expect-error
 import RUNTIME_INDEX_SRC from "../../packages/astroflare-runtime/dist/index.js?raw";
@@ -71,6 +73,7 @@ const RUNTIME_BUNDLE_MODULES: Record<string, string> = {
 	"runtime/prefetch-client.js": RUNTIME_PREFETCH_SRC as string,
 	"runtime/rss.js": RUNTIME_RSS_SRC as string,
 	"runtime/sitemap.js": RUNTIME_SITEMAP_SRC as string,
+	"runtime/i18n.js": RUNTIME_I18N_SRC as string,
 };
 
 const enc = (s: string) => new TextEncoder().encode(s);

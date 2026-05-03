@@ -53,6 +53,7 @@ import {
 	HYDRATION_CLIENT_SOURCE,
 	PREFETCH_CLIENT_SOURCE,
 	VIEW_TRANSITIONS_CLIENT_SOURCE,
+	deriveLocale,
 } from "@astroflare/runtime";
 import { inlineBundle } from "./bundle.js";
 import { type EndpointContext, runEndpoint } from "./endpoint.js";
@@ -261,6 +262,9 @@ export function createPreviewServer(opts: PreviewServerOptions): PreviewServer {
 							url,
 							params: match.params,
 							site: opts.config.site,
+							currentLocale: opts.config.i18n
+								? deriveLocale(url.pathname, opts.config.i18n)
+								: undefined,
 						};
 						return runEndpoint({
 							host: opts.host,
@@ -278,6 +282,9 @@ export function createPreviewServer(opts: PreviewServerOptions): PreviewServer {
 						url,
 						site: opts.config.site,
 						locals: mwLocals ?? {},
+						currentLocale: opts.config.i18n
+							? deriveLocale(url.pathname, opts.config.i18n)
+							: undefined,
 					};
 					const result = await opts.host.executor.runCached<RenderResult>(
 						closure.bundleKey,

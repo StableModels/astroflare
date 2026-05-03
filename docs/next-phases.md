@@ -234,11 +234,22 @@ alternative; `<a data-aflare-reload>` opt-out for view transitions;
 `tap` prefetch strategy; custom directive registry. Picked up if
 there's demand.
 
-### Phase 18 — i18n routing
+### Phase 18 — i18n routing ✓
 
-`[lang]/...` route segments, locale-aware route rewriting, `Astro.currentLocale`,
-`getRelativeLocaleUrl`. Belongs late because it touches routing (which
-is otherwise stable) and the deploy planner (variant explosion).
+**Done.** Retro: [`docs/phases/phase-18-i18n.md`](./phases/phase-18-i18n.md).
+15 new tests; 643 total. `AstroflareConfig.i18n` config schema
+(locales / defaultLocale / routing strategy);
+`deriveLocale(pathname, config)` + `getRelativeLocaleUrl(locale,
+path, config)` runtime helpers; `Astro.currentLocale` threaded
+through `SharedRenderContext`, `RenderContext`, `AstroGlobal`, and
+`EndpointContext`. No router change needed — `[lang]` segments are
+already generic dynamic params from Phase 3.
+
+**Defer:** locale-aware route fallback (serve `/fr/missing` from
+`/missing.astro` when localised copy is absent);
+`Astro.preferredLocale` from `Accept-Language`; the rest of Astro's
+i18n helper surface (`getAbsoluteLocaleUrl`, `getLocaleByPath`,
+etc.); variant pre-expansion in the deploy planner.
 
 ### Phase 19 — Quality gates
 

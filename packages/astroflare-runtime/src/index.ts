@@ -49,6 +49,10 @@ export {
 	type SitemapInput,
 	type SitemapUrlEntry,
 } from "./sitemap.js";
+// Phase 18: i18n routing helpers. `deriveLocale` is what the router
+// uses to populate `Astro.currentLocale`; `getRelativeLocaleUrl` is
+// the user-facing link helper.
+export { deriveLocale, getRelativeLocaleUrl } from "./i18n.js";
 // JSX runtime — re-exported so a `runtimeImport` URL pointing at this
 // entrypoint can supply `jsx`, `jsxs`, `jsxDEV`, and `Fragment` from a
 // single source. The MDX compiler post-processes its output to alias

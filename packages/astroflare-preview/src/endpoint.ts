@@ -30,6 +30,8 @@ export interface EndpointContext {
 	url: URL;
 	params: Record<string, string>;
 	site?: string;
+	/** Phase 18: resolved locale when an `i18n` config is active. */
+	currentLocale?: string;
 }
 
 export interface EndpointResult {

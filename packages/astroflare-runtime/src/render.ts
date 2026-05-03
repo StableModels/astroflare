@@ -54,6 +54,7 @@ export async function render<P>(
 			site: context.site,
 			cookies,
 			locals,
+			currentLocale: context.currentLocale,
 		},
 		async () => {
 			try {
@@ -115,5 +116,6 @@ export function createAstroGlobal<P>(
 		cookies: parts.cookies,
 		locals: parts.locals,
 		slots: makeAstroSlots(parts.slots),
+		currentLocale: context.currentLocale,
 	};
 }

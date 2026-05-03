@@ -176,3 +176,27 @@ describe("render() — Astro.redirect propagation", () => {
 		expect(result.headers["content-type"]).toBe("application/json");
 	});
 });
+
+describe("render() — Astro.currentLocale (Phase 18)", () => {
+	it("propagates currentLocale from RenderContext to the page", async () => {
+		// biome-ignore lint/suspicious/noExplicitAny: ad-hoc test prop shape
+		const c = $component(async (props: any) => {
+			return $render`locale=${String(props.Astro.currentLocale)}`;
+		}) as AstroComponent<AstroProp>;
+		const result = await render(c as never, ctx({ currentLocale: "fr" }));
+		expect(result.kind).toBe("html");
+		if (result.kind !== "html") return;
+		expect(result.html).toBe("locale=fr");
+	});
+
+	it("currentLocale is undefined when no i18n config is active", async () => {
+		// biome-ignore lint/suspicious/noExplicitAny: ad-hoc test prop shape
+		const c = $component(async (props: any) => {
+			return $render`locale=${String(props.Astro.currentLocale)}`;
+		}) as AstroComponent<AstroProp>;
+		const result = await render(c as never, ctx());
+		expect(result.kind).toBe("html");
+		if (result.kind !== "html") return;
+		expect(result.html).toBe("locale=undefined");
+	});
+});

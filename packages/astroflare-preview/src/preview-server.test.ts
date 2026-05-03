@@ -16,6 +16,7 @@
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import type { AstroflareConfig } from "@astroflare/core";
 import { type TestHost, createTestHost } from "@astroflare/test-utils";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { type PreviewServer, createPreviewServer } from "./preview-server.js";
@@ -31,11 +32,14 @@ interface Fixture {
 	server: PreviewServer;
 }
 
-async function makeFixture(files: Record<string, string>): Promise<Fixture> {
+async function makeFixture(
+	files: Record<string, string>,
+	configOverrides: Partial<AstroflareConfig> = {},
+): Promise<Fixture> {
 	const host = createTestHost();
 	for (const [p, body] of Object.entries(files)) await host.storage.write(p, enc(body));
 	const server = createPreviewServer({
-		config: { site: "https://example.com" },
+		config: { site: "https://example.com", ...configOverrides },
 		host,
 		runtimeImport: RUNTIME_URL,
 	});
@@ -54,8 +58,11 @@ afterAll(async () => {
 	await Promise.all(fixtureCleanups.map((h) => h.dispose()));
 });
 
-async function fixture(files: Record<string, string>): Promise<Fixture> {
-	const f = await makeFixture(files);
+async function fixture(
+	files: Record<string, string>,
+	configOverrides: Partial<AstroflareConfig> = {},
+): Promise<Fixture> {
+	const f = await makeFixture(files, configOverrides);
 	fixtureCleanups.push(f.host);
 	return f;
 }
@@ -429,6 +436,46 @@ describe("preview server: hydration + islands", () => {
 		const r = await server.fetch(new Request("https://app/plain"));
 		const body = await r.text();
 		expect(body).not.toContain("/_aflare/hydration.js");
+	});
+});
+
+// ---------------------------------------------------------------------------
+// i18n routing (Phase 18)
+// ---------------------------------------------------------------------------
+
+describe("preview server: i18n", () => {
+	it("populates Astro.currentLocale from a recognised URL prefix", async () => {
+		const { server } = await fixture(
+			{
+				"/src/pages/[lang]/about.astro":
+					"---\nconst loc = Astro.currentLocale;\n---\n<p>locale={loc}</p>",
+			},
+			{ i18n: { locales: ["en", "fr"], defaultLocale: "en" } },
+		);
+		const r = await server.fetch(new Request("https://example.com/fr/about"));
+		expect(r.status).toBe(200);
+		expect(await bodyWithoutHmr(r)).toBe("<p>locale=fr</p>");
+	});
+
+	it("falls back to defaultLocale when the URL has no locale prefix", async () => {
+		const { server } = await fixture(
+			{
+				"/src/pages/index.astro": "---\nconst loc = Astro.currentLocale;\n---\n<p>locale={loc}</p>",
+			},
+			{ i18n: { locales: ["en", "fr"], defaultLocale: "en" } },
+		);
+		const r = await server.fetch(new Request("https://example.com/"));
+		expect(r.status).toBe(200);
+		expect(await bodyWithoutHmr(r)).toBe("<p>locale=en</p>");
+	});
+
+	it("currentLocale is undefined when no i18n config is set", async () => {
+		const { server } = await fixture({
+			"/src/pages/index.astro":
+				"---\nconst loc = Astro.currentLocale;\n---\n<p>locale={String(loc)}</p>",
+		});
+		const r = await server.fetch(new Request("https://example.com/"));
+		expect(await bodyWithoutHmr(r)).toBe("<p>locale=undefined</p>");
 	});
 });
 

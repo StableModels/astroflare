@@ -386,6 +386,11 @@ export interface AstroGlobal<P = Record<string, unknown>, L = Record<string, unk
 	locals: L;
 	/** Imperative slot rendering API (frontmatter-side). */
 	slots: AstroSlots;
+	/**
+	 * Locale resolved for this request from the project's i18n config
+	 * (Phase 18). `undefined` when no `i18n` config is set.
+	 */
+	currentLocale?: string;
 }
 
 /**
@@ -447,6 +452,11 @@ export interface RenderContext<P = Record<string, unknown>, L = Record<string, u
 	site?: string;
 	/** Optional locals bag (set by middleware, read by pages). Defaults to `{}`. */
 	locals?: L;
+	/**
+	 * Resolved request locale (Phase 18). Set by the router when an
+	 * `i18n` config is present; surfaced as `Astro.currentLocale`.
+	 */
+	currentLocale?: string;
 }
 
 /**
@@ -497,9 +507,43 @@ export interface AstroflareConfig {
 	 * configuration; runtime secrets land in Phase 15's `EnvService`.
 	 */
 	env?: Record<string, unknown>;
+	/**
+	 * Internationalisation routing (Phase 18). Optional; when present,
+	 * the router resolves `Astro.currentLocale` from the URL prefix and
+	 * `getRelativeLocaleUrl` produces locale-prefixed links.
+	 */
+	i18n?: I18nConfig;
 	/** Vite is forbidden (§10) — kept here only so we can throw a clear error
 	 *  if someone copies an Astro config that includes it. */
 	vite?: never;
+}
+
+/**
+ * Astroflare i18n configuration (Phase 18). Astro-shaped subset:
+ * `locales` is the supported set, `defaultLocale` is the fallback when
+ * the URL has no recognised prefix, and `routing` controls whether the
+ * default locale is rendered at the root path or with its own prefix.
+ *
+ * Example:
+ * ```ts
+ * defineConfig({
+ *   i18n: {
+ *     locales: ["en", "fr", "de"],
+ *     defaultLocale: "en",
+ *     routing: "pathname-prefix-other", // /, /fr/, /de/
+ *   },
+ * });
+ * ```
+ *
+ * `prefix-default` adds the default locale to the URL too (`/en/`,
+ * `/fr/`, `/de/`); `pathname-prefix-other` (Astro's default) keeps the
+ * default locale at the root.
+ */
+export interface I18nConfig {
+	locales: readonly string[];
+	defaultLocale: string;
+	/** Default: `"pathname-prefix-other"`. */
+	routing?: "prefix-default" | "pathname-prefix-other";
 }
 
 /**

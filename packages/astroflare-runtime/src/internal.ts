@@ -209,6 +209,12 @@ export interface SharedRenderContext {
 	site?: string;
 	cookies?: AstroCookies;
 	locals?: Record<string, unknown>;
+	/**
+	 * The locale the request resolves to under the project's `I18nConfig`
+	 * (Phase 18). Surfaced as `Astro.currentLocale`. `undefined` when no
+	 * `i18n` config is set.
+	 */
+	currentLocale?: string;
 }
 
 const renderContextStore = new AsyncLocalStorage<SharedRenderContext>();
@@ -233,6 +239,8 @@ interface AstroLike<P> {
 	cookies: AstroCookies;
 	locals: Record<string, unknown>;
 	slots: AstroSlots;
+	/** Phase 18: the resolved locale, or `undefined` when no i18n config. */
+	currentLocale: string | undefined;
 }
 
 function makeChildAstro<P>(props: P, slots: SlotMap): AstroLike<P> {
@@ -249,6 +257,7 @@ function makeChildAstro<P>(props: P, slots: SlotMap): AstroLike<P> {
 		cookies: ctx?.cookies ?? noopCookies(),
 		locals: ctx?.locals ?? {},
 		slots: makeAstroSlots(slots),
+		currentLocale: ctx?.currentLocale,
 	};
 }
 
