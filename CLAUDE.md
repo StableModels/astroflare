@@ -90,14 +90,12 @@ Cloudflare's isolate primitives. Two lifecycles:
   [`tests/e2e/fixtures/preview-host-ref/`](tests/e2e/fixtures/preview-host-ref/).
 - **Mode B — Production deploy.** Compile + render runs locally
   (Node), output lands in R2 as a versioned, atomically-flippable
-  *snapshot*. New shape (Phase 26b, additive): host owns its own
-  worker that instantiates `R2Snapshots({ bucket, prefix? })` and
-  mounts `createSnapshotHandler({ snapshots })`. The `prefix`
-  parameter supports multi-env (dev/staging/prod buckets) +
-  multi-site (`sites/<id>/`) partitioning. Reference fixture:
+  *snapshot*. Host owns its own worker that instantiates
+  `R2Snapshots({ bucket, prefix? })` and mounts
+  `createSnapshotHandler({ snapshots })`. The `prefix` parameter
+  supports multi-env (dev/staging/prod buckets) + multi-site
+  (`sites/<id>/`) partitioning. Reference fixture:
   [`tests/e2e/fixtures/deploy-host-ref/`](tests/e2e/fixtures/deploy-host-ref/).
-  Legacy `stack-worker.ts` + `R2Storage` + `createDeployServer`
-  still in tree until the e2e harness is rewired.
 
 Founding spec: [`docs/cloudflare-validation-plan.md`](docs/cloudflare-validation-plan.md).
 Dual-mode plan: [`docs/dual-mode-validation-plan.md`](docs/dual-mode-validation-plan.md).
@@ -111,15 +109,22 @@ Run everything: `pnpm test`. Run one project: `pnpm vitest run --project <name>`
 | Layer | Where | Pool | Purpose |
 | --- | --- | --- | --- |
 | A — Node | `packages/*/src/*.test.ts` | node | Pure framework logic. Fast (~ms). |
-| B — workerd | `tests/workerd/` | workerd via `@cloudflare/vitest-pool-workers` | Code that depends on the workerd runtime (Hibernating WS, sqlite DOs) but doesn't need the full framework wired. |
-| C — integration | `tests/integration/` | Miniflare via `@cloudflare/vitest-pool-workers` | Full project-worker assembly under Miniflare. R2 + DO + Worker Loader all real (mock-free). Pre-seeds R2 via `env.FILES.put`. |
-| D — e2e | `tests/e2e/` | node | **Real Cloudflare.** Provisions one stack per run via the `af` CLI library, deploys fixtures, asserts live behaviour. Skips when `CLOUDFLARE_*` env vars are absent. Mode A e2e coverage is deferred until the reference host fixture (`tests/e2e/fixtures/preview-host-ref/`) gets bundling + globalSetup wiring. |
+| B — workerd | `tests/workerd/` + per-package `host-cloudflare`, `site-workspace` | workerd via `@cloudflare/vitest-pool-workers` | Code that depends on the workerd runtime. |
+| D — e2e | `tests/e2e/` | node | **Real Cloudflare.** Provisions both modes per run via the `af` CLI library, deploys fixtures, asserts live behaviour. Skips when `CLOUDFLARE_*` env vars are absent. |
 
-E2e details: globalSetup provisions a Mode B stack, runs
-`deployStaticBundle` for the discovered fixtures, then writes
-`tests/e2e/.state/<sha7>/runtime.json` for spec workers to read.
-Teardown destroys the stack. Stale state from a credential-less run
-is wiped automatically.
+The Phase-15-era Layer C (Miniflare integration project) was retired
+with Phase 26b's hard-cut — those tests exercised the deleted DOs.
+Equivalent end-to-end coverage runs in Layer D against the reference
+fixtures.
+
+E2e details: globalSetup provisions a Mode B stack (deploy-host-ref
+bundle), runs `deployStaticBundle` for fixtures under
+`tests/e2e/fixtures/<name>/src/pages/`, then best-effort provisions
+the Mode A reference host (preview-host-ref) and uploads
+`files/index.astro` via its `/_aflare/site/file` endpoint. State
+lands at `tests/e2e/.state/<sha7>/runtime.json` for spec workers to
+read. Teardown destroys both. Stale state from a credential-less
+run is wiped automatically.
 
 ## Cloudflare CLI (`af`)
 
@@ -130,27 +135,30 @@ and automated tests share a single registry under
 
 Run from source (no build step): `pnpm exec tsx packages/astroflare-cli/src/cli.ts <verb>`.
 
-Stack worker bundle: `node scripts/build-stack-worker.mjs` →
-`packages/astroflare-host-cloudflare/dist/stack-worker.bundle.js`
-(Mode B). Mode A's preview-worker.ts and its build script are gone
-(Phase 26) — preview is host-driven.
+Reference host bundles (built per-fixture, not framework-shipped):
+- Mode B: `node tests/e2e/fixtures/deploy-host-ref/build.mjs` →
+  `dist/worker.bundle.js`. `provisionStack` deploys this.
+- Mode A: `node tests/e2e/fixtures/preview-host-ref/build.mjs` →
+  `dist/worker.bundle.js`. `provisionPreviewHost` deploys this.
 
 | Verb | Purpose |
 | --- | --- |
-| `provision-stack <n>` / `destroy-stack <n>` | Mode B stack: worker + R2 + DOs + DEPLOY_TOKEN. |
-| `deploy-static <fixture-dir> --stack <n>` | Compile + render fixture locally, ship HTML to R2, flip `/site/current`. |
+| `provision-stack <n>` / `destroy-stack <n>` | Mode B stack: deploy-host-ref worker + R2 + DEPLOY_TOKEN. |
+| `deploy-static <fixture-dir> --stack <n>` | Compile + render fixture locally, ship HTML to R2 via the snapshot layout, flip current. |
 | `init / deploy / status / rollback` | Project lifecycle (Mode B end-user surface). |
-| `list / inspect / health` | See *all* managed hosts (legacy fixtures + stacks) — Phase 26c. |
+| `list / inspect / health` | See all managed hosts (fixtures + stacks). |
 | `gc / destroy / destroy-all` | Account-wide cleanup. |
-| `doctor` | Environment sanity check (creds, plan, state) — JSON report (Phase 26c). |
-| `snapshot list <stack> [--prefix <p>]` | Enumerate snapshot hashes; marks the active one (Phase 26c). |
-| `snapshot current <stack> [--prefix <p>]` | Active snapshot hash (Phase 26c). |
-| `snapshot cat <stack> <hash> <route>` | Read raw bytes of one snapshot entry (Phase 26c). |
+| `doctor` | Environment sanity check (creds, state) — JSON report. |
+| `snapshot list / current / cat / diff` | Read-back of Mode B snapshots — list hashes, active hash, raw bytes per route, structural diff between two snapshots. `--prefix <p>` for multi-site. |
+| `exec <METHOD> <path> [--body @file]` | Ad-hoc Cloudflare REST passthrough. |
+| `logs <worker> [--tail] [--since <d>]` | Wrangler tail wrapper. |
 
-Mode A has no `af` verbs — preview is host-driven (Phase 26). Hosts
-integrate via `@astroflare/host-cloudflare` (`createCoordinator`,
-`createPreviewHandler`, `acceptHmrSocket`, `SqlCache`,
-`createWorkerdExecutor`) and `@astroflare/site-workspace`
+Mode A has no public `af` verbs (host-driven). The cli-lib internally
+exposes `provisionPreviewHost` / `destroyPreviewHost` /
+`loadPreviewHostBundle` — used by the e2e harness, not the user
+surface. Hosts integrate via `@astroflare/host-cloudflare`
+(`createCoordinator`, `createPreviewHandler`, `acceptHmrSocket`,
+`SqlCache`, `createWorkerdExecutor`) and `@astroflare/site-workspace`
 (`WorkspaceSite`).
 
 Credentials: `.dev.vars` holds `CLOUDFLARE_API_TOKEN` (git-crypt locally;

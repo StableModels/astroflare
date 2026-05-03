@@ -92,7 +92,8 @@ export class WorkspaceSite implements Site {
 		const rows = this.#sql
 			.exec<{ hash: string }>("SELECT hash FROM aflare_hash WHERE path = ?", path)
 			.toArray();
-		if (rows.length === 0) {
+		const first = rows[0];
+		if (!first) {
 			// Workspace has the file but we don't know the hash — the file
 			// was written by a path that bypassed `WorkspaceSite.write`.
 			// Compute on demand so callers always see a hash.
@@ -102,7 +103,7 @@ export class WorkspaceSite implements Site {
 			this.#sql.exec("INSERT OR REPLACE INTO aflare_hash (path, hash) VALUES (?, ?)", path, hash);
 			return { size: stat.size, hash };
 		}
-		return { size: stat.size, hash: rows[0].hash };
+		return { size: stat.size, hash: first.hash };
 	}
 
 	async *glob(pattern: string): AsyncIterable<string> {
@@ -140,7 +141,12 @@ export class WorkspaceSite implements Site {
 }
 
 async function sha256Hex(bytes: Uint8Array): Promise<string> {
-	const buf = await crypto.subtle.digest("SHA-256", bytes);
+	// Copy into a fresh ArrayBuffer to satisfy `BufferSource` (the
+	// generic Uint8Array<ArrayBufferLike> doesn't widen cleanly when
+	// site-workspace is included in the composite tsc graph).
+	const copy = new Uint8Array(bytes.byteLength);
+	copy.set(bytes);
+	const buf = await crypto.subtle.digest("SHA-256", copy.buffer);
 	const hex = Array.from(new Uint8Array(buf))
 		.map((b) => b.toString(16).padStart(2, "0"))
 		.join("");
