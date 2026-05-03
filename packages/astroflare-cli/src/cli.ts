@@ -37,7 +37,7 @@
  * progress.
  */
 
-import { execSync } from "node:child_process";
+import { execSync, spawn } from "node:child_process";
 import { basename } from "node:path";
 import { parseArgs } from "node:util";
 import {
@@ -45,17 +45,20 @@ import {
 	deployStaticBundle,
 	destroyStack,
 	doctor,
+	exec as execApi,
 	findOrphanWorkers,
 	inspectManaged,
 	isAstroflareCliError,
 	listManaged,
 	loadStackWorkerBundle,
+	logsCommand,
 	makeCloudflareClient,
 	provisionFixture,
 	provisionStack,
 	readStackState,
 	snapshotCat,
 	snapshotCurrent,
+	snapshotDiff,
 	snapshotList,
 	statusReport,
 	teardownFixture,
@@ -113,6 +116,10 @@ async function main(argv: readonly string[]): Promise<number> {
 			return runDoctor();
 		case "snapshot":
 			return runSnapshot(rest);
+		case "exec":
+			return runExec(rest);
+		case "logs":
+			return runLogs(rest);
 
 		case "--version":
 		case "-v":
@@ -395,7 +402,7 @@ async function runDoctor(): Promise<number> {
 async function runSnapshot(argv: readonly string[]): Promise<number> {
 	const [sub, ...rest] = argv;
 	if (!sub) {
-		console.error("af snapshot: missing subcommand (list / current / cat)");
+		console.error("af snapshot: missing subcommand (list / current / cat / diff)");
 		return 1;
 	}
 	switch (sub) {
@@ -405,10 +412,111 @@ async function runSnapshot(argv: readonly string[]): Promise<number> {
 			return runSnapshotCurrent(rest);
 		case "cat":
 			return runSnapshotCat(rest);
+		case "diff":
+			return runSnapshotDiff(rest);
 		default:
 			console.error(`af snapshot: unknown subcommand '${sub}'`);
 			return 1;
 	}
+}
+
+async function runSnapshotDiff(argv: readonly string[]): Promise<number> {
+	const [stackName, hashA, hashB, ...flags] = argv;
+	if (!stackName || !hashA || !hashB) {
+		console.error("af snapshot diff: usage: af snapshot diff <stack-name> <hashA> <hashB>");
+		return 1;
+	}
+	const prefix = parsePrefixFlag(flags);
+	try {
+		const ctx = opsCtx();
+		const stack = readStackState(ctx.rootDir, ctx.sha7, stackName);
+		if (!stack) {
+			console.error(`af snapshot diff: no stack '${stackName}' for sha=${ctx.sha7}`);
+			return 1;
+		}
+		const result = await snapshotDiff({
+			client: ctx.client,
+			bucket: stack.bucketName,
+			prefix,
+			hashA,
+			hashB,
+		});
+		console.log(JSON.stringify(result, null, 2));
+		return 0;
+	} catch (err) {
+		return reportError("af snapshot diff", err);
+	}
+}
+
+async function runExec(argv: readonly string[]): Promise<number> {
+	const { values, positionals } = parseArgs({
+		args: [...argv],
+		options: {
+			body: { type: "string" },
+			"content-type": { type: "string" },
+		},
+		allowPositionals: true,
+	});
+	const [method, path] = positionals;
+	if (!method || !path) {
+		console.error(
+			"af exec: usage: af exec <METHOD> <path> [--body @file|<string>] [--content-type <ct>]",
+		);
+		return 1;
+	}
+	const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
+	const apiToken = process.env.CLOUDFLARE_API_TOKEN;
+	if (!accountId || !apiToken) {
+		console.error("af exec: CLOUDFLARE_ACCOUNT_ID + CLOUDFLARE_API_TOKEN required");
+		return 1;
+	}
+	try {
+		const result = await execApi({
+			accountId,
+			apiToken,
+			method,
+			path,
+			body: values.body as string | undefined,
+			contentType: values["content-type"] as string | undefined,
+		});
+		console.log(JSON.stringify(result, null, 2));
+		return result.status >= 200 && result.status < 300 ? 0 : 1;
+	} catch (err) {
+		return reportError("af exec", err);
+	}
+}
+
+async function runLogs(argv: readonly string[]): Promise<number> {
+	const { values, positionals } = parseArgs({
+		args: [...argv],
+		options: {
+			tail: { type: "boolean" },
+			since: { type: "string" },
+		},
+		allowPositionals: true,
+	});
+	const [name] = positionals;
+	if (!name) {
+		console.error("af logs: usage: af logs <worker-name> [--tail] [--since <duration>]");
+		return 1;
+	}
+	const result = logsCommand({
+		workerName: name,
+		tail: Boolean(values.tail),
+		since: values.since as string | undefined,
+	});
+	console.log(JSON.stringify({ command: result.command, notes: result.notes }, null, 2));
+	// Spawn wrangler tail and stream stdout/stderr through.
+	const [bin, ...args] = result.command;
+	if (!bin) return 1;
+	return await new Promise<number>((resolve_) => {
+		const child = spawn(bin, args, { stdio: "inherit" });
+		child.on("error", (err) => {
+			console.error(`af logs: failed to spawn wrangler — ${err.message}`);
+			resolve_(1);
+		});
+		child.on("exit", (code) => resolve_(code ?? 0));
+	});
 }
 
 async function runSnapshotList(argv: readonly string[]): Promise<number> {
@@ -699,9 +807,13 @@ function printUsage(): void {
 			"  doctor          Environment sanity check (creds, plan, state)",
 			"",
 			"AGENT OPS / INTROSPECTION (Phase 26c)",
-			"  snapshot list <stack> [--prefix <p>]              List snapshot hashes",
-			"  snapshot current <stack> [--prefix <p>]           Active snapshot hash",
+			"  snapshot list <stack> [--prefix <p>]               List snapshot hashes",
+			"  snapshot current <stack> [--prefix <p>]            Active snapshot hash",
 			"  snapshot cat <stack> <hash> <route> [--prefix <p>] Read raw bytes",
+			"  snapshot diff <stack> <hashA> <hashB>              Structural diff",
+			"  exec <METHOD> <path> [--body @file] [--content-type <ct>]",
+			"                                                       Ad-hoc Cloudflare REST call",
+			"  logs <worker> [--tail] [--since <duration>]        Wrangler tail wrapper",
 			"",
 			"COMMON OPTIONS (deploy / status / rollback)",
 			"  --account-id <id>     Cloudflare account ID",

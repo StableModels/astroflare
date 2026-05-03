@@ -24,13 +24,17 @@
  */
 
 import { execSync } from "node:child_process";
-import { existsSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { resolve } from "node:path";
 import {
 	type FixtureSource,
 	deployStaticBundle,
+	destroyPreviewHost,
 	destroyStack,
+	loadPreviewHostBundle,
 	loadStackWorkerBundle,
 	makeCloudflareClient,
+	provisionPreviewHost,
 	provisionStack,
 } from "@astroflare/cli-lib";
 import { clearRuntimeEnv, writeRuntimeEnv } from "./runtime-env.js";
@@ -109,12 +113,100 @@ export default async function setup(): Promise<() => Promise<void>> {
 		console.log("[e2e setup] no .astro fixtures discovered — skipping deploy");
 	}
 
+	// Phase 26 reference preview host (Mode A). Best-effort: when the
+	// bundle is missing or provisioning fails, the preview-host spec
+	// self-skips without failing the suite.
+	let previewHostUrl: string | null = null;
+	let previewHostDeployToken: string | null = null;
+	let previewState: { sha7: string; name: string; workerName: string } | null = null;
+	const previewBundlePath = resolve(
+		ctx.rootDir,
+		"tests/e2e/fixtures/preview-host-ref/dist/worker.bundle.js",
+	);
+	if (existsSync(previewBundlePath)) {
+		try {
+			console.log("[e2e setup] provisioning preview-host-ref");
+			const provisioned = await provisionPreviewHost({
+				rootDir: ctx.rootDir,
+				sha7: ctx.sha7,
+				name: "e2e",
+				client,
+				previewHostBundle: loadPreviewHostBundle(ctx.rootDir),
+			});
+			previewHostUrl = provisioned.url;
+			previewHostDeployToken = provisioned.deployToken;
+			previewState = {
+				sha7: provisioned.sha7,
+				name: provisioned.name,
+				workerName: provisioned.workerName,
+			};
+			console.log(`[e2e setup]   preview-host → ${provisioned.url}`);
+
+			const indexAstroPath = resolve(
+				ctx.rootDir,
+				"tests/e2e/fixtures/preview-host-ref/files/index.astro",
+			);
+			if (existsSync(indexAstroPath)) {
+				const settleMs = Number(process.env.AFLARE_SETTLE_MS ?? 8000);
+				if (settleMs > 0) {
+					console.log(`[e2e setup] waiting ${settleMs}ms for workers.dev DNS`);
+					await new Promise((r) => setTimeout(r, settleMs));
+				}
+				const body = readFileSync(indexAstroPath);
+				let attempt = 0;
+				const maxAttempts = 6;
+				while (attempt < maxAttempts) {
+					attempt++;
+					try {
+						const res = await fetch(
+							`${provisioned.url.replace(/\/$/, "")}/_aflare/site/file?path=/src/pages/index.astro`,
+							{
+								method: "POST",
+								headers: {
+									Authorization: `Bearer ${provisioned.deployToken}`,
+									"content-type": "application/octet-stream",
+								},
+								body: new Uint8Array(body),
+							},
+						);
+						if (!res.ok) {
+							const text = await res.text();
+							if (res.status === 404 && attempt < maxAttempts) {
+								await new Promise((r) => setTimeout(r, 2000 * attempt));
+								continue;
+							}
+							throw new Error(`upload index.astro: ${res.status}: ${text}`);
+						}
+						console.log("[e2e setup]   uploaded preview-host-ref/index.astro");
+						break;
+					} catch (err) {
+						if (attempt >= maxAttempts) throw err;
+					}
+				}
+			}
+		} catch (err) {
+			console.error(
+				`[e2e setup]   preview-host provisioning failed (continuing): ${(err as Error).message}`,
+			);
+			previewHostUrl = null;
+			previewHostDeployToken = null;
+		}
+	} else {
+		console.log(
+			"[e2e setup] preview-host bundle not built — run `node tests/e2e/fixtures/preview-host-ref/build.mjs`",
+		);
+	}
+
 	writeRuntimeEnv({
 		stackUrl: stackState.url,
 		deployHash,
 		fixtures: fixtures.map((f) => f.name),
+		previewHostUrl,
+		previewHostDeployToken,
 	});
-	console.log(`[e2e setup]   wrote runtime env: ${fixtures.length} fixtures, deploy=${deployHash}`);
+	console.log(
+		`[e2e setup]   wrote runtime env: ${fixtures.length} fixtures, deploy=${deployHash}, preview=${previewHostUrl ?? "none"}`,
+	);
 
 	return async function teardown() {
 		// Wipe runtime.json first so any subsequent test run that
@@ -131,6 +223,20 @@ export default async function setup(): Promise<() => Promise<void>> {
 			console.log(`[e2e teardown]   destroyed stack ${stackState.workerName}`);
 		} catch (err) {
 			console.error(`[e2e teardown]   FAILED to destroy stack: ${(err as Error).message}`);
+		}
+		if (previewState) {
+			console.log("[e2e teardown] destroying preview-host");
+			try {
+				await destroyPreviewHost({
+					rootDir: ctx.rootDir,
+					sha7: previewState.sha7,
+					name: previewState.name,
+					client,
+				});
+				console.log(`[e2e teardown]   destroyed preview-host ${previewState.workerName}`);
+			} catch (err) {
+				console.error(`[e2e teardown]   FAILED to destroy preview-host: ${(err as Error).message}`);
+			}
 		}
 	};
 }

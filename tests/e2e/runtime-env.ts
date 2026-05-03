@@ -20,6 +20,10 @@ export interface RuntimeEnv {
 	stackUrl: string;
 	deployHash: string | null;
 	fixtures: readonly string[];
+	/** URL of the Phase-26 reference preview host (Mode A). Null when not provisioned. */
+	previewHostUrl?: string | null;
+	/** Bearer token for `/_aflare/site/file` writes on the preview host. */
+	previewHostDeployToken?: string | null;
 }
 
 function statePath(): string {
