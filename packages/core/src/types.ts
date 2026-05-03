@@ -27,12 +27,8 @@
  * host's concern (it owns when/how files are written; e.g. an IDE write, an
  * AI agent message, a `git pull`). Change notifications flow into the
  * framework via the host calling `coordinator.notifyChanged(event)` after a
- * write, not through `Site` itself.
- *
- * Replaces the prior `Storage.read` / `stat` / `glob` surface. The
- * `Storage` cache keyspace is now a separate `Cache` interface (below);
- * the write surface (`write` / `remove`) is host-side and not part of
- * `Site`.
+ * write, not through `Site` itself. The compile-cache keyspace is a separate
+ * `Cache` interface (below).
  */
 export interface Site {
 	/** Read a file's bytes. Returns `null` if missing. */
@@ -383,7 +379,7 @@ export interface ImageMetadata {
  * host package and passed to `createApp(config, host)`.
  *
  * Post-Phase 26 / 26b: `site` (read) + `cache` (compile cache) are the
- * canonical capabilities. The legacy `Storage` interface is gone.
+ * canonical capabilities.
  */
 export interface Host {
 	/** Read-only file capability the framework consumes. */
@@ -403,11 +399,11 @@ export interface Host {
 	imageService?: ImageService;
 	/**
 	 * Phase 15b RPC services. Optional — when absent, the framework
-	 * uses degraded in-process defaults. The host package's
-	 * `createHost()` (Phase 15) constructs Cloudflare-bound versions
-	 * (Cloudflare Images for `imageService`, the project worker's
-	 * env binding for `envService`, the `Logger` for `logService`,
-	 * the storage for `fsService`).
+	 * uses degraded in-process defaults. Hosts that supply them wire
+	 * Cloudflare-bound implementations (Cloudflare Images for
+	 * `imageService`, the host worker's env binding for `envService`,
+	 * the `Logger` for `logService`, the host's filesystem capability
+	 * for `fsService`).
 	 */
 	fsService?: FsService;
 	logService?: LogService;
@@ -417,8 +413,9 @@ export interface Host {
 /**
  * Workspace-write RPC (§9.3 of the brief). External agents
  * (LSP / IDE plugin / dev server) call `FsService.write(path, bytes)`
- * to add or update a file; the implementation persists via `Storage`
- * and notifies the framework so HMR fans out to connected previews.
+ * to add or update a file; the implementation persists to the host's
+ * filesystem and notifies the framework so HMR fans out to connected
+ * previews.
  *
  * Phase 15b ships the interface plus an in-process default
  * (`InMemoryFsService` from `@astroflare/test-utils`); a real
@@ -437,10 +434,10 @@ export interface FsStat {
 	hash: string;
 	/**
 	 * Last-modified timestamp in ms-since-epoch, when the underlying
-	 * `Storage` exposes one. The brief's `Storage.stat` doesn't yet
-	 * carry mtime; in-memory implementations use `0`. Wire from the
-	 * Cloudflare R2 binding's `uploaded` field when the host
-	 * implementation gets there.
+	 * filesystem exposes one. `Site.statFile` doesn't yet carry mtime;
+	 * in-memory implementations use `0`. Wire from the Cloudflare R2
+	 * binding's `uploaded` field when the host implementation gets
+	 * there.
 	 */
 	mtime?: number;
 }

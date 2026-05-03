@@ -1,7 +1,7 @@
 /**
  * Default in-process implementations of the Phase 15b RPC services.
  *
- * `InMemoryFsService` — wraps a `Storage` so `write` / `read` /
+ * `InMemoryFsService` — wraps a `MemorySite` so `write` / `read` /
  * `remove` go through the existing in-memory store. Suitable for
  * tests that exercise the agent-write → HMR loop without a real
  * external agent.

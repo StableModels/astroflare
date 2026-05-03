@@ -1,7 +1,7 @@
 /**
  * Tiny glob matcher.
  *
- * Supports the subset Astroflare actually uses for `Storage.glob`:
+ * Supports the subset Astroflare actually uses for `Site.glob`:
  *   - `*`   — match any run of non-separator chars
  *   - `**`  — match any path (zero or more segments, including separators)
  *   - `?`   — match exactly one non-separator char

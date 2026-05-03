@@ -87,9 +87,16 @@ Transport in `@astroflare/host-cloudflare`, `minimal-blog` fixture.
 - User remark/rehype plugin chains (deferred — surfacing only if real demand appears)
 
 ### C — Host implementation (production deploys)
-- `@astroflare/host-cloudflare/src/storage.ts` — `@cloudflare/workspace`-backed Storage
-- `@astroflare/host-cloudflare/src/coordinator-do.ts` — DO-backed Coordinator (per-workspace state, persistent module graph)
-- `@astroflare/host-cloudflare/src/project-worker.ts` — entrypoint Worker that wires Storage/Coordinator/Transport/Executor into a single `fetch` handler
+
+> Historical Phase-13-era backlog. Items shipped in Phase 15 then
+> got refactored across the host boundary in Phase 26+. The current
+> shape is `WorkspaceSite` + `createCoordinator` + host-owned worker
+> (Mode A) and `R2Snapshots` + `createSnapshotHandler` (Mode B), all
+> in `@astroflare/host-cloudflare`.
+
+- ~~`@astroflare/host-cloudflare/src/storage.ts` — `@cloudflare/workspace`-backed Storage~~ → `WorkspaceSite` (Phase 26)
+- ~~`@astroflare/host-cloudflare/src/coordinator-do.ts` — DO-backed Coordinator (per-workspace state, persistent module graph)~~ → `createCoordinator` factory (Phase 26)
+- ~~`@astroflare/host-cloudflare/src/project-worker.ts` — entrypoint Worker that wires Storage/Coordinator/Transport/Executor into a single `fetch` handler~~ → host-owned (no framework entrypoint, Phase 26)
 - `FsService` / `LogService` / `ImageService` / `EnvService` Cap'n Web RPC classes (§9.3)
 - Bundle DW + esbuild-wasm (deploy-time bundling for SSR routes and per-island chunks)
 - Workflow-orchestrated parallel render fan-out

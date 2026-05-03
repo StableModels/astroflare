@@ -89,14 +89,6 @@ build cleanly into deployable bundles.
   the executor. Used by `createPreviewHandler` and `buildSite`
   (workers).
 
-The `Storage` interface in `@astroflare/core` remains
-`@deprecated` but is still consumed by framework-internal code
-(`@astroflare/preview`'s preview-server, `@astroflare/content`'s
-collection reader, `@astroflare/test-utils`). Migrating those
-internals from `Storage` → `Site` + `Cache` is a separate refactor
-that doesn't change the host-facing API and doesn't violate the
-North Star (implementation detail, not host surface).
-
 Phase plans:
 [`docs/phases/phase-26-host-driven-preview.md`](docs/phases/phase-26-host-driven-preview.md),
 [`docs/phases/phase-26b-host-driven-build.md`](docs/phases/phase-26b-host-driven-build.md),

@@ -9,7 +9,7 @@
  *      skip uploads whose hash already matches.
  *   3. Upload changed files to R2 via the Cloudflare REST API
  *      (`/accounts/<id>/r2/buckets/<bucket>/objects/<key>`). Object
- *      key prefixing matches `R2Storage`'s layout: `files/<workspace-path>`.
+ *      keys are prefixed `files/<workspace-path>`.
  *   4. POST `/_aflare/deploy` on the project worker with the deploy
  *      token. The worker runs the planner + render fan-out + manifest
  *      write + atomic flip.
@@ -126,7 +126,7 @@ export interface ProjectFile {
 
 /**
  * Walk the project's `src/` and `public/` directories. Returns workspace-
- * style paths suitable for R2Storage's key layout. Hidden files
+ * style paths suitable for the R2 `files/` key layout. Hidden files
  * (dot-prefixed) are skipped.
  */
 export async function walkProjectFiles(projectDir: string): Promise<ProjectFile[]> {

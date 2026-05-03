@@ -1,5 +1,21 @@
 # Dual-mode validation plan — Phases 25–26
 
+> **Superseded (2026-05-03).** Phases 25–26 shipped, then Phase 26
+> refactored the architecture across the framework / host boundary
+> (host-driven preview + build, no Astroflare-owned DOs or worker
+> entrypoints). The artifacts this plan calls out by name —
+> `R2Storage`, `MemoryStorage`, `Storage` interface, `stack-worker`,
+> `preview-worker`, `DurableObjectStorage` — are gone. Current
+> shape: `Site` + `Cache` + `Snapshots` capabilities consumed by
+> `createCoordinator` / `createPreviewHandler` (Mode A) and
+> `R2Snapshots` + `createSnapshotHandler` (Mode B), all in
+> `@astroflare/host-cloudflare`. See CLAUDE.md and
+> [`phases/phase-26-host-driven-preview.md`](./phases/phase-26-host-driven-preview.md)
+> / [`phases/phase-26b-host-driven-build.md`](./phases/phase-26b-host-driven-build.md)
+> for the live picture. This file is preserved for historical
+> context; the test-shape sketch (one fixture flowing through both
+> modes) still informs the parity spec at `tests/e2e/parity.spec.ts`.
+
 Two distinct lifecycles exist for an Astroflare site running on
 Cloudflare; both need explicit proof that they work end-to-end. The
 phases below land them, with the same fixture flowing through both

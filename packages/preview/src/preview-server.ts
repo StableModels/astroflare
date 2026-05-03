@@ -12,7 +12,7 @@
  *   2. if URL is `/_aflare/hmr` → upgrade via `host.transport.acceptHmrSocket`
  *   3. else: route lookup → 404 if no match
  *   4. `ModuleGraph.closure(routeFilePath)` — compile route + every transitive
- *      `.astro` dep (each compile cache-checked via Storage.cacheRead/Write)
+ *      `.astro` dep (each compile cache-checked via `Cache.get/put`)
  *   5. `host.executor.runCached(bundleKey, () => buildBundle(modules), ctx)`
  *   6. inject HMR client into the rendered HTML
  *   7. wrap in `Response`, `text/html`
@@ -459,7 +459,7 @@ async function serveAsset(host: Host, encodedPath: string): Promise<Response> {
 	const ext = path.split(".").pop()?.toLowerCase() ?? "";
 	const contentType = IMAGE_CONTENT_TYPES[ext] ?? "application/octet-stream";
 	// Copy into a fresh ArrayBuffer to satisfy `BodyInit` (the `Uint8Array`
-	// returned from `Storage.read` is generic over `ArrayBufferLike`, which
+	// returned from `Site.readFile` is generic over `ArrayBufferLike`, which
 	// includes `SharedArrayBuffer`).
 	const copy = new Uint8Array(bytes.byteLength);
 	copy.set(bytes);

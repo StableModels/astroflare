@@ -5,10 +5,6 @@
  * exercise framework code paths in plain Node, without workerd or
  * Miniflare.
  *
- * Replaces the read-side responsibilities of `MemoryStorage`:
- *   - `MemorySite.readFile/statFile/glob` ↔ Storage.read/stat/glob
- *   - `MemoryCache.get/put` ↔ Storage.cacheRead/cacheWrite
- *
  * `MemorySite` exposes a non-interface `write(path, bytes)` helper
  * for tests that need to seed files (the `Site` interface itself is
  * read-only; writes are a host concern).

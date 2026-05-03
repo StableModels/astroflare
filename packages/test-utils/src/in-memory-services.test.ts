@@ -6,7 +6,7 @@ const enc = (s: string) => new TextEncoder().encode(s);
 const dec = (b: Uint8Array) => new TextDecoder().decode(b);
 
 describe("InMemoryFsService", () => {
-	it("write / read round-trips through the underlying Storage", async () => {
+	it("write / read round-trips through the underlying MemorySite", async () => {
 		const site = new MemorySite();
 		const fs = new InMemoryFsService({ site });
 		await fs.write("/src/index.astro", enc("<p>hi</p>"));
