@@ -1,0 +1,14 @@
+{
+	"name": "deploy-host-ref-fixture",
+	"version": "0.0.0",
+	"private": true,
+	"type": "module",
+	"dependencies": {
+		"@astroflare/build": "workspace:*",
+		"@astroflare/host-cloudflare": "workspace:*"
+	},
+	"devDependencies": {
+		"@cloudflare/workers-types": "^4.20241224.0",
+		"esbuild": "^0.28.0"
+	}
+}

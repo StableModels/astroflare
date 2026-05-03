@@ -2,3 +2,5 @@ packages:
   - "packages/*"
   - "examples/*"
   - "tests/*"
+  - "tests/e2e/fixtures/preview-host-ref"
+  - "tests/e2e/fixtures/deploy-host-ref"

@@ -305,6 +305,41 @@ importers:
         specifier: workspace:*
         version: link:../../packages/astroflare-cli-lib
 
+  tests/e2e/fixtures/deploy-host-ref:
+    dependencies:
+      '@astroflare/build':
+        specifier: workspace:*
+        version: link:../../../../packages/astroflare-build
+      '@astroflare/host-cloudflare':
+        specifier: workspace:*
+        version: link:../../../../packages/astroflare-host-cloudflare
+    devDependencies:
+      '@cloudflare/workers-types':
+        specifier: ^4.20241224.0
+        version: 4.20260502.1
+      esbuild:
+        specifier: ^0.28.0
+        version: 0.28.0
+
+  tests/e2e/fixtures/preview-host-ref:
+    dependencies:
+      '@astroflare/host-cloudflare':
+        specifier: workspace:*
+        version: link:../../../../packages/astroflare-host-cloudflare
+      '@astroflare/site-workspace':
+        specifier: workspace:*
+        version: link:../../../../packages/astroflare-site-workspace
+      '@cloudflare/shell':
+        specifier: ^0.3.6
+        version: 0.3.6
+    devDependencies:
+      '@cloudflare/workers-types':
+        specifier: ^4.20241224.0
+        version: 4.20260502.1
+      esbuild:
+        specifier: ^0.28.0
+        version: 0.28.0
+
   tests/integration:
     dependencies:
       '@astroflare/core':

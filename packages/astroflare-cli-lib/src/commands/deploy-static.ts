@@ -16,7 +16,7 @@
 
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
-import { LocalSite, buildSite } from "@astroflare/build";
+import { LocalSite, buildSite } from "@astroflare/build/node";
 import type { SnapshotEntry } from "@astroflare/core";
 import type { CloudflareClient } from "../api.js";
 import { RestR2SnapshotSink } from "../rest-snapshot-sink.js";

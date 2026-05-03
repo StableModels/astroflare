@@ -30,7 +30,10 @@ const result = await build({
 	format: "esm",
 	platform: "neutral",
 	target: "es2022",
-	external: ["cloudflare:workers"],
+	// `esbuild-wasm` is reachable only from the compiler's TS-strip
+	// dynamic-import; deploy-host-ref never compiles. Mark external so
+	// esbuild's static analysis doesn't try to resolve it.
+	external: ["cloudflare:workers", "esbuild-wasm"],
 	conditions: ["workerd"],
 	metafile: true,
 	outfile: OUTFILE,
