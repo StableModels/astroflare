@@ -96,17 +96,21 @@ export class Cli {
 	async #provision(args: readonly string[]): Promise<number> {
 		const [fixture] = args;
 		if (!fixture) {
-			this.#log("usage: aflare-e2e provision <fixture>");
+			this.#log("usage: aflare e2e provision <fixture>");
 			return 1;
 		}
-		const loader = this.#opts.loadBundle ?? defaultLoadBundle;
-		const bundle = await loader(fixture);
+		const loader = this.#opts.loadBundle;
+		const bundle = loader
+			? await loader(fixture)
+			: await defaultLoadBundle(fixture, this.#opts.env.rootDir);
+		const fixtureCfg = await loadFixtureConfig(fixture, this.#opts.env.rootDir);
 		const state = await provisionFixture({
 			rootDir: this.#opts.env.rootDir,
 			sha7: this.#opts.env.sha7,
 			fixture,
 			client: this.#client,
 			workerBundle: bundle,
+			provisionR2: fixtureCfg?.provisionR2 ?? false,
 		});
 		this.#log(`provisioned ${state.workerName} → ${state.url}`);
 		return 0;
@@ -260,11 +264,37 @@ Environment:
   AFLARE_E2E_ROOT          Override the repo root (default: cwd)
 `;
 
-async function defaultLoadBundle(fixture: string): Promise<string> {
-	// In production this would shell out to the existing aflare CLI to
-	// build the fixture into a Worker bundle. For Phase 20 we ship the
-	// scaffolding; the bundle path is wired alongside the fixture work.
-	return `// stub bundle for fixture: ${fixture}\nexport default { fetch() { return new Response("ok"); } };`;
+async function defaultLoadBundle(fixture: string, rootDir: string): Promise<string> {
+	// Look for `tests/e2e/fixtures/<fixture>/worker.js` — a hand-written
+	// Worker bundle the fixture ships alongside its `.astro` sources.
+	// When the framework's deploy pipeline matures (Phase 20b — bundle
+	// Astroflare itself for fixtures), this fixture-specific worker.js
+	// is replaced by the framework-built bundle and `defaultLoadBundle`
+	// shells out to `aflare deploy --bundle <fixture>` to produce it.
+	const path = `${rootDir}/tests/e2e/fixtures/${fixture}/worker.js`;
+	const fs = await import("node:fs");
+	if (fs.existsSync(path)) {
+		return fs.readFileSync(path, "utf8");
+	}
+	throw new Error(`no Worker bundle for fixture '${fixture}' (expected ${path})`);
+}
+
+interface FixtureConfig {
+	/** Whether the fixture's Worker needs an R2 bucket. Default `false`. */
+	provisionR2?: boolean;
+}
+
+/**
+ * Read the per-fixture e2e config from
+ * `tests/e2e/fixtures/<fixture>/aflare-e2e.json` if present. Lets each
+ * fixture opt into R2 provisioning (and other future toggles) without
+ * the CLI baking assumptions about which resources every fixture needs.
+ */
+async function loadFixtureConfig(fixture: string, rootDir: string): Promise<FixtureConfig | null> {
+	const path = `${rootDir}/tests/e2e/fixtures/${fixture}/aflare-e2e.json`;
+	const fs = await import("node:fs");
+	if (!fs.existsSync(path)) return null;
+	return JSON.parse(fs.readFileSync(path, "utf8")) as FixtureConfig;
 }
 
 /** Production entry point. */

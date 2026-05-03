@@ -8,5 +8,5 @@
   },
   "include": ["src/**/*"],
   "exclude": ["dist", "**/*.test.ts"],
-  "references": [{ "path": "../astroflare-core" }]
+  "references": [{ "path": "../astroflare-core" }, { "path": "../../tools/aflare-e2e" }]
 }

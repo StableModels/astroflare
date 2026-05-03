@@ -26,7 +26,9 @@
  * progress messages go to stderr.
  */
 
+import { execSync } from "node:child_process";
 import { parseArgs } from "node:util";
+import { Cli as E2eCli } from "@astroflare/e2e";
 import { type DeployConfig, resolveConfig } from "./commands/deploy.js";
 import { cmdDeploy, cmdRollback, cmdStatus } from "./commands/deploy.js";
 import { initProject } from "./commands/init.js";
@@ -48,6 +50,8 @@ async function main(argv: readonly string[]): Promise<number> {
 			return runStatus(rest);
 		case "rollback":
 			return runRollback(rest);
+		case "e2e":
+			return runE2e(rest);
 		case "--version":
 		case "-v":
 			console.log("aflare 0.0.0");
@@ -57,6 +61,42 @@ async function main(argv: readonly string[]): Promise<number> {
 			printUsage();
 			return 1;
 	}
+}
+
+/**
+ * `aflare e2e <verb>` — orchestrate end-to-end tests against live
+ * Cloudflare. Delegates to `@astroflare/e2e`'s CLI dispatcher so
+ * the verb surface (`provision`, `teardown`, `teardown-all`,
+ * `list`, `inspect`, `status`, `gc`) lives in one place.
+ *
+ * Reads `CLOUDFLARE_ACCOUNT_ID` + `CLOUDFLARE_API_TOKEN` from env;
+ * `AFLARE_E2E_SHA` overrides the SHA used in resource names
+ * (default: `git rev-parse --short=7 HEAD`); `AFLARE_E2E_ROOT`
+ * overrides the repo root (default: cwd).
+ */
+async function runE2e(argv: readonly string[]): Promise<number> {
+	const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
+	const apiToken = process.env.CLOUDFLARE_API_TOKEN;
+	if (!accountId) {
+		console.error("aflare e2e: CLOUDFLARE_ACCOUNT_ID is required");
+		return 2;
+	}
+	if (!apiToken) {
+		console.error("aflare e2e: CLOUDFLARE_API_TOKEN is required");
+		return 2;
+	}
+	const sha7 =
+		process.env.AFLARE_E2E_SHA ?? execSync("git rev-parse --short=7 HEAD").toString().trim();
+	const rootDir = process.env.AFLARE_E2E_ROOT ?? process.cwd();
+	const cli = new E2eCli({
+		env: {
+			rootDir,
+			sha7,
+			cloudflareAccountId: accountId,
+			cloudflareApiToken: apiToken,
+		},
+	});
+	return await cli.run(argv);
 }
 
 async function runInit(argv: readonly string[]): Promise<number> {
@@ -180,6 +220,10 @@ function printUsage(): void {
 			"  deploy [dir]    Upload project files to R2 and run the deploy ceremony",
 			"  status          Show the active deploy hash",
 			"  rollback <hash> Flip /site/current to a previous deploy",
+			"",
+			"  e2e <verb>      Orchestrate end-to-end tests against live Cloudflare",
+			"                  Verbs: provision, teardown, teardown-all, list,",
+			"                         inspect, status, gc",
 			"",
 			"COMMON OPTIONS",
 			"  --account-id <id>     Cloudflare account ID",

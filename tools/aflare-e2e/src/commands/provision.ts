@@ -29,32 +29,49 @@ export interface ProvisionInput {
 	urlPattern?: (workerName: string) => string;
 	/** Force re-provision when an existing state file is present. */
 	force?: boolean;
+	/**
+	 * Whether the fixture needs an R2 bucket. Default `true` (matches
+	 * the typical Astroflare project shape). Fixtures that don't read
+	 * from R2 set this to `false` so accounts without R2 enabled can
+	 * still run them.
+	 */
+	provisionR2?: boolean;
 }
 
 const DEFAULT_NAME_PATTERN = (fixture: string, sha7: string): string =>
 	`aflare-e2e-${fixture}-${sha7}`;
 
-const DEFAULT_URL_PATTERN = (workerName: string): string => `https://${workerName}.workers.dev`;
-
 export async function provisionFixture(input: ProvisionInput): Promise<FixtureState> {
 	const namePattern = input.namePattern ?? DEFAULT_NAME_PATTERN;
-	const urlPattern = input.urlPattern ?? DEFAULT_URL_PATTERN;
 
 	const existing = readFixtureState(input.rootDir, input.sha7, input.fixture);
 	if (existing && !input.force) return existing;
 
 	const workerName = namePattern(input.fixture, input.sha7);
-	const bucketName = `${workerName}-store`;
+	const provisionR2 = input.provisionR2 !== false;
+	const bucketName = provisionR2 ? `${workerName}-store` : "";
 
-	await input.client.createR2Bucket(bucketName);
+	if (provisionR2) {
+		await input.client.createR2Bucket(bucketName);
+	}
 	await input.client.uploadWorker(workerName, input.workerBundle);
+	// Workers don't get a public URL by default — explicitly enable the
+	// workers.dev subdomain so e2e specs can fetch the deployed Worker.
+	await input.client.enableWorkerSubdomain(workerName);
+
+	// Real workers.dev URL pattern: `<worker>.<account-subdomain>.workers.dev`.
+	// Tests override `urlPattern` to a deterministic value without
+	// reaching the live API.
+	const url = input.urlPattern
+		? input.urlPattern(workerName)
+		: `https://${workerName}.${await input.client.getAccountSubdomain()}.workers.dev`;
 
 	const state: FixtureState = {
 		fixture: input.fixture,
 		sha7: input.sha7,
 		workerName,
 		bucketName,
-		url: urlPattern(workerName),
+		url,
 		provisionedAt: new Date().toISOString(),
 	};
 	writeFixtureState(input.rootDir, state);

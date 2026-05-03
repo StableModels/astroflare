@@ -19,6 +19,8 @@ function makeMockClient(overrides: Partial<CloudflareClient> = {}): CloudflareCl
 		createR2Bucket: vi.fn(async () => undefined),
 		deleteR2Bucket: vi.fn(async () => undefined),
 		listWorkers: vi.fn(async () => []),
+		enableWorkerSubdomain: vi.fn(async () => undefined),
+		getAccountSubdomain: vi.fn(async () => "test-account"),
 		...overrides,
 	};
 }
@@ -49,7 +51,7 @@ describe("provisionFixture", () => {
 		);
 		expect(state.workerName).toBe("aflare-e2e-minimal-abc1234");
 		expect(state.bucketName).toBe("aflare-e2e-minimal-abc1234-store");
-		expect(state.url).toBe("https://aflare-e2e-minimal-abc1234.workers.dev");
+		expect(state.url).toBe("https://aflare-e2e-minimal-abc1234.test-account.workers.dev");
 
 		const persisted = readFixtureState(rootDir, "abc1234", "minimal");
 		expect(persisted?.workerName).toBe(state.workerName);

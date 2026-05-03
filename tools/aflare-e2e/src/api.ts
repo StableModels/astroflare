@@ -42,9 +42,20 @@ export interface CloudflareClient {
 	deleteR2Bucket(name: string): Promise<void>;
 	/** List Worker scripts. */
 	listWorkers(): Promise<readonly { id: string; created_on?: string }[]>;
+	/**
+	 * Enable the `<name>.<account>.workers.dev` URL for a Worker.
+	 * Idempotent — re-enabling a Worker that's already public is a no-op.
+	 */
+	enableWorkerSubdomain(name: string): Promise<void>;
+	/**
+	 * Account-scoped workers.dev subdomain (e.g. `myteam` → Workers serve
+	 * at `<name>.myteam.workers.dev`). Cached per CloudflareClient
+	 * instance so a session of provision calls makes one HTTP request.
+	 */
+	getAccountSubdomain(): Promise<string>;
 }
 
-const DEFAULT_BASE = "https://api.cloudflare.com/v4";
+const DEFAULT_BASE = "https://api.cloudflare.com/client/v4";
 
 /** Build a CloudflareClient. */
 export function makeCloudflareClient(opts: CloudflareClientOptions): CloudflareClient {
@@ -55,6 +66,7 @@ export function makeCloudflareClient(opts: CloudflareClientOptions): CloudflareC
 		Accept: "application/json",
 		...extra,
 	});
+	let cachedSubdomain: string | null = null;
 
 	async function callApi<T>(method: string, path: string, init: RequestInit = {}): Promise<T> {
 		const url = `${baseUrl}/accounts/${opts.accountId}${path}`;
@@ -82,9 +94,33 @@ export function makeCloudflareClient(opts: CloudflareClientOptions): CloudflareC
 
 	return {
 		async uploadWorker(name, body) {
+			// Modern ES-modules Workers upload: multipart/form-data carrying a
+			// JSON `metadata` part declaring `main_module` plus the actual
+			// module source. Cloudflare picks the format up from the
+			// content-type — passing JS as `application/javascript` would
+			// instead be parsed as the legacy service-worker format and
+			// reject `export default` syntax.
+			const form = new FormData();
+			form.append(
+				"metadata",
+				new Blob(
+					[
+						JSON.stringify({
+							main_module: "worker.js",
+							compatibility_date: "2025-09-01",
+							compatibility_flags: ["nodejs_compat"],
+						}),
+					],
+					{ type: "application/json" },
+				),
+			);
+			form.append(
+				"worker.js",
+				new Blob([body], { type: "application/javascript+module" }),
+				"worker.js",
+			);
 			await callApi("PUT", `/workers/scripts/${encodeURIComponent(name)}`, {
-				headers: { "content-type": "application/javascript" },
-				body,
+				body: form,
 			});
 		},
 		async deleteWorker(name) {
@@ -104,6 +140,23 @@ export function makeCloudflareClient(opts: CloudflareClientOptions): CloudflareC
 				"GET",
 				"/workers/scripts",
 			);
+		},
+		async enableWorkerSubdomain(name) {
+			await callApi("POST", `/workers/scripts/${encodeURIComponent(name)}/subdomain`, {
+				headers: { "content-type": "application/json" },
+				body: JSON.stringify({ enabled: true }),
+			});
+		},
+		async getAccountSubdomain() {
+			if (cachedSubdomain) return cachedSubdomain;
+			const result = await callApi<{ subdomain?: string | null }>("GET", "/workers/subdomain");
+			if (!result?.subdomain) {
+				throw new Error(
+					"workers.dev subdomain is not configured for this account; visit the Cloudflare dashboard and enable it under Workers & Pages → subdomain",
+				);
+			}
+			cachedSubdomain = result.subdomain;
+			return cachedSubdomain;
 		},
 	};
 }

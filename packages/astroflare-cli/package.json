@@ -18,7 +18,8 @@
     "test": "vitest run --project cli"
   },
   "dependencies": {
-    "@astroflare/core": "workspace:*"
+    "@astroflare/core": "workspace:*",
+    "@astroflare/e2e": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

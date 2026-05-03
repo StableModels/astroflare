@@ -54,26 +54,45 @@ jobs:
       - name: typecheck
         run: pnpm typecheck
 
-      # Provision per-fixture resources. The aflare-e2e CLI is idempotent
-      # — a previous failed run that didn't reach teardown won't double-
-      # create.
-      - name: provision minimal fixture
+      # Provision every fixture. `aflare e2e provision` is idempotent —
+      # a previous failed run that didn't reach teardown won't double-
+      # create. Each provision logs the live URL; we extract them via
+      # the deterministic naming pattern.
+      - name: provision fixtures
         id: provision
+        # Worker names embed AFLARE_E2E_SHA verbatim, so we truncate
+        # GITHUB_SHA to its short form (7 chars) before exporting.
+        # Cloudflare caps script names at 64 chars; the prefix
+        # `aflare-e2e-<fixture>-` plus a 7-char SHA stays well under.
         run: |
-          SHA7="${GITHUB_SHA:0:7}"
-          export AFLARE_E2E_SHA="$SHA7"
-          pnpm --filter @astroflare/e2e exec node ./src/cli.ts provision minimal
-          echo "url=https://aflare-e2e-minimal-$SHA7.workers.dev" >> "$GITHUB_OUTPUT"
+          export AFLARE_E2E_SHA="${GITHUB_SHA:0:7}"
+          SUBDOMAIN="astroflare-e2e"
+          pnpm exec tsx ./packages/astroflare-cli/src/cli.ts e2e provision minimal
+          pnpm exec tsx ./packages/astroflare-cli/src/cli.ts e2e provision basics
+          pnpm exec tsx ./packages/astroflare-cli/src/cli.ts e2e provision ssr
+          # Workers.dev DNS settles within a couple of seconds; wait
+          # before driving HTTP at the live URL.
+          sleep 10
+          echo "sha7=$AFLARE_E2E_SHA" >> "$GITHUB_OUTPUT"
+          echo "url_minimal=https://aflare-e2e-minimal-$AFLARE_E2E_SHA.$SUBDOMAIN.workers.dev/" >> "$GITHUB_OUTPUT"
+          echo "url_basics=https://aflare-e2e-basics-$AFLARE_E2E_SHA.$SUBDOMAIN.workers.dev/" >> "$GITHUB_OUTPUT"
+          echo "url_ssr=https://aflare-e2e-ssr-$AFLARE_E2E_SHA.$SUBDOMAIN.workers.dev/" >> "$GITHUB_OUTPUT"
+
+      - name: aflare e2e status (sanity)
+        env:
+          AFLARE_E2E_SHA: ${{ steps.provision.outputs.sha7 }}
+        run: pnpm exec tsx ./packages/astroflare-cli/src/cli.ts e2e status
 
       - name: e2e tests
         env:
-          AFLARE_E2E_URL: ${{ steps.provision.outputs.url }}
+          AFLARE_E2E_URL: ${{ steps.provision.outputs.url_minimal }}
+          AFLARE_E2E_URL_BASICS: ${{ steps.provision.outputs.url_basics }}
+          AFLARE_E2E_URL_SSR: ${{ steps.provision.outputs.url_ssr }}
         run: pnpm exec vitest run --project e2e
 
       # Teardown ALWAYS runs — failed test runs must not leak resources.
       - name: teardown
         if: always()
         run: |
-          SHA7="${GITHUB_SHA:0:7}"
-          export AFLARE_E2E_SHA="$SHA7"
-          pnpm --filter @astroflare/e2e exec node ./src/cli.ts teardown-all || true
+          export AFLARE_E2E_SHA="${GITHUB_SHA:0:7}"
+          pnpm exec tsx ./packages/astroflare-cli/src/cli.ts e2e teardown-all || true

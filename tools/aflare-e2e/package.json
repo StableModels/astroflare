@@ -11,9 +11,6 @@
       "default": "./src/index.ts"
     }
   },
-  "bin": {
-    "aflare-e2e": "./src/cli.ts"
-  },
   "scripts": {
     "test": "vitest run --project e2e-cli"
   },

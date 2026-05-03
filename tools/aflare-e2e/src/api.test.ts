@@ -9,7 +9,7 @@ function mockResponse(status: number, body: unknown): Response {
 }
 
 describe("makeCloudflareClient", () => {
-	it("uploadWorker sends PUT with Bearer auth + javascript content-type", async () => {
+	it("uploadWorker sends PUT as multipart/form-data with module metadata", async () => {
 		const fetchImpl = vi.fn().mockResolvedValue(mockResponse(200, { success: true, result: null }));
 		const client = makeCloudflareClient({
 			accountId: "ACCT",
@@ -27,8 +27,62 @@ describe("makeCloudflareClient", () => {
 		expect((init as RequestInit).method).toBe("PUT");
 		const headers = (init as RequestInit).headers as Record<string, string>;
 		expect(headers.Authorization).toBe("Bearer TOKEN");
-		expect(headers["content-type"]).toBe("application/javascript");
-		expect((init as RequestInit).body).toBe("export default {};");
+		// Modern ES-modules upload: body is FormData; fetch sets the
+		// boundary'd content-type itself, so the wrapper doesn't pin one.
+		const body = (init as RequestInit).body;
+		expect(body).toBeInstanceOf(FormData);
+		const fd = body as FormData;
+		const metadataPart = fd.get("metadata");
+		expect(metadataPart).toBeInstanceOf(Blob);
+		const metadataText = await (metadataPart as Blob).text();
+		const metadata = JSON.parse(metadataText) as { main_module: string };
+		expect(metadata.main_module).toBe("worker.js");
+		const moduleBlob = fd.get("worker.js") as Blob;
+		expect(await moduleBlob.text()).toBe("export default {};");
+	});
+
+	it("enableWorkerSubdomain POSTs `{ enabled: true }` to /subdomain", async () => {
+		const fetchImpl = vi.fn().mockResolvedValue(mockResponse(200, { success: true, result: null }));
+		const client = makeCloudflareClient({
+			accountId: "A",
+			apiToken: "T",
+			fetchImpl,
+			baseUrl: "https://stub",
+		});
+		await client.enableWorkerSubdomain("my-worker");
+		const [url, init] = fetchImpl.mock.calls[0] ?? [];
+		expect(url).toBe("https://stub/accounts/A/workers/scripts/my-worker/subdomain");
+		expect((init as RequestInit).method).toBe("POST");
+		expect((init as RequestInit).body).toBe('{"enabled":true}');
+	});
+
+	it("getAccountSubdomain unwraps the subdomain field + caches", async () => {
+		const fetchImpl = vi
+			.fn()
+			.mockResolvedValue(mockResponse(200, { success: true, result: { subdomain: "myteam" } }));
+		const client = makeCloudflareClient({
+			accountId: "A",
+			apiToken: "T",
+			fetchImpl,
+			baseUrl: "https://stub",
+		});
+		expect(await client.getAccountSubdomain()).toBe("myteam");
+		// Second call uses the cache → no extra fetch.
+		expect(await client.getAccountSubdomain()).toBe("myteam");
+		expect(fetchImpl).toHaveBeenCalledOnce();
+	});
+
+	it("getAccountSubdomain throws a helpful error when the account has none", async () => {
+		const fetchImpl = vi
+			.fn()
+			.mockResolvedValue(mockResponse(200, { success: true, result: { subdomain: null } }));
+		const client = makeCloudflareClient({
+			accountId: "A",
+			apiToken: "T",
+			fetchImpl,
+			baseUrl: "https://stub",
+		});
+		await expect(client.getAccountSubdomain()).rejects.toThrow(/workers\.dev subdomain/);
 	});
 
 	it("deleteWorker treats 404 as success", async () => {
