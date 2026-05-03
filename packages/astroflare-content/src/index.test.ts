@@ -1,12 +1,12 @@
-import { MemoryStorage } from "@astroflare/test-utils";
+import { MemorySite } from "@astroflare/test-utils";
 import { describe, expect, it } from "vitest";
 import { createContentReader, defineCollection, z } from "./index.js";
 
 const enc = (s: string) => new TextEncoder().encode(s);
 
-async function fixture(files: Record<string, string>): Promise<MemoryStorage> {
-	const s = new MemoryStorage();
-	for (const [p, body] of Object.entries(files)) await s.write(p, enc(body));
+async function fixture(files: Record<string, string>): Promise<MemorySite> {
+	const s = new MemorySite();
+	for (const [p, body] of Object.entries(files)) s.write(p, enc(body));
 	return s;
 }
 

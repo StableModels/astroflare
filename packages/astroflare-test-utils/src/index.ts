@@ -9,6 +9,7 @@
  * Cloudflare-specific behaviour (workerd globals, hibernation, etc.).
  */
 export * from "./memory-storage.js";
+export * from "./memory-site.js";
 export * from "./map-coordinator.js";
 export * from "./memory-image-service.js";
 export * from "./inproc-executor.js";

@@ -401,9 +401,19 @@ export interface ImageMetadata {
 /**
  * The full set of host capabilities the framework needs. Constructed by the
  * host package and passed to `createApp(config, host)`.
+ *
+ * Phase 26 / 26b: `site` + `cache` are the canonical capabilities the host
+ * supplies; `storage` remains for back-compat during the framework-internal
+ * migration (preview-server, content reader still consume it). New code
+ * should prefer `host.site` + `host.cache`.
  */
 export interface Host {
+	/** @deprecated Use `site` (read) + `cache` (compile cache). */
 	storage: Storage;
+	/** Read-only file capability the framework consumes (Phase 26). */
+	site?: Site;
+	/** Content-addressed compile cache (Phase 26). */
+	cache?: Cache;
 	executor: Executor;
 	coordinator: Coordinator;
 	transport: Transport;
