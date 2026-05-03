@@ -1,11 +1,17 @@
 #!/usr/bin/env bash
 #
-# scripts/setup — fetch the git-crypt symmetric key from 1Password
-# and unlock encrypted files (`.dev.vars`) on a fresh checkout.
+# scripts/setup — fresh-checkout bootstrap. Two steps, both idempotent:
 #
-# The base64-encoded key lives in 1Password as a Secure Note titled
-# "Git Crypt Key, Astroflare" in the StableModels vault (Flywheel
-# Equity team). The note body (`notesPlain`) holds the base64 string.
+#   1. Fetch the git-crypt symmetric key from 1Password and unlock
+#      `.dev.vars` (and any other git-crypt-filtered files).
+#
+#   2. Authorize the repo's `.envrc` with direnv so cd-ing into the
+#      directory auto-loads `.dev.vars` into the shell environment.
+#
+# The base64-encoded git-crypt key lives in 1Password as a Secure
+# Note titled "Git Crypt Key, Astroflare" in the StableModels vault
+# (Flywheel Equity team). The note body (`notesPlain`) holds the
+# base64 string.
 #
 # `op://` references reject `,` and `%`, so the title can't appear
 # literally — the default reference below uses the item's UUID
@@ -27,8 +33,10 @@
 #
 #     export OP_ACCOUNT=ryan@flywheeleq.com
 #
-# Prereqs: `git-crypt` and the 1Password CLI (`op`) installed and
-# `op` signed in (`op signin` or via the desktop app integration).
+# Prereqs: `git-crypt`, the 1Password CLI (`op`), and `direnv`
+# installed. `op` must be signed in (`op signin` or via the desktop
+# app integration). `direnv` must be hooked into your shell — see
+# https://direnv.net/docs/hook.html.
 
 set -euo pipefail
 
@@ -37,51 +45,94 @@ REPO_ROOT="$(git rev-parse --show-toplevel)"
 
 cd "$REPO_ROOT"
 
-# Already unlocked? `git-crypt status` returns 0 only when every
-# encrypted entry is decrypted.
-if git-crypt status .dev.vars 2>/dev/null | grep -q "^    not encrypted"; then
-    echo "git-crypt: .dev.vars is already decrypted — nothing to do."
+# ---------------------------------------------------------------------------
+# Step 1: git-crypt unlock (skip if already unlocked)
+# ---------------------------------------------------------------------------
+#
+# `git-crypt status` reports the *filter* state (always "encrypted"
+# once `.dev.vars` is in `.gitattributes`), not the working-tree
+# state. Detect "already unlocked" by reading the file's magic
+# bytes: encrypted blobs start with `\0GITCRYPT\0`, plaintext doesn't.
+
+FIRST_BYTE_HEX="$(head -c 1 .dev.vars 2>/dev/null | od -An -tx1 | tr -d ' \n' || echo "")"
+if [ "$FIRST_BYTE_HEX" = "00" ]; then
+    NEEDS_UNLOCK=true
+else
+    NEEDS_UNLOCK=false
+fi
+
+if [ "$NEEDS_UNLOCK" = "false" ]; then
+    echo "git-crypt: .dev.vars is already decrypted - skipping unlock."
+else
+    command -v git-crypt >/dev/null 2>&1 || {
+        echo "error: git-crypt not found in PATH. Install it first:" >&2
+        echo "  brew install git-crypt" >&2
+        exit 1
+    }
+    command -v op >/dev/null 2>&1 || {
+        echo "error: 1Password CLI ('op') not found in PATH. Install it first:" >&2
+        echo "  brew install --cask 1password-cli" >&2
+        exit 1
+    }
+
+    # Fetch the base64 key. Pass `--account` if `OP_ACCOUNT` is set so
+    # `op` picks the right team when the user is signed into multiple.
+    # `op read` exits non-zero on auth / reference errors and `set -e`
+    # propagates that.
+    echo "Reading git-crypt key from ${OP_REF}..."
+    if [ -n "${OP_ACCOUNT:-}" ]; then
+        B64="$(op read --account "$OP_ACCOUNT" "$OP_REF")"
+    else
+        B64="$(op read "$OP_REF")"
+    fi
+    if [ -z "$B64" ]; then
+        echo "error: 1Password returned an empty value for $OP_REF" >&2
+        exit 1
+    fi
+
+    # Decode to a temp file, unlock, then wipe. The temp file lives in
+    # /tmp (outside the repo) so a wayward commit can't include it; we
+    # also clean up eagerly via trap.
+    TMP="$(mktemp -t aflare-gitcrypt.XXXXXX)"
+    trap 'rm -f "$TMP"' EXIT
+
+    # `base64 --decode` works on BOTH BSD/macOS and GNU coreutils. The
+    # `--ignore-garbage` flag silently dropped legitimate input on macOS;
+    # 1Password returns clean base64 so we don't need it.
+    printf '%s' "$B64" | base64 --decode > "$TMP"
+
+    git-crypt unlock "$TMP"
+
+    echo "git-crypt: unlocked. .dev.vars and any other filtered files are now readable."
+fi
+
+# ---------------------------------------------------------------------------
+# Step 2: direnv allow — auto-load .dev.vars into shell sessions
+# ---------------------------------------------------------------------------
+
+if ! command -v direnv >/dev/null 2>&1; then
+    echo
+    echo "warning: direnv not found in PATH — skipping shell auto-load setup." >&2
+    echo "  brew install direnv  # then hook into your shell:" >&2
+    echo "  https://direnv.net/docs/hook.html" >&2
+    echo "  After installing, re-run this script to authorize .envrc." >&2
     exit 0
 fi
 
-# Sanity-check toolchain.
-command -v git-crypt >/dev/null 2>&1 || {
-    echo "error: git-crypt not found in PATH. Install it first:" >&2
-    echo "  brew install git-crypt" >&2
-    exit 1
-}
-command -v op >/dev/null 2>&1 || {
-    echo "error: 1Password CLI ('op') not found in PATH. Install it first:" >&2
-    echo "  brew install --cask 1password-cli" >&2
-    exit 1
-}
-
-# Fetch the base64 key. Pass `--account` if `OP_ACCOUNT` is set so
-# `op` picks the right team when the user is signed into multiple.
-# `op read` exits non-zero on auth / reference errors and `set -e`
-# propagates that.
-echo "Reading git-crypt key from $OP_REF…"
-if [ -n "${OP_ACCOUNT:-}" ]; then
-    B64="$(op read --account "$OP_ACCOUNT" "$OP_REF")"
-else
-    B64="$(op read "$OP_REF")"
-fi
-if [ -z "$B64" ]; then
-    echo "error: 1Password returned an empty value for $OP_REF" >&2
-    exit 1
+if [ ! -f .envrc ]; then
+    echo "warning: .envrc missing — auto-load skipped (expected committed file)." >&2
+    exit 0
 fi
 
-# Decode to a temp file, unlock, then wipe. The temp file lives in
-# /tmp (outside the repo) so a wayward commit can't include it; we
-# also clean up eagerly via trap.
-TMP="$(mktemp -t aflare-gitcrypt.XXXXXX)"
-trap 'rm -f "$TMP"' EXIT
+# `direnv allow` is idempotent and writes a hash into direnv's local
+# state directory; it doesn't print on success unless we ask. Capture
+# stderr so a fresh-shell user sees the "loaded …" line direnv emits
+# on the next prompt.
+echo "Authorizing .envrc with direnv..."
+direnv allow .
 
-# `base64 --decode` works on BOTH BSD/macOS and GNU coreutils. The
-# `--ignore-garbage` flag silently dropped legitimate input on macOS;
-# 1Password returns clean base64 so we don't need it.
-printf '%s' "$B64" | base64 --decode > "$TMP"
-
-git-crypt unlock "$TMP"
-
-echo "git-crypt: unlocked. .dev.vars and any other filtered files are now readable."
+cat <<'NOTE'
+direnv: .envrc is authorized. Open a new terminal in this directory
+(or run `direnv reload`) and the values from `.dev.vars` will be
+loaded into your shell environment.
+NOTE
