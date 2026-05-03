@@ -17,12 +17,18 @@
     "format": "biome format --write .",
     "test": "tsc -b && vitest run",
     "test:watch": "vitest",
-    "test:coverage": "tsc -b && vitest run --coverage"
+    "test:coverage": "tsc -b && vitest run --coverage",
+    "prepare": "husky"
+  },
+  "lint-staged": {
+    "*": ["biome check --write --no-errors-on-unmatched"]
   },
   "devDependencies": {
     "@biomejs/biome": "1.9.4",
     "@types/node": "^22.10.0",
     "@vitest/coverage-v8": "2.1.8",
+    "husky": "^9.1.7",
+    "lint-staged": "^16.4.0",
     "rimraf": "^6.0.1",
     "typescript": "^5.7.2",
     "vitest": "^2.1.8"
