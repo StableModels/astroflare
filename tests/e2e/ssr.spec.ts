@@ -2,11 +2,11 @@
  * Phase 20a e2e — `ssr` fixture.
  *
  * Verifies a `.ts` endpoint deployed as a server route: echo back
- * search params as JSON. Skipped unless `AFLARE_E2E_URL_SSR` is set.
+ * search params as JSON. Skipped unless `AFLARE_URL_SSR` is set.
  */
 import { describe, expect, it } from "vitest";
 
-const E2E_URL = process.env.AFLARE_E2E_URL_SSR;
+const E2E_URL = process.env.AFLARE_URL_SSR;
 const describeIfE2e = E2E_URL ? describe : describe.skip;
 
 describeIfE2e("e2e: ssr fixture", () => {

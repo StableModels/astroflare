@@ -1,11 +1,11 @@
 /**
- * `aflare-e2e gc` — sweep orphan Worker scripts left in the
+ * `findOrphanWorkers` — sweep orphan Worker scripts left in the
  * Cloudflare account that don't appear in any `.state/<sha7>/`
- * directory locally. Useful after a crashed CI run or a
- * mistake-cleanup; pairs with `teardown-all`.
+ * directory locally. Useful after a crashed CI run, a mistake
+ * cleanup, or a debug session that didn't reach its `teardown`.
  *
- * Returns the orphan list rather than deleting unprompted —
- * caller decides whether to print or to follow up with
+ * Returns the orphan list rather than deleting unprompted — caller
+ * decides whether to print or to follow up with
  * `client.deleteWorker(name)`.
  */
 
@@ -15,8 +15,9 @@ import type { CloudflareClient } from "../api.js";
 export interface GcInput {
 	rootDir: string;
 	client: CloudflareClient;
-	/** Only consider Workers whose name starts with this prefix as candidates
-	 *  (so we don't propose deleting unrelated scripts in the account). */
+	/** Only consider Workers whose name starts with this prefix as
+	 *  candidates (so we don't propose deleting unrelated scripts in
+	 *  the account). Default `aflare-`. */
 	namePrefix?: string;
 }
 
@@ -25,7 +26,7 @@ export interface GcResult {
 	knownLocal: readonly string[];
 }
 
-const DEFAULT_PREFIX = "aflare-e2e-";
+const DEFAULT_PREFIX = "aflare-";
 
 export async function findOrphanWorkers(input: GcInput): Promise<GcResult> {
 	const prefix = input.namePrefix ?? DEFAULT_PREFIX;
@@ -38,10 +39,10 @@ export async function findOrphanWorkers(input: GcInput): Promise<GcResult> {
 }
 
 /**
- * Walk every `tests/e2e/.state/<sha7>/<fixture>.json` and build the
- * set of worker names. We don't read each file — the worker name is
- * deterministic (`<prefix>-<fixture>-<sha7>`), so the SHA + fixture
- * encoded in the path are enough.
+ * Walk every `tests/e2e/.state/<sha7>/<name>.json` and rebuild the
+ * worker-name set. We don't read each file — the worker name is
+ * deterministic (`aflare-<name>-<sha>`), so the SHA + name encoded
+ * in the path are enough.
  */
 function collectKnownWorkers(rootDir: string): string[] {
 	const stateDir = `${rootDir}/tests/e2e/.state`;
@@ -53,7 +54,7 @@ function collectKnownWorkers(rootDir: string): string[] {
 		for (const filename of readdirSync(shaDir)) {
 			if (!filename.endsWith(".json")) continue;
 			const fixture = filename.slice(0, -".json".length);
-			out.push(`aflare-e2e-${fixture}-${sha}`);
+			out.push(`aflare-${fixture}-${sha}`);
 		}
 	}
 	return out;

@@ -82,12 +82,21 @@ importers:
 
   packages/astroflare-cli:
     dependencies:
+      '@astroflare/cli-lib':
+        specifier: workspace:*
+        version: link:../astroflare-cli-lib
       '@astroflare/core':
         specifier: workspace:*
         version: link:../astroflare-core
-      '@astroflare/e2e':
-        specifier: workspace:*
-        version: link:../../tools/aflare-e2e
+    devDependencies:
+      '@types/node':
+        specifier: ^22.10.0
+        version: 22.19.17
+      vitest:
+        specifier: ^2.1.8
+        version: 2.1.8(@types/node@22.19.17)(happy-dom@15.11.7)
+
+  packages/astroflare-cli-lib:
     devDependencies:
       '@types/node':
         specifier: ^22.10.0
@@ -257,9 +266,9 @@ importers:
       '@astroflare/cli':
         specifier: workspace:*
         version: link:../../packages/astroflare-cli
-      '@astroflare/e2e':
+      '@astroflare/cli-lib':
         specifier: workspace:*
-        version: link:../../tools/aflare-e2e
+        version: link:../../packages/astroflare-cli-lib
 
   tests/integration:
     dependencies:
@@ -319,15 +328,6 @@ importers:
       wrangler:
         specifier: ^4.0.0
         version: 4.87.0(@cloudflare/workers-types@4.20260502.1)
-
-  tools/aflare-e2e:
-    devDependencies:
-      '@types/node':
-        specifier: ^22.10.0
-        version: 22.19.17
-      vitest:
-        specifier: ^2.1.8
-        version: 2.1.8(@types/node@22.19.17)(happy-dom@15.11.7)
 
 packages:
 

@@ -1,16 +1,16 @@
 /**
- * Per-fixture state store — `tests/e2e/.state/<sha7>/<fixture>.json`.
+ * Per-Worker state store — `tests/e2e/.state/<sha7>/<name>.json`.
  *
- * Provisioning a fixture writes a small JSON document recording the
- * resources it owns (Worker name, R2 bucket name, deployed URL).
- * Subsequent commands (`run`, `teardown`) read that document instead
- * of round-tripping the API. Names are deterministic
- * (`aflare-e2e-<fixture>-<sha7>`) so concurrent CI runs on different
- * SHAs share nothing.
+ * Provisioning a managed Worker writes a small JSON document
+ * recording the resources it owns (Worker name, R2 bucket name,
+ * deployed URL). Subsequent commands (`destroy`, `inspect`,
+ * `health`) read that document instead of round-tripping the API.
+ * Names are deterministic (`aflare-<name>-<sha7>`) so concurrent
+ * runs on different SHAs share nothing.
  *
  * The directory is gitignored (`tests/e2e/.state/`) so leaked state
- * from a crashed run never lands in git; `gc` (deferred to Phase 20a)
- * sweeps orphans by listing the live account.
+ * from a crashed run never lands in git; `findOrphanWorkers` sweeps
+ * orphans by listing the live account.
  */
 
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";

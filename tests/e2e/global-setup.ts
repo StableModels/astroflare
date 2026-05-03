@@ -21,13 +21,13 @@
 
 import { execSync } from "node:child_process";
 import { readdirSync, statSync } from "node:fs";
-import { loadFixtureBundle } from "@astroflare/cli/commands/fixtures";
 import {
 	type FixtureState,
 	makeCloudflareClient,
 	provisionFixture,
 	teardownFixture,
-} from "@astroflare/e2e";
+} from "@astroflare/cli-lib";
+import { loadFixtureBundle } from "@astroflare/cli/commands/fixtures";
 
 interface ProvisionContext {
 	accountId: string;
@@ -41,9 +41,8 @@ function readContext(): ProvisionContext {
 	const apiToken = process.env.CLOUDFLARE_API_TOKEN;
 	if (!accountId) throw new Error("CLOUDFLARE_ACCOUNT_ID is required for e2e tests");
 	if (!apiToken) throw new Error("CLOUDFLARE_API_TOKEN is required for e2e tests");
-	const sha7 =
-		process.env.AFLARE_E2E_SHA ?? execSync("git rev-parse --short=7 HEAD").toString().trim();
-	const rootDir = process.env.AFLARE_E2E_ROOT ?? process.cwd();
+	const sha7 = process.env.AFLARE_SHA ?? execSync("git rev-parse --short=7 HEAD").toString().trim();
+	const rootDir = process.env.AFLARE_ROOT ?? process.cwd();
 	return { accountId, apiToken, sha7, rootDir };
 }
 
@@ -60,15 +59,15 @@ function discoverFixtures(rootDir: string): readonly string[] {
 
 /** Spec files read these env vars: */
 function urlEnvVar(fixture: string): string {
-	if (fixture === "minimal") return "AFLARE_E2E_URL";
-	return `AFLARE_E2E_URL_${fixture.toUpperCase()}`;
+	if (fixture === "minimal") return "AFLARE_URL";
+	return `AFLARE_URL_${fixture.toUpperCase()}`;
 }
 
 export default async function setup(): Promise<() => Promise<void>> {
 	// Local-friendly: when Cloudflare credentials aren't available
 	// (e.g. a developer running `pnpm test` without unlocking
 	// `.dev.vars`), skip provisioning entirely. The spec files
-	// already self-skip when their `AFLARE_E2E_URL_*` env vars are
+	// already self-skip when their `AFLARE_URL_*` env vars are
 	// missing, so this is a clean no-op.
 	if (!process.env.CLOUDFLARE_ACCOUNT_ID || !process.env.CLOUDFLARE_API_TOKEN) {
 		console.log("[e2e setup] CLOUDFLARE_* credentials missing — skipping provisioning");
@@ -99,7 +98,7 @@ export default async function setup(): Promise<() => Promise<void>> {
 
 	// workers.dev DNS settles within a couple of seconds — wait once
 	// for everyone before any spec issues a fetch.
-	const settleMs = Number(process.env.AFLARE_E2E_SETTLE_MS ?? 8000);
+	const settleMs = Number(process.env.AFLARE_SETTLE_MS ?? 8000);
 	if (provisioned.length > 0 && settleMs > 0) {
 		console.log(`[e2e setup] waiting ${settleMs}ms for workers.dev DNS`);
 		await new Promise((resolve) => setTimeout(resolve, settleMs));

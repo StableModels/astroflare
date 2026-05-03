@@ -55,10 +55,8 @@ jobs:
         run: pnpm typecheck
 
       - name: e2e tests (provision + run + teardown)
-        # Worker names embed AFLARE_E2E_SHA verbatim; truncate GITHUB_SHA
+        # Worker names embed AFLARE_SHA verbatim; truncate GITHUB_SHA
         # to its short form (Cloudflare caps script names at 64 chars).
-        env:
-          AFLARE_E2E_SHA: ${{ github.sha }}
         run: |
-          export AFLARE_E2E_SHA="${GITHUB_SHA:0:7}"
+          export AFLARE_SHA="${GITHUB_SHA:0:7}"
           pnpm exec vitest run --project e2e

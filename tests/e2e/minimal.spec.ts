@@ -5,13 +5,13 @@
  * `/` route returns 200, the rendered HTML contains the page's
  * literal greeting, and the response is HTML.
  *
- * Skipped unless `AFLARE_E2E_URL` is set — the test only runs in
+ * Skipped unless `AFLARE_URL` is set — the test only runs in
  * CI's e2e workflow (or when a developer manually drives a
  * deploy with `aflare-e2e provision minimal`).
  */
 import { describe, expect, it } from "vitest";
 
-const E2E_URL = process.env.AFLARE_E2E_URL;
+const E2E_URL = process.env.AFLARE_URL;
 const describeIfE2e = E2E_URL ? describe : describe.skip;
 
 describeIfE2e("e2e: minimal fixture", () => {

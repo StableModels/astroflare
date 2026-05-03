@@ -2,12 +2,12 @@
  * Phase 20a e2e — `basics` fixture.
  *
  * Verifies routing, static-asset serving, and scoped-CSS emission.
- * Skipped unless `AFLARE_E2E_URL_BASICS` is set; the workflow's
+ * Skipped unless `AFLARE_URL_BASICS` is set; the workflow's
  * provision step exports it.
  */
 import { describe, expect, it } from "vitest";
 
-const E2E_URL = process.env.AFLARE_E2E_URL_BASICS;
+const E2E_URL = process.env.AFLARE_URL_BASICS;
 const describeIfE2e = E2E_URL ? describe : describe.skip;
 
 describeIfE2e("e2e: basics fixture", () => {

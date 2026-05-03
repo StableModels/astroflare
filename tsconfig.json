@@ -10,6 +10,6 @@
     { "path": "./packages/astroflare-host-cloudflare" },
     { "path": "./packages/astroflare-content" },
     { "path": "./packages/astroflare-cli" },
-    { "path": "./tools/aflare-e2e" }
+    { "path": "./packages/astroflare-cli-lib" }
   ]
 }

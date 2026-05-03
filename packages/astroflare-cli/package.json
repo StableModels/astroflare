@@ -23,7 +23,7 @@
   },
   "dependencies": {
     "@astroflare/core": "workspace:*",
-    "@astroflare/e2e": "workspace:*"
+    "@astroflare/cli-lib": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

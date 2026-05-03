@@ -24,7 +24,7 @@ function makeMockClient(overrides: Partial<CloudflareClient> = {}): CloudflareCl
 
 let rootDir: string;
 beforeEach(() => {
-	rootDir = mkdtempSync(join(tmpdir(), "aflare-e2e-list-"));
+	rootDir = mkdtempSync(join(tmpdir(), "aflare-list-"));
 });
 afterEach(() => {
 	rmSync(rootDir, { recursive: true, force: true });
@@ -49,7 +49,7 @@ describe("inspectFixture", () => {
 		const client = makeMockClient();
 		await provisionFixture({ rootDir, sha7: "s", fixture: "f", client, workerBundle: "x" });
 		const state = inspectFixture({ rootDir, sha7: "s", fixture: "f" });
-		expect(state?.workerName).toBe("aflare-e2e-f-s");
+		expect(state?.workerName).toBe("aflare-f-s");
 	});
 
 	it("returns null for an unprovisioned fixture", () => {
@@ -98,23 +98,23 @@ describe("findOrphanWorkers", () => {
 		await provisionFixture({ rootDir, sha7: "abc", fixture: "a", client, workerBundle: "x" });
 		await provisionFixture({ rootDir, sha7: "abc", fixture: "b", client, workerBundle: "x" });
 		const live = [
-			{ id: "aflare-e2e-a-abc", created_on: "2026-01-01" },
-			{ id: "aflare-e2e-b-abc", created_on: "2026-01-02" },
-			{ id: "aflare-e2e-stale-zzz", created_on: "2025-12-31" },
+			{ id: "aflare-a-abc", created_on: "2026-01-01" },
+			{ id: "aflare-b-abc", created_on: "2026-01-02" },
+			{ id: "aflare-stale-zzz", created_on: "2025-12-31" },
 			{ id: "unrelated-script", created_on: "2025-11-30" },
 		];
 		const stale = makeMockClient({ listWorkers: vi.fn(async () => live) });
 		const result = await findOrphanWorkers({ rootDir, client: stale });
 		expect(result.orphans).toHaveLength(1);
-		expect(result.orphans[0]?.id).toBe("aflare-e2e-stale-zzz");
-		expect(result.knownLocal).toContain("aflare-e2e-a-abc");
+		expect(result.orphans[0]?.id).toBe("aflare-stale-zzz");
+		expect(result.knownLocal).toContain("aflare-a-abc");
 	});
 
 	it("returns no orphans when every live worker matches local state", async () => {
 		const client = makeMockClient();
 		await provisionFixture({ rootDir, sha7: "x", fixture: "f", client, workerBundle: "y" });
 		const stale = makeMockClient({
-			listWorkers: vi.fn(async () => [{ id: "aflare-e2e-f-x" }]),
+			listWorkers: vi.fn(async () => [{ id: "aflare-f-x" }]),
 		});
 		const result = await findOrphanWorkers({ rootDir, client: stale });
 		expect(result.orphans).toEqual([]);

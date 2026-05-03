@@ -1,7 +1,7 @@
 /**
  * Filesystem bridge for the `provision` verb (and the e2e test
  * suite's globalSetup, which uses these same helpers via the
- * `@astroflare/e2e` library).
+ * `@astroflare/cli-lib` library).
  *
  * Reads the per-fixture Worker bundle from
  * `tests/e2e/fixtures/<name>/worker.js`. When the framework's deploy

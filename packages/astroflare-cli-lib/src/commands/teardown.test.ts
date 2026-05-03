@@ -22,7 +22,7 @@ function makeMockClient(overrides: Partial<CloudflareClient> = {}): CloudflareCl
 
 let rootDir: string;
 beforeEach(() => {
-	rootDir = mkdtempSync(join(tmpdir(), "aflare-e2e-tear-"));
+	rootDir = mkdtempSync(join(tmpdir(), "aflare-tear-"));
 });
 afterEach(() => {
 	rmSync(rootDir, { recursive: true, force: true });
@@ -33,8 +33,8 @@ describe("teardownFixture", () => {
 		const client = makeMockClient();
 		await provisionFixture({ rootDir, sha7: "s", fixture: "f", client, workerBundle: "x" });
 		const r = await teardownFixture({ rootDir, sha7: "s", fixture: "f", client });
-		expect(r.deletedWorker).toBe("aflare-e2e-f-s");
-		expect(r.deletedBucket).toBe("aflare-e2e-f-s-store");
+		expect(r.deletedWorker).toBe("aflare-f-s");
+		expect(r.deletedBucket).toBe("aflare-f-s-store");
 		expect(readFixtureState(rootDir, "s", "f")).toBeNull();
 	});
 

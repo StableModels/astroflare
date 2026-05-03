@@ -21,7 +21,7 @@ function makeMockClient(overrides: Partial<CloudflareClient> = {}): CloudflareCl
 
 let rootDir: string;
 beforeEach(() => {
-	rootDir = mkdtempSync(join(tmpdir(), "aflare-e2e-prov-"));
+	rootDir = mkdtempSync(join(tmpdir(), "aflare-prov-"));
 });
 afterEach(() => {
 	rmSync(rootDir, { recursive: true, force: true });
@@ -37,13 +37,13 @@ describe("provisionFixture", () => {
 			client,
 			workerBundle: "export default {};",
 		});
-		expect(client.createR2Bucket).toHaveBeenCalledWith("aflare-e2e-minimal-abc1234-store");
+		expect(client.createR2Bucket).toHaveBeenCalledWith("aflare-minimal-abc1234-store");
 		expect(client.uploadWorker).toHaveBeenCalledWith(
-			"aflare-e2e-minimal-abc1234",
+			"aflare-minimal-abc1234",
 			"export default {};",
 		);
-		expect(client.enableWorkerSubdomain).toHaveBeenCalledWith("aflare-e2e-minimal-abc1234");
-		expect(state.url).toBe("https://aflare-e2e-minimal-abc1234.test-account.workers.dev");
+		expect(client.enableWorkerSubdomain).toHaveBeenCalledWith("aflare-minimal-abc1234");
+		expect(state.url).toBe("https://aflare-minimal-abc1234.test-account.workers.dev");
 		expect(readFixtureState(rootDir, "abc1234", "minimal")?.workerName).toBe(state.workerName);
 	});
 
@@ -79,7 +79,7 @@ describe("provisionFixture", () => {
 			workerBundle: "x",
 			urlPattern: (n) => `https://stub/${n}`,
 		});
-		expect(state.url).toBe("https://stub/aflare-e2e-f-s");
+		expect(state.url).toBe("https://stub/aflare-f-s");
 		expect(client.getAccountSubdomain).not.toHaveBeenCalled();
 	});
 });

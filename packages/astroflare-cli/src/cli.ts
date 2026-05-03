@@ -30,7 +30,7 @@
  * provisioning through globalSetup.)
  *
  * Configuration resolves in priority order: CLI flags →
- * environment (CLOUDFLARE_*, AFLARE_E2E_*, DEPLOY_TOKEN) →
+ * environment (CLOUDFLARE_*, AFLARE_*, DEPLOY_TOKEN) →
  * `aflare.config.json`.
  *
  * Output: stdout is one-line JSON (scriptable); stderr is human
@@ -48,7 +48,7 @@ import {
 	provisionFixture,
 	statusReport,
 	teardownFixture,
-} from "@astroflare/e2e";
+} from "@astroflare/cli-lib";
 import { type DeployConfig, resolveConfig } from "./commands/deploy.js";
 import { cmdDeploy, cmdRollback, cmdStatus } from "./commands/deploy.js";
 import { loadFixtureBundle } from "./commands/fixtures.js";
@@ -195,9 +195,8 @@ function opsCtx(): OpsCtx {
 	const apiToken = process.env.CLOUDFLARE_API_TOKEN;
 	if (!accountId) throw new Error("CLOUDFLARE_ACCOUNT_ID is required");
 	if (!apiToken) throw new Error("CLOUDFLARE_API_TOKEN is required");
-	const sha7 =
-		process.env.AFLARE_E2E_SHA ?? execSync("git rev-parse --short=7 HEAD").toString().trim();
-	const rootDir = process.env.AFLARE_E2E_ROOT ?? process.cwd();
+	const sha7 = process.env.AFLARE_SHA ?? execSync("git rev-parse --short=7 HEAD").toString().trim();
+	const rootDir = process.env.AFLARE_ROOT ?? process.cwd();
 	const client = makeCloudflareClient({ accountId, apiToken });
 	return { rootDir, sha7, client };
 }
@@ -439,8 +438,8 @@ function printUsage(): void {
 			"ENVIRONMENT",
 			"  CLOUDFLARE_ACCOUNT_ID, CLOUDFLARE_API_TOKEN — used as defaults if",
 			"  flags are absent. The deploy token defaults to DEPLOY_TOKEN.",
-			"  AFLARE_E2E_SHA  — override the SHA used in managed Worker names",
-			"  AFLARE_E2E_ROOT — override the repo root used to find fixtures",
+			"  AFLARE_SHA   — override the SHA used in managed Worker names",
+			"  AFLARE_ROOT  — override the repo root used to find fixtures",
 			"",
 		].join("\n"),
 	);

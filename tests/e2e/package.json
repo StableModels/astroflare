@@ -5,6 +5,6 @@
   "type": "module",
   "dependencies": {
     "@astroflare/cli": "workspace:*",
-    "@astroflare/e2e": "workspace:*"
+    "@astroflare/cli-lib": "workspace:*"
   }
 }
