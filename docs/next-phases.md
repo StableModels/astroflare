@@ -272,7 +272,28 @@ users still hit expression-parser errors inside raw children
 when the body has unbalanced parens). Production-deploy overlay
 scrub is also a follow-up.
 
-### Phase 20 — End-to-end tests against live Cloudflare
+### Phase 20 — End-to-end tests against live Cloudflare ✓
+
+**Done (scaffolding).** Retro: [`docs/phases/phase-20-e2e.md`](./phases/phase-20-e2e.md).
+22 new tests; 678 total / 60 files / 7 pools all green.
+`tools/aflare-e2e/` CLI (provision / teardown / teardown-all /
+list verbs) with mocked-fetch unit tests; `tests/e2e/` separate
+vitest project (opt-in via `AFLARE_E2E_URL`); `minimal` fixture +
+`.github/workflows/e2e.yml` running on push-to-main + nightly.
+`tests/e2e/.state/` is gitignored so resource state doesn't bleed
+into commits.
+
+**Phase 20a (deferred):** the rest of the verbs (`build`/`deploy`/
+`run`/`preview`/`inspect`/`status`/`logs`/`metrics`/`trace`/`gc`)
+plus the rest of the Astro fixture corpus (basics / blog /
+portfolio / non-html-pages / middleware / ssr / framework-react /
+with-mdx / hackernews). The architectural slots are ready in
+`cli.ts`'s dispatch + `tests/e2e/fixtures/`; each is mechanical
+to add.
+
+---
+
+(The full Phase 20 plan below stays for reference.)
 
 The capstone phase. Every prior phase is verified locally — unit
 tests, Miniflare integration, workerd pool. Phase 20 closes the

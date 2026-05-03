@@ -9,6 +9,7 @@
     { "path": "./packages/astroflare-test-utils" },
     { "path": "./packages/astroflare-host-cloudflare" },
     { "path": "./packages/astroflare-content" },
-    { "path": "./packages/astroflare-cli" }
+    { "path": "./packages/astroflare-cli" },
+    { "path": "./tools/aflare-e2e" }
   ]
 }

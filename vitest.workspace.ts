@@ -20,5 +20,7 @@ export default [
 	"./packages/astroflare-host-cloudflare/vitest.config.ts",
 	"./tests/workerd/vitest.config.ts",
 	"./tests/integration/vitest.config.ts",
+	"./tests/e2e/vitest.config.ts",
+	"./tools/aflare-e2e/vitest.config.ts",
 	"./examples/minimal-blog/vitest.config.ts",
 ];

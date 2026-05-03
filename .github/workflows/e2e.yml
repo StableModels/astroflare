@@ -1,0 +1,79 @@
+name: e2e
+
+# Phase 20 — end-to-end tests against real Cloudflare.
+#
+# Triggers:
+#   - push to main: every merge gets validated against the edge
+#   - schedule (nightly): catches Cloudflare-side regressions even on
+#     a quiet repo
+#   - workflow_dispatch: manual on-demand runs
+#
+# The job provisions per-fixture resources (Worker + R2 bucket),
+# runs the e2e specs against the deployed URL, and tears resources
+# down in a `if: always()` step so a failed test run never leaks.
+# Resource names are `aflare-e2e-<fixture>-<sha7>` so concurrent runs
+# on different SHAs never collide.
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    # 06:42 UTC daily — off-peak, low overlap with merges.
+    - cron: "42 6 * * *"
+  workflow_dispatch:
+
+concurrency:
+  # Coalesce repeated pushes to main; the e2e budget is per-account, not
+  # per-PR. A second push to main while one's in flight cancels the first.
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  e2e:
+    name: e2e against live Cloudflare
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      CLOUDFLARE_ACCOUNT_ID: 4ef06593037ec81daf64e272ab950efb
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      AFLARE_E2E_SHA: ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10.28.2
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".nvmrc"
+          cache: "pnpm"
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: typecheck
+        run: pnpm typecheck
+
+      # Provision per-fixture resources. The aflare-e2e CLI is idempotent
+      # — a previous failed run that didn't reach teardown won't double-
+      # create.
+      - name: provision minimal fixture
+        id: provision
+        run: |
+          SHA7="${GITHUB_SHA:0:7}"
+          export AFLARE_E2E_SHA="$SHA7"
+          pnpm --filter @astroflare/e2e exec node ./src/cli.ts provision minimal
+          echo "url=https://aflare-e2e-minimal-$SHA7.workers.dev" >> "$GITHUB_OUTPUT"
+
+      - name: e2e tests
+        env:
+          AFLARE_E2E_URL: ${{ steps.provision.outputs.url }}
+        run: pnpm exec vitest run --project e2e
+
+      # Teardown ALWAYS runs — failed test runs must not leak resources.
+      - name: teardown
+        if: always()
+        run: |
+          SHA7="${GITHUB_SHA:0:7}"
+          export AFLARE_E2E_SHA="$SHA7"
+          pnpm --filter @astroflare/e2e exec node ./src/cli.ts teardown-all || true
