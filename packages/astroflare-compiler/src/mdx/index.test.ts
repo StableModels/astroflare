@@ -13,8 +13,7 @@ describe("compileMdx", () => {
 	});
 
 	it("parses YAML frontmatter and exposes it as a named export", async () => {
-		const src =
-			"---\ntitle: Hi\nslug: hello\ntags:\n  - a\n  - b\n---\n\n# Body\n";
+		const src = "---\ntitle: Hi\nslug: hello\ntags:\n  - a\n  - b\n---\n\n# Body\n";
 		const r = await compileMdx(src);
 		expect(r.frontmatter.title).toBe("Hi");
 		expect(r.frontmatter.slug).toBe("hello");
@@ -42,9 +41,7 @@ describe("compileMdx", () => {
 
 	it("throws on invalid YAML frontmatter", async () => {
 		const src = "---\n: not: valid: yaml :\n---\n# body\n";
-		await expect(compileMdx(src, { filename: "/x.mdx" })).rejects.toThrow(
-			/invalid YAML/,
-		);
+		await expect(compileMdx(src, { filename: "/x.mdx" })).rejects.toThrow(/invalid YAML/);
 	});
 
 	it("runs internal rehype plugins (Phase 14 Shiki rides this surface)", async () => {

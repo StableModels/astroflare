@@ -8,8 +8,8 @@
  *   - cache subspace stays disjoint from the files subspace
  */
 
-import { R2Storage } from "@astroflare/host-cloudflare";
 import { env } from "cloudflare:test";
+import { R2Storage } from "@astroflare/host-cloudflare";
 import { afterEach, describe, expect, it } from "vitest";
 
 const enc = (s: string) => new TextEncoder().encode(s);

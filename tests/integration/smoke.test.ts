@@ -76,10 +76,7 @@ describe("project-worker: routing", () => {
 	});
 
 	it("renders a .mdx page with inline JSX", async () => {
-		await seed(
-			"/src/pages/widget.mdx",
-			"# MDX\n\n<button class=\"primary\">click</button>\n",
-		);
+		await seed("/src/pages/widget.mdx", '# MDX\n\n<button class="primary">click</button>\n');
 		const r = await SELF.fetch("https://app/widget");
 		expect(r.status).toBe(200);
 		const body = stripHmr(await r.text());
@@ -137,10 +134,7 @@ describe("project-worker: storage round-trip", () => {
 	// COMPILABLE_IMPORT_RE rewriting works in the production-shaped
 	// host (R2 storage, DO coordinator, Worker Loader executor).
 	it("a .astro page can import { frontmatter } from a .md file", async () => {
-		await seed(
-			"/src/posts/hello.md",
-			"---\ntitle: Hello, World\nauthor: Ada\n---\n# body\n",
-		);
+		await seed("/src/posts/hello.md", "---\ntitle: Hello, World\nauthor: Ada\n---\n# body\n");
 		await seed(
 			"/src/pages/index.astro",
 			"---\n" +
@@ -164,16 +158,14 @@ describe("project-worker: assets", () => {
 		// Seed a tiny PNG (1x1 transparent — the actual bytes don't
 		// matter for the route-handling test).
 		const pngBytes = new Uint8Array([
-			0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d,
-			0x49, 0x48, 0x44, 0x52,
+			0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44,
+			0x52,
 		]);
 		await env.FILES.put("files/src/assets/x.png", pngBytes.buffer);
 		const r = await SELF.fetch("https://app/_aflare/asset/src/assets/x.png");
 		expect(r.status).toBe(200);
 		expect(r.headers.get("content-type")).toBe("image/png");
-		expect(r.headers.get("cache-control")).toBe(
-			"public, max-age=31536000, immutable",
-		);
+		expect(r.headers.get("cache-control")).toBe("public, max-age=31536000, immutable");
 	});
 
 	it("returns 404 for an asset URL whose file doesn't exist", async () => {

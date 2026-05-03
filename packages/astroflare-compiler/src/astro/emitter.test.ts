@@ -202,9 +202,7 @@ describe("emitter — directives", () => {
 	});
 
 	it(".tsx imports skip the SSR callback (no React SSR yet)", () => {
-		const code = compile(
-			'---\nimport Counter from "./Counter.tsx";\n---\n<Counter client:load />',
-		);
+		const code = compile('---\nimport Counter from "./Counter.tsx";\n---\n<Counter client:load />');
 		expect(code).toContain("$island(");
 		// React-side imports: SSR callback is `null` so the island starts
 		// empty and the client runtime mounts fresh.

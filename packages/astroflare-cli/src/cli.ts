@@ -28,11 +28,7 @@
 
 import { parseArgs } from "node:util";
 import { type DeployConfig, resolveConfig } from "./commands/deploy.js";
-import {
-	cmdDeploy,
-	cmdRollback,
-	cmdStatus,
-} from "./commands/deploy.js";
+import { cmdDeploy, cmdRollback, cmdStatus } from "./commands/deploy.js";
 
 async function main(argv: readonly string[]): Promise<number> {
 	const [subcommand, ...rest] = argv;

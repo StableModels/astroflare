@@ -67,14 +67,11 @@ export async function resolveConfig(input: ResolveConfigInput): Promise<DeployCo
 	const projectDir = input.flags.projectDir ?? input.env.AFLARE_PROJECT_DIR ?? ".";
 	const fileCfg = await readConfigFile(projectDir);
 
-	const accountId =
-		input.flags.accountId ?? input.env.CLOUDFLARE_ACCOUNT_ID ?? fileCfg.accountId;
+	const accountId = input.flags.accountId ?? input.env.CLOUDFLARE_ACCOUNT_ID ?? fileCfg.accountId;
 	const bucket = input.flags.bucket ?? input.env.AFLARE_BUCKET ?? fileCfg.bucket;
-	const apiToken =
-		input.flags.apiToken ?? input.env.CLOUDFLARE_API_TOKEN ?? fileCfg.apiToken;
+	const apiToken = input.flags.apiToken ?? input.env.CLOUDFLARE_API_TOKEN ?? fileCfg.apiToken;
 	const url = input.flags.url ?? input.env.AFLARE_WORKER_URL ?? fileCfg.url;
-	const deployToken =
-		input.flags.deployToken ?? input.env.DEPLOY_TOKEN ?? fileCfg.deployToken;
+	const deployToken = input.flags.deployToken ?? input.env.DEPLOY_TOKEN ?? fileCfg.deployToken;
 
 	const missing: string[] = [];
 	if (!accountId) missing.push("accountId (CLOUDFLARE_ACCOUNT_ID)");
@@ -147,11 +144,7 @@ export async function walkProjectFiles(projectDir: string): Promise<ProjectFile[
 	return out;
 }
 
-async function walkDir(
-	dir: string,
-	projectRoot: string,
-	out: ProjectFile[],
-): Promise<void> {
+async function walkDir(dir: string, projectRoot: string, out: ProjectFile[]): Promise<void> {
 	const entries = await fs.readdir(dir, { withFileTypes: true });
 	for (const entry of entries) {
 		if (entry.name.startsWith(".")) continue;
@@ -211,7 +204,8 @@ async function headObject(cfg: DeployConfig, key: string): Promise<string | null
 	});
 	if (res.status === 404) return null;
 	if (!res.ok) throw new Error(`R2 HEAD ${key}: ${res.status} ${res.statusText}`);
-	const meta = res.headers.get("x-amz-meta-aflare-sha") ?? res.headers.get(`x-amz-meta-${HASH_META_KEY}`);
+	const meta =
+		res.headers.get("x-amz-meta-aflare-sha") ?? res.headers.get(`x-amz-meta-${HASH_META_KEY}`);
 	return meta ?? null;
 }
 

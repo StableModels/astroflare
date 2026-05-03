@@ -44,12 +44,7 @@
  */
 
 import { createDeployServer, deploy, readCurrent } from "@astroflare/build";
-import type {
-	AstroflareConfig,
-	Executor,
-	Host,
-	TaskBundle,
-} from "@astroflare/core";
+import type { AstroflareConfig, Executor, Host, TaskBundle } from "@astroflare/core";
 import { createPreviewServer } from "@astroflare/preview";
 import { type EnvContext, withEnvContext } from "@astroflare/runtime/env";
 import { CoordinatorDurableObject, DurableObjectCoordinator } from "./coordinator-do.js";
@@ -274,10 +269,7 @@ async function handleDeploy(
 		host.logger.event("deploy.failed", {
 			message: (err as Error).message,
 		});
-		return jsonResponse(
-			{ error: (err as Error).message ?? "deploy failed" },
-			500,
-		);
+		return jsonResponse({ error: (err as Error).message ?? "deploy failed" }, 500);
 	}
 }
 
@@ -346,11 +338,7 @@ class RuntimeBundledExecutor implements Executor {
 		return this.#base.runOnce(this.#augment(task), input);
 	}
 
-	async runCached<R>(
-		id: string,
-		taskFactory: () => TaskBundle,
-		input: unknown,
-	): Promise<R> {
+	async runCached<R>(id: string, taskFactory: () => TaskBundle, input: unknown): Promise<R> {
 		return this.#base.runCached(id, () => this.#augment(taskFactory()), input);
 	}
 

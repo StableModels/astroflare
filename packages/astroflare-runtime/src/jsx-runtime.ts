@@ -40,12 +40,12 @@
  */
 
 import {
-	type AstroComponent,
-	type RawHtml,
-	type SlotMap,
 	$escape,
 	$rawHtml,
 	$renderComponent,
+	type AstroComponent,
+	type RawHtml,
+	type SlotMap,
 	isRawHtml,
 } from "./internal.js";
 
@@ -130,10 +130,7 @@ export const jsxs = jsx;
 /** `jsxDEV` — the dev-mode variant MDX emits when `development: true`. */
 export const jsxDEV = jsx;
 
-async function invokeAstroComponent(
-	type: AstroComponentLike,
-	props: JsxProps,
-): Promise<RawHtml> {
+async function invokeAstroComponent(type: AstroComponentLike, props: JsxProps): Promise<RawHtml> {
 	const { children, ...rest } = props;
 	const slots: SlotMap = {};
 	if (children !== undefined) {

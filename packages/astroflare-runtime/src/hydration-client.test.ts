@@ -56,7 +56,7 @@ describe("AstroIslandElement: scheduler routing", () => {
 			// Second arg is a timeout option.
 			expect(ric.mock.calls[0]?.[1]).toEqual({ timeout: 2000 });
 		} finally {
-			delete (globalThis as { requestIdleCallback?: unknown }).requestIdleCallback;
+			(globalThis as { requestIdleCallback?: unknown }).requestIdleCallback = undefined;
 		}
 	});
 
@@ -76,7 +76,7 @@ describe("AstroIslandElement: scheduler routing", () => {
 			});
 			expect(observeSpy).toHaveBeenCalledWith(island);
 		} finally {
-			delete (globalThis as { IntersectionObserver?: unknown }).IntersectionObserver;
+			(globalThis as { IntersectionObserver?: unknown }).IntersectionObserver = undefined;
 		}
 	});
 
@@ -98,7 +98,7 @@ describe("AstroIslandElement: scheduler routing", () => {
 			// `matches: false` → registers a change listener instead of firing.
 			expect(mqAddSpy).toHaveBeenCalled();
 		} finally {
-			delete (globalThis as { matchMedia?: unknown }).matchMedia;
+			(globalThis as { matchMedia?: unknown }).matchMedia = undefined;
 		}
 	});
 
@@ -114,7 +114,7 @@ describe("AstroIslandElement: scheduler routing", () => {
 			wrap.appendChild(island);
 			expect(ric).toHaveBeenCalledOnce(); // still only once
 		} finally {
-			delete (globalThis as { requestIdleCallback?: unknown }).requestIdleCallback;
+			(globalThis as { requestIdleCallback?: unknown }).requestIdleCallback = undefined;
 		}
 	});
 });

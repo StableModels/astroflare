@@ -309,8 +309,7 @@ describe("preview server: markdown routes", () => {
 	// can destructure them out via `__m_<idx>.<name>`.
 	it("a .astro page can import { frontmatter } from a .md file", async () => {
 		const { server } = await fixture({
-			"/src/posts/hello.md":
-				"---\ntitle: Hello, World\nauthor: Ada\ntags: [intro]\n---\n# body\n",
+			"/src/posts/hello.md": "---\ntitle: Hello, World\nauthor: Ada\ntags: [intro]\n---\n# body\n",
 			"/src/pages/index.astro":
 				"---\n" +
 				'import { frontmatter } from "../posts/hello.md";\n' +
@@ -329,8 +328,7 @@ describe("preview server: markdown routes", () => {
 
 	it("a .astro page can import default + named together from a .md file", async () => {
 		const { server } = await fixture({
-			"/src/posts/post.md":
-				"---\ntitle: Post Title\n---\n# the body\n\nparagraph.\n",
+			"/src/posts/post.md": "---\ntitle: Post Title\n---\n# the body\n\nparagraph.\n",
 			"/src/pages/index.astro":
 				"---\n" +
 				'import Post, { frontmatter } from "../posts/post.md";\n' +
@@ -388,9 +386,7 @@ describe("preview server: hydration + islands", () => {
 		const { server } = await fixture({
 			"/src/pages/index.astro": "<p>x</p>",
 		});
-		const r = await server.fetch(
-			new Request("https://app/_aflare/island?path=/nope.tsx"),
-		);
+		const r = await server.fetch(new Request("https://app/_aflare/island?path=/nope.tsx"));
 		expect(r.status).toBe(404);
 	});
 
@@ -399,9 +395,7 @@ describe("preview server: hydration + islands", () => {
 			"/components/x.css": "p { color: red }",
 			"/src/pages/index.astro": "<p>x</p>",
 		});
-		const r = await server.fetch(
-			new Request("https://app/_aflare/island?path=/components/x.css"),
-		);
+		const r = await server.fetch(new Request("https://app/_aflare/island?path=/components/x.css"));
 		expect(r.status).toBe(415);
 	});
 
@@ -412,7 +406,7 @@ describe("preview server: hydration + islands", () => {
 			"/src/pages/index.astro":
 				'---\nimport Counter from "../components/Counter.tsx";\n---\n' +
 				"<html><head></head><body>" +
-				'<Counter client:load count={42} />' +
+				"<Counter client:load count={42} />" +
 				"</body></html>",
 		});
 		const r = await server.fetch(new Request("https://app/"));
@@ -445,8 +439,7 @@ describe("preview server: hydration + islands", () => {
 describe("preview server: MDX routes", () => {
 	it("renders a .mdx page", async () => {
 		const { server } = await fixture({
-			"/src/pages/about.mdx":
-				"---\ntitle: About\n---\n# Hello MDX\n\nA paragraph.\n",
+			"/src/pages/about.mdx": "---\ntitle: About\n---\n# Hello MDX\n\nA paragraph.\n",
 		});
 		const r = await server.fetch(new Request("https://app/about"));
 		expect(r.status).toBe(200);
@@ -457,8 +450,7 @@ describe("preview server: MDX routes", () => {
 
 	it("renders inline JSX in a .mdx page", async () => {
 		const { server } = await fixture({
-			"/src/pages/widget.mdx":
-				"# Title\n\n<button class=\"primary\">click</button>\n",
+			"/src/pages/widget.mdx": '# Title\n\n<button class="primary">click</button>\n',
 		});
 		const r = await server.fetch(new Request("https://app/widget"));
 		const body = await bodyWithoutHmr(r);
@@ -468,8 +460,7 @@ describe("preview server: MDX routes", () => {
 
 	it("a .astro page can import { frontmatter } from a .mdx file", async () => {
 		const { server } = await fixture({
-			"/src/posts/post.mdx":
-				"---\ntitle: MDX Post\nauthor: Lin\n---\n\n# body\n",
+			"/src/posts/post.mdx": "---\ntitle: MDX Post\nauthor: Lin\n---\n\n# body\n",
 			"/src/pages/index.astro":
 				"---\n" +
 				'import { frontmatter } from "../posts/post.mdx";\n' +

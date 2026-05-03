@@ -5,10 +5,7 @@
  * Every binding name has to match `wrangler.toml`.
  */
 
-import type {
-	CoordinatorDurableObject,
-	HmrDurableObject,
-} from "@astroflare/host-cloudflare";
+import type { CoordinatorDurableObject, HmrDurableObject } from "@astroflare/host-cloudflare";
 
 declare module "cloudflare:test" {
 	interface ProvidedEnv {

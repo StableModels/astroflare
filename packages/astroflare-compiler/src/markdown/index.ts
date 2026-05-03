@@ -87,9 +87,7 @@ export async function compileMarkdown(
 	//    and rehype-stringify so its `<pre><span style="color:#…">…` output
 	//    survives stringification (the `raw` hast nodes flow through
 	//    rehype-stringify because `allowDangerousHtml` is on).
-	const processor = unified()
-		.use(remarkParse)
-		.use(remarkRehype, { allowDangerousHtml: true });
+	const processor = unified().use(remarkParse).use(remarkRehype, { allowDangerousHtml: true });
 	if (opts.shiki !== false) {
 		processor.use(rehypeShiki());
 	}

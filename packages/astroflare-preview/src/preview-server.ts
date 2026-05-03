@@ -450,9 +450,10 @@ async function serveIslandModule(host: Host, path: string): Promise<Response> {
 	// outside the workspace aren't possible.
 	const normalized = path.startsWith("/") ? path : `/${path}`;
 
-	const ext = ISLAND_TS_EXTENSIONS.find((e) => normalized.endsWith(e))
-		?? ISLAND_JS_EXTENSIONS.find((e) => normalized.endsWith(e))
-		?? null;
+	const ext =
+		ISLAND_TS_EXTENSIONS.find((e) => normalized.endsWith(e)) ??
+		ISLAND_JS_EXTENSIONS.find((e) => normalized.endsWith(e)) ??
+		null;
 	if (!ext) {
 		return new Response("unsupported island extension", { status: 415 });
 	}

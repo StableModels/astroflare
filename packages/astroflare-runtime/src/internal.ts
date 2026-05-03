@@ -451,15 +451,7 @@ export async function $island(
 
 	return {
 		__astroRaw: true,
-		html:
-			`<astro-island uid="${uid}"` +
-			` component-url="${$escape(componentUrl)}"` +
-			` component-name="${$escape(opts.componentName)}"` +
-			directiveAttr +
-			">" +
-			`<script type="application/json" data-aflare-props>${embedJson(propsJson)}</script>` +
-			ssrHtml +
-			"</astro-island>",
+		html: `<astro-island uid="${uid}" component-url="${$escape(componentUrl)}" component-name="${$escape(opts.componentName)}"${directiveAttr}><script type="application/json" data-aflare-props>${embedJson(propsJson)}</script>${ssrHtml}</astro-island>`,
 	};
 }
 

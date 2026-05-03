@@ -117,8 +117,7 @@ describe("getCollection", () => {
 	it("reads .mdx entries alongside .md (Phase 14)", async () => {
 		const storage = await fixture({
 			"/src/content/blog/plain.md": "---\ntitle: Plain\n---\nbody A",
-			"/src/content/blog/jsx.mdx":
-				"---\ntitle: JSX\n---\n# body B\n\n<button>x</button>\n",
+			"/src/content/blog/jsx.mdx": "---\ntitle: JSX\n---\n# body B\n\n<button>x</button>\n",
 		});
 		const reader = createContentReader(storage, {
 			collections: { blog: defineCollection({ schema: blogSchema }) },

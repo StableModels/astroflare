@@ -5,8 +5,8 @@
  * the framework-facing `DurableObjectCoordinator` wrapper.
  */
 
-import { DurableObjectCoordinator } from "@astroflare/host-cloudflare";
 import { env } from "cloudflare:test";
+import { DurableObjectCoordinator } from "@astroflare/host-cloudflare";
 import { afterEach, describe, expect, it } from "vitest";
 
 let nextId = 0;

@@ -45,7 +45,7 @@
 
 import { compile as mdxCompile } from "@mdx-js/mdx";
 import rehypeRaw from "rehype-raw";
-import type { Plugin, PluggableList } from "unified";
+import type { PluggableList, Plugin } from "unified";
 import { parse as parseYaml } from "yaml";
 import { rehypeShiki } from "../shiki/index.js";
 

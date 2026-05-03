@@ -29,11 +29,7 @@
  */
 
 import type { Element, Root } from "hast";
-import {
-	type Highlighter,
-	type ShikiTransformer,
-	createHighlighter,
-} from "shiki";
+import { type Highlighter, type ShikiTransformer, createHighlighter } from "shiki";
 import type { Plugin } from "unified";
 
 const DEFAULT_THEME = "github-dark";
@@ -100,9 +96,7 @@ export function rehypeShiki(options: ShikiOptions = {}): Plugin<[], Root> {
 		if (targets.length === 0) return;
 
 		const highlighter = await getHighlighter();
-		const knownLangs = new Set<string>(
-			highlighter.getLoadedLanguages().concat(["plaintext"]),
-		);
+		const knownLangs = new Set<string>(highlighter.getLoadedLanguages().concat(["plaintext"]));
 
 		for (const t of targets) {
 			const lang = knownLangs.has(t.lang) ? t.lang : "plaintext";

@@ -147,15 +147,10 @@ function buildIslandClass(): CustomElementConstructor {
 		async #hydrate(): Promise<void> {
 			const url = this.getAttribute("component-url");
 			if (!url) {
-				console.warn(
-					"[astroflare] island missing component-url — skipping hydration",
-					this,
-				);
+				console.warn("[astroflare] island missing component-url — skipping hydration", this);
 				return;
 			}
-			const propsScript = this.querySelector<HTMLScriptElement>(
-				"script[data-aflare-props]",
-			);
+			const propsScript = this.querySelector<HTMLScriptElement>("script[data-aflare-props]");
 			const props = parseProps(propsScript?.textContent);
 			propsScript?.remove();
 
@@ -163,9 +158,7 @@ function buildIslandClass(): CustomElementConstructor {
 				const mod: IslandModule = (await import(url)) as IslandModule;
 				const mount = mod.mount ?? mod.default;
 				if (typeof mount !== "function") {
-					console.error(
-						`[astroflare] island module at ${url} has no \`mount\` or default export`,
-					);
+					console.error(`[astroflare] island module at ${url} has no \`mount\` or default export`);
 					return;
 				}
 				await mount(this, props);

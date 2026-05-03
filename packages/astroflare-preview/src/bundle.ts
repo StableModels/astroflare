@@ -206,9 +206,7 @@ function renderModuleBody(mod: ModuleInfo, idxByPath: Map<string, number>): Rend
 		if (parsed.default) lines.push(`  const ${parsed.default} = __m_${idx}.default;`);
 		if (parsed.namespace) lines.push(`  const ${parsed.namespace} = __m_${idx};`);
 		if (parsed.named.length > 0) {
-			const parts = parsed.named.map((b) =>
-				b.from === b.to ? b.from : `${b.from}: ${b.to}`,
-			);
+			const parts = parsed.named.map((b) => (b.from === b.to ? b.from : `${b.from}: ${b.to}`));
 			lines.push(`  const { ${parts.join(", ")} } = __m_${idx};`);
 		}
 		return `${lines.join("\n")}\n`;

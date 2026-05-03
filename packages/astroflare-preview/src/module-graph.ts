@@ -34,12 +34,7 @@
  *     `.css`, etc.) are not compiled or bundled — Phase 6/8 work.
  */
 
-import {
-	COMPILER_VERSION,
-	compileAstro,
-	compileMarkdown,
-	compileMdx,
-} from "@astroflare/compiler";
+import { COMPILER_VERSION, compileAstro, compileMarkdown, compileMdx } from "@astroflare/compiler";
 import {
 	type Host,
 	type ImageMetadata,

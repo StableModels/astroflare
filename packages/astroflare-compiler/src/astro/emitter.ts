@@ -756,8 +756,7 @@ function collectDirectives(attrs: readonly AstroAttribute[]): CollectedDirective
  */
 function parseFrontmatterImports(hoisted: readonly string[]): Map<string, string> {
 	const out = new Map<string, string>();
-	const re =
-		/^[ \t]*import[ \t]+([^"';\n]+?)[ \t]+from[ \t]+["']([^"']+)["']/gm;
+	const re = /^[ \t]*import[ \t]+([^"';\n]+?)[ \t]+from[ \t]+["']([^"']+)["']/gm;
 	for (const stmt of hoisted) {
 		if (!stmt.trimStart().startsWith("import")) continue;
 		re.lastIndex = 0;

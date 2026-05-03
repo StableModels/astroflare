@@ -1,14 +1,8 @@
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import {
-	cmdDeploy,
-	cmdRollback,
-	cmdStatus,
-	resolveConfig,
-	walkProjectFiles,
-} from "./deploy.js";
+import { cmdDeploy, cmdRollback, cmdStatus, resolveConfig, walkProjectFiles } from "./deploy.js";
 import type { DeployConfig } from "./deploy.js";
 
 let dir: string;
@@ -51,9 +45,9 @@ describe("resolveConfig", () => {
 	});
 
 	it("throws when required fields are absent", async () => {
-		await expect(
-			resolveConfig({ flags: { projectDir: dir }, env: {} }),
-		).rejects.toThrow(/missing config/);
+		await expect(resolveConfig({ flags: { projectDir: dir }, env: {} })).rejects.toThrow(
+			/missing config/,
+		);
 	});
 });
 
@@ -68,11 +62,7 @@ describe("walkProjectFiles", () => {
 
 		const files = await walkProjectFiles(dir);
 		const paths = files.map((f) => f.path).sort();
-		expect(paths).toEqual([
-			"/public/logo.png",
-			"/src/pages/about.md",
-			"/src/pages/index.astro",
-		]);
+		expect(paths).toEqual(["/public/logo.png", "/src/pages/about.md", "/src/pages/index.astro"]);
 		for (const f of files) {
 			expect(f.hash).toMatch(/^[a-f0-9]{64}$/);
 			expect(f.size).toBeGreaterThan(0);
@@ -98,37 +88,32 @@ describe("cmdDeploy: pipeline", () => {
 		seedFile("src/pages/index.astro", "<p>v1</p>");
 		seedFile("src/pages/about.md", "# About\n");
 
-		const fetchMock = vi.fn(
-			async (input: string | URL | Request, init?: RequestInit) => {
-				const url = typeof input === "string" ? input : (input as URL).toString();
-				const method = (init?.method ?? "GET").toUpperCase();
-				if (url.includes("/r2/buckets/") && method === "HEAD") {
-					return new Response(null, { status: 404 });
-				}
-				if (url.includes("/r2/buckets/") && method === "PUT") {
-					return new Response(null, { status: 200 });
-				}
-				if (url.endsWith("/_aflare/deploy") && method === "POST") {
-					return new Response(
-						JSON.stringify({
-							deployHash: "abc123",
-							routeCount: 2,
-							skippedCount: 0,
-							durationMs: 42,
-						}),
-						{ status: 200, headers: { "content-type": "application/json" } },
-					);
-				}
-				throw new Error(`unhandled fetch: ${method} ${url}`);
-			},
-		);
+		const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+			const url = typeof input === "string" ? input : (input as URL).toString();
+			const method = (init?.method ?? "GET").toUpperCase();
+			if (url.includes("/r2/buckets/") && method === "HEAD") {
+				return new Response(null, { status: 404 });
+			}
+			if (url.includes("/r2/buckets/") && method === "PUT") {
+				return new Response(null, { status: 200 });
+			}
+			if (url.endsWith("/_aflare/deploy") && method === "POST") {
+				return new Response(
+					JSON.stringify({
+						deployHash: "abc123",
+						routeCount: 2,
+						skippedCount: 0,
+						durationMs: 42,
+					}),
+					{ status: 200, headers: { "content-type": "application/json" } },
+				);
+			}
+			throw new Error(`unhandled fetch: ${method} ${url}`);
+		});
 		vi.stubGlobal("fetch", fetchMock);
 		try {
 			const result = await cmdDeploy({ ...CFG, projectDir: dir });
-			expect(result.uploaded.sort()).toEqual([
-				"/src/pages/about.md",
-				"/src/pages/index.astro",
-			]);
+			expect(result.uploaded.sort()).toEqual(["/src/pages/about.md", "/src/pages/index.astro"]);
 			expect(result.skipped).toEqual([]);
 			expect(result.deployHash).toBe("abc123");
 			expect(result.routeCount).toBe(2);
@@ -143,30 +128,28 @@ describe("cmdDeploy: pipeline", () => {
 		const knownHash = files[0]?.hash;
 		expect(knownHash).toBeDefined();
 
-		const fetchMock = vi.fn(
-			async (input: string | URL | Request, init?: RequestInit) => {
-				const url = typeof input === "string" ? input : (input as URL).toString();
-				const method = (init?.method ?? "GET").toUpperCase();
-				if (url.includes("/r2/buckets/") && method === "HEAD") {
-					return new Response(null, {
-						status: 200,
-						headers: { "x-amz-meta-aflare-sha": knownHash as string },
-					});
-				}
-				if (url.endsWith("/_aflare/deploy") && method === "POST") {
-					return new Response(
-						JSON.stringify({
-							deployHash: "h",
-							routeCount: 1,
-							skippedCount: 0,
-							durationMs: 1,
-						}),
-						{ status: 200 },
-					);
-				}
-				throw new Error(`unhandled fetch: ${method} ${url}`);
-			},
-		);
+		const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+			const url = typeof input === "string" ? input : (input as URL).toString();
+			const method = (init?.method ?? "GET").toUpperCase();
+			if (url.includes("/r2/buckets/") && method === "HEAD") {
+				return new Response(null, {
+					status: 200,
+					headers: { "x-amz-meta-aflare-sha": knownHash as string },
+				});
+			}
+			if (url.endsWith("/_aflare/deploy") && method === "POST") {
+				return new Response(
+					JSON.stringify({
+						deployHash: "h",
+						routeCount: 1,
+						skippedCount: 0,
+						durationMs: 1,
+					}),
+					{ status: 200 },
+				);
+			}
+			throw new Error(`unhandled fetch: ${method} ${url}`);
+		});
 		vi.stubGlobal("fetch", fetchMock);
 		try {
 			const result = await cmdDeploy({ ...CFG, projectDir: dir });
@@ -180,8 +163,8 @@ describe("cmdDeploy: pipeline", () => {
 
 describe("cmdStatus", () => {
 	it("returns the worker's status payload", async () => {
-		const fetchMock = vi.fn(async () =>
-			new Response(JSON.stringify({ deployHash: "h1", active: true }), { status: 200 }),
+		const fetchMock = vi.fn(
+			async () => new Response(JSON.stringify({ deployHash: "h1", active: true }), { status: 200 }),
 		);
 		vi.stubGlobal("fetch", fetchMock);
 		try {

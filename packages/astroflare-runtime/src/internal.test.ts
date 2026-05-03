@@ -242,7 +242,7 @@ describe("$island", () => {
 		// `/src/pages/index.astro` + `../components/Counter.tsx` →
 		// `/src/components/Counter.tsx`
 		expect(r.html).toContain(
-			"component-url=\"/_aflare/island?path=%2Fsrc%2Fcomponents%2FCounter.tsx\"",
+			'component-url="/_aflare/island?path=%2Fsrc%2Fcomponents%2FCounter.tsx"',
 		);
 	});
 

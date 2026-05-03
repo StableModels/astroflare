@@ -14,6 +14,7 @@
  * `R2Storage`, compiles via the inline-bundle path, and renders.
  */
 
+import { setProjectWorkerRuntime } from "@astroflare/host-cloudflare/project-worker";
 /* eslint-disable @typescript-eslint/ban-ts-comment */
 // @ts-expect-error — Vite's `?raw` plugin returns the file as a string.
 import RUNTIME_COMPONENTS_SRC from "../../packages/astroflare-runtime/dist/components.js?raw";
@@ -35,7 +36,6 @@ import RUNTIME_INTERNAL_SRC from "../../packages/astroflare-runtime/dist/interna
 import RUNTIME_JSX_RUNTIME_SRC from "../../packages/astroflare-runtime/dist/jsx-runtime.js?raw";
 // @ts-expect-error
 import RUNTIME_RENDER_SRC from "../../packages/astroflare-runtime/dist/render.js?raw";
-import { setProjectWorkerRuntime } from "@astroflare/host-cloudflare/project-worker";
 
 setProjectWorkerRuntime({
 	"runtime/index.js": RUNTIME_INDEX_SRC as string,
