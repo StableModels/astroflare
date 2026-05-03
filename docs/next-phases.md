@@ -322,8 +322,13 @@ alongside the git-crypt key.
 
 **CI.** A separate `.github/workflows/e2e.yml` runs on push to
 `main` and on a nightly schedule (catches upstream Cloudflare
-regressions). `CLOUDFLARE_API_TOKEN` lives in repository secrets;
-the workflow runs `aflare-e2e run-all`. Teardown runs in a
+regressions). `CLOUDFLARE_API_TOKEN` is already provisioned as a
+repository secret (the existing `ci.yml` exposes it to its `test`
+step too, inert until something needs it); the e2e workflow
+references the same `secrets.CLOUDFLARE_API_TOKEN` and runs
+`aflare-e2e run-all`. `CLOUDFLARE_ACCOUNT_ID` is non-secret and
+lives in `.envrc` for local shells; CI sets it as a literal
+`env:` value (direnv doesn't run there). Teardown runs in a
 `finally` step so failed runs never leak resources.
 
 **Defer:** Custom-domain provisioning (DNS automation is its own
