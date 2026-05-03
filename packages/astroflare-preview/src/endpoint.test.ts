@@ -12,7 +12,7 @@ afterEach(async () => {
 async function fixture(files: Record<string, string>): Promise<TestHost> {
 	const host = createTestHost();
 	active.push(host);
-	for (const [p, body] of Object.entries(files)) await host.storage.write(p, enc(body));
+	for (const [p, body] of Object.entries(files)) host.site.write(p, enc(body));
 	return host;
 }
 

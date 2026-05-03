@@ -107,7 +107,10 @@ export class ModuleGraph {
 	}
 
 	async #compileImpl(path: string): Promise<ModuleInfo> {
-		const sourceBytes = await this.#host.storage.read(path);
+		const sourceBytes = await this.#host.site.readFile(path);
+		if (!sourceBytes) {
+			throw new Error(`module-graph.compile: source not found: ${path}`);
+		}
 		const sourceHash = await contentId(sourceBytes);
 		const compileKey = await contentIdWithConfig(sourceBytes, {
 			compiler: COMPILER_VERSION,
@@ -116,14 +119,14 @@ export class ModuleGraph {
 		});
 
 		let compiled: string;
-		const cached = await this.#host.storage.cacheRead(compileKey);
+		const cached = await this.#host.cache.get(compileKey);
 		if (cached) {
 			compiled = dec.decode(cached);
 			this.#host.logger.event("module-graph.cache.hit", { path, compileKey });
 		} else {
 			const source = dec.decode(sourceBytes);
 			compiled = await this.#compileSource(path, source);
-			await this.#host.storage.cacheWrite(compileKey, enc.encode(compiled));
+			await this.#host.cache.put(compileKey, enc.encode(compiled));
 			this.#host.logger.event("module-graph.compile", { path, compileKey });
 		}
 

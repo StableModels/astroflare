@@ -140,7 +140,7 @@ export function createPreviewServer(opts: PreviewServerOptions): PreviewServer {
 		// Look for `.js` first, then `.ts`. Cache id covers source content;
 		// the HMR subscriber clears `middleware` if either file changes.
 		for (const path of ["/src/middleware.js", "/src/middleware.ts"]) {
-			const stat = await opts.host.storage.stat(path);
+			const stat = await opts.host.site.statFile(path);
 			if (!stat) continue;
 			const fn = await loadMiddleware(opts.host, `middleware:${stat.hash}`);
 			middleware = fn;
@@ -152,7 +152,7 @@ export function createPreviewServer(opts: PreviewServerOptions): PreviewServer {
 
 	async function ensureRoutes(): Promise<void> {
 		if (!routesReady) {
-			routesReady = router.discover(opts.host.storage);
+			routesReady = router.discover(opts.host.site);
 			ensureHmrPipeline();
 		}
 		await routesReady;
@@ -174,7 +174,7 @@ export function createPreviewServer(opts: PreviewServerOptions): PreviewServer {
 				// `/src/pages/` — transitive importers showing up in `updates`
 				// don't change the route table.
 				if (!msg.trigger || !msg.trigger.startsWith(PAGES_PREFIX)) return;
-				routesReady = router.discover(opts.host.storage);
+				routesReady = router.discover(opts.host.site);
 				opts.host.logger.event("preview.routes.invalidated", {
 					trigger: msg.trigger,
 				});
@@ -182,7 +182,7 @@ export function createPreviewServer(opts: PreviewServerOptions): PreviewServer {
 				// File removal: if any pruned path lives under /src/pages/
 				// the route table needs rebuilding (deleted page).
 				if (msg.paths.some((p) => p.startsWith(PAGES_PREFIX))) {
-					routesReady = router.discover(opts.host.storage);
+					routesReady = router.discover(opts.host.site);
 					opts.host.logger.event("preview.routes.invalidated", {
 						reason: "prune",
 						paths: msg.paths,
@@ -275,7 +275,12 @@ export function createPreviewServer(opts: PreviewServerOptions): PreviewServer {
 
 				const runInner = async (): Promise<Response> => {
 					if (match.route.kind === "endpoint") {
-						const sourceBytes = await opts.host.storage.read(match.route.filePath);
+						const sourceBytes = await opts.host.site.readFile(match.route.filePath);
+						if (!sourceBytes) {
+							return new Response(`endpoint source not found: ${match.route.filePath}`, {
+								status: 404,
+							});
+						}
 						const cacheId = await contentIdWithConfig(sourceBytes, {
 							compiler: COMPILER_VERSION,
 							kind: "endpoint",
@@ -440,18 +445,17 @@ function buildResponseFromResult(result: {
  * Serve a compiler-resolved asset (Phase 13). The URL after
  * `/_aflare/asset/` is the workspace-absolute path with the leading
  * slash stripped — e.g. `src/assets/logo.png`. Reads the file from
- * `host.storage` and returns it with the right content-type.
+ * `host.site` and returns it with the right content-type.
  */
 async function serveAsset(host: Host, encodedPath: string): Promise<Response> {
 	const path = `/${decodeURIComponent(encodedPath)}`;
-	const stat = await host.storage.stat(path);
-	if (!stat) {
+	const bytes = await host.site.readFile(path);
+	if (!bytes) {
 		return new Response("Not found", {
 			status: 404,
 			headers: { "content-type": "text/plain;charset=utf-8" },
 		});
 	}
-	const bytes = await host.storage.read(path);
 	const ext = path.split(".").pop()?.toLowerCase() ?? "";
 	const contentType = IMAGE_CONTENT_TYPES[ext] ?? "application/octet-stream";
 	// Copy into a fresh ArrayBuffer to satisfy `BodyInit` (the `Uint8Array`
@@ -525,11 +529,14 @@ async function serveIslandModule(host: Host, path: string): Promise<Response> {
 		return new Response("unsupported island extension", { status: 415 });
 	}
 
-	const stat = await host.storage.stat(normalized);
+	const stat = await host.site.statFile(normalized);
 	if (!stat) {
 		return new Response("island source not found", { status: 404 });
 	}
-	const sourceBytes = await host.storage.read(normalized);
+	const sourceBytes = await host.site.readFile(normalized);
+	if (!sourceBytes) {
+		return new Response("island source not found", { status: 404 });
+	}
 	let source = dec.decode(sourceBytes);
 
 	if ((ISLAND_TS_EXTENSIONS as readonly string[]).includes(ext)) {

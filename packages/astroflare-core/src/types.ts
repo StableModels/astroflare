@@ -136,26 +136,6 @@ export interface SnapshotSink {
 }
 
 // -----------------------------------------------------------------------------
-// 1c. Storage — DEPRECATED (Phase 26)
-// -----------------------------------------------------------------------------
-
-/**
- * @deprecated Replaced by `Site` (read) + `Cache` (compile cache) +
- * host-side write helpers. Kept temporarily so existing test fakes and Mode B
- * adapters compile during the Phase 26 / 26b migration. New code should not
- * implement or consume `Storage`.
- */
-export interface Storage {
-	read(path: string): Promise<Uint8Array>;
-	write(path: string, bytes: Uint8Array): Promise<void>;
-	remove(path: string): Promise<void>;
-	glob(pattern: string): AsyncIterable<string>;
-	stat(path: string): Promise<FileStat | null>;
-	cacheRead(hash: string): Promise<Uint8Array | null>;
-	cacheWrite(hash: string, bytes: Uint8Array): Promise<void>;
-}
-
-// -----------------------------------------------------------------------------
 // 2. Executor — isolated unit of work (§5.2)
 // -----------------------------------------------------------------------------
 
@@ -402,18 +382,14 @@ export interface ImageMetadata {
  * The full set of host capabilities the framework needs. Constructed by the
  * host package and passed to `createApp(config, host)`.
  *
- * Phase 26 / 26b: `site` + `cache` are the canonical capabilities the host
- * supplies; `storage` remains for back-compat during the framework-internal
- * migration (preview-server, content reader still consume it). New code
- * should prefer `host.site` + `host.cache`.
+ * Post-Phase 26 / 26b: `site` (read) + `cache` (compile cache) are the
+ * canonical capabilities. The legacy `Storage` interface is gone.
  */
 export interface Host {
-	/** @deprecated Use `site` (read) + `cache` (compile cache). */
-	storage: Storage;
-	/** Read-only file capability the framework consumes (Phase 26). */
-	site?: Site;
-	/** Content-addressed compile cache (Phase 26). */
-	cache?: Cache;
+	/** Read-only file capability the framework consumes. */
+	site: Site;
+	/** Content-addressed compile cache. */
+	cache: Cache;
 	executor: Executor;
 	coordinator: Coordinator;
 	transport: Transport;

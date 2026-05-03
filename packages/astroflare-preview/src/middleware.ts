@@ -53,9 +53,8 @@ const MIDDLEWARE_PATH_CANDIDATES = ["/src/middleware.js", "/src/middleware.ts"];
  */
 export async function loadMiddleware(host: Host, cacheId: string): Promise<MiddlewareFn | null> {
 	for (const path of MIDDLEWARE_PATH_CANDIDATES) {
-		const stat = await host.storage.stat(path);
-		if (!stat) continue;
-		const sourceBytes = await host.storage.read(path);
+		const sourceBytes = await host.site.readFile(path);
+		if (!sourceBytes) continue;
 		let source = dec.decode(sourceBytes);
 		if (path.endsWith(".ts")) {
 			try {

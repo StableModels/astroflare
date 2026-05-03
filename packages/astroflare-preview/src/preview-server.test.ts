@@ -37,7 +37,7 @@ async function makeFixture(
 	configOverrides: Partial<AstroflareConfig> = {},
 ): Promise<Fixture> {
 	const host = createTestHost();
-	for (const [p, body] of Object.entries(files)) await host.storage.write(p, enc(body));
+	for (const [p, body] of Object.entries(files)) host.site.write(p, enc(body));
 	const server = createPreviewServer({
 		config: { site: "https://example.com", ...configOverrides },
 		host,
@@ -275,7 +275,7 @@ describe("preview server: multi-module composition", () => {
 		const r1 = await server.fetch(new Request("https://app/"));
 		expect(await bodyWithoutHmr(r1)).toBe("<p>v1</p>");
 
-		await host.storage.write("/src/components/L.astro", new TextEncoder().encode("<p>v2</p>"));
+		host.site.write("/src/components/L.astro", new TextEncoder().encode("<p>v2</p>"));
 
 		const r2 = await server.fetch(new Request("https://app/"));
 		expect(await bodyWithoutHmr(r2)).toBe("<p>v2</p>");
@@ -703,7 +703,7 @@ describe("preview server: HMR endpoint", () => {
 	it("respects a custom workspaceId", async () => {
 		const host = createTestHost();
 		fixtureCleanups.push(host);
-		await host.storage.write("/src/pages/index.astro", new TextEncoder().encode("<p>x</p>"));
+		host.site.write("/src/pages/index.astro", new TextEncoder().encode("<p>x</p>"));
 		const server = createPreviewServer({
 			config: {},
 			host,
@@ -773,7 +773,7 @@ describe("preview server: reactive route discovery", () => {
 		expect(r404.status).toBe(404);
 
 		// Add a new page and notify the coordinator.
-		await host.storage.write("/src/pages/about.astro", new TextEncoder().encode("<p>about</p>"));
+		host.site.write("/src/pages/about.astro", new TextEncoder().encode("<p>about</p>"));
 		await host.coordinator.onFileChanged("/src/pages/about.astro", "h");
 		// Drain microtasks (HMR subscriber kicks off discovery; we await routes
 		// implicitly on the next request).
@@ -804,7 +804,7 @@ describe("preview server: reactive route discovery", () => {
 		const before = await server.fetch(new Request("https://app/about"));
 		expect(before.status).toBe(200);
 
-		await host.storage.remove("/src/pages/about.astro");
+		host.site.remove("/src/pages/about.astro");
 		await host.coordinator.onFileRemoved("/src/pages/about.astro");
 
 		const after = await server.fetch(new Request("https://app/about"));
@@ -935,7 +935,7 @@ describe("preview server: middleware", () => {
 		const r1 = await server.fetch(new Request("https://app/"));
 		expect(await r1.text()).toContain("v1:");
 
-		await host.storage.write(
+		host.site.write(
 			"/src/middleware.js",
 			new TextEncoder().encode(
 				'export const onRequest = async (ctx, next) => { const r = await next(); return new Response("v2:" + (await r.text())); };',
@@ -986,7 +986,7 @@ describe("preview server: asset pipeline", () => {
 		expect(r.headers.get("content-type")).toBe("image/png");
 		expect(await r.text()).toBe("PNG-BYTES");
 		// Also touch host so the linter doesn't flag the unused binding.
-		expect(await host.storage.stat("/src/assets/logo.png")).not.toBeNull();
+		expect(await host.site.statFile("/src/assets/logo.png")).not.toBeNull();
 	});
 
 	it("returns 404 for an asset URL whose file doesn't exist", async () => {
@@ -1018,7 +1018,7 @@ describe("preview server: errors", () => {
 		await server.fetch(new Request("https://app/"));
 		// Now delete the underlying file. Subsequent requests match the route
 		// but storage.read throws.
-		await host.storage.remove("/src/pages/index.astro");
+		host.site.remove("/src/pages/index.astro");
 		const r = await server.fetch(new Request("https://app/"));
 		expect(r.status).toBe(500);
 	});

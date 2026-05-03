@@ -29,7 +29,7 @@ function makeFixture(files: Record<string, string>): {
 	const host = createTestHost();
 	active.push(host);
 	for (const [p, body] of Object.entries(files)) {
-		host.storage.write(p, enc(body));
+		host.site.write(p, enc(body));
 	}
 	const graph = new ModuleGraph(host, { runtimeImport: RUNTIME_URL });
 	return { host, graph };
@@ -45,11 +45,11 @@ describe("ModuleGraph.compile", () => {
 		expect(a.compiled).toContain("$component(");
 
 		// Second call hits the in-process compile cache (no extra storage cache writes).
-		const writesBefore = host.storage.cacheKeys().length;
+		const writesBefore = host.cache.keys().length;
 		const b = await graph.compile("/src/pages/index.astro");
 		expect(b.compiled).toBe(a.compiled);
 		// Key wasn't added a second time — same id maps to same bytes.
-		expect(host.storage.cacheKeys().length).toBe(writesBefore);
+		expect(host.cache.keys().length).toBe(writesBefore);
 
 		// Both calls produced one cache.hit + one cache.write event.
 		expect(host.logger.byName("module-graph.compile")).toHaveLength(1);
@@ -61,7 +61,7 @@ describe("ModuleGraph.compile", () => {
 			"/src/pages/x.astro": "<p>v1</p>",
 		});
 		const a = await graph.compile("/src/pages/x.astro");
-		await host.storage.write("/src/pages/x.astro", enc("<p>v2</p>"));
+		host.site.write("/src/pages/x.astro", enc("<p>v2</p>"));
 		const b = await graph.compile("/src/pages/x.astro");
 		expect(a.compileKey).not.toBe(b.compileKey);
 	});
@@ -151,7 +151,7 @@ describe("ModuleGraph.closure", () => {
 			"/src/components/L.astro": "<p>v1</p>",
 		});
 		const a = await graph.closure("/src/pages/x.astro");
-		await host.storage.write("/src/components/L.astro", enc("<p>v2</p>"));
+		host.site.write("/src/components/L.astro", enc("<p>v2</p>"));
 		const b = await graph.closure("/src/pages/x.astro");
 		expect(a.bundleKey).not.toBe(b.bundleKey);
 	});

@@ -43,9 +43,6 @@ async function bootHost(): Promise<TestHost> {
 	const host = createTestHost();
 	active.push(host);
 	for (const [p, body] of Object.entries(minimalBlogFiles)) {
-		// Seed both legacy storage (preview-server still uses it) and the
-		// new site (content reader migrated to Site in Phase 26 cleanup).
-		await host.storage.write(p, enc(body));
 		host.site.write(p, enc(body));
 	}
 	return host;

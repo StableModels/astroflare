@@ -1,14 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
 import { InMemoryEnvService, InMemoryFsService, InMemoryLogService } from "./in-memory-services.js";
-import { MemoryStorage } from "./memory-storage.js";
+import { MemorySite } from "./memory-site.js";
 
 const enc = (s: string) => new TextEncoder().encode(s);
 const dec = (b: Uint8Array) => new TextDecoder().decode(b);
 
 describe("InMemoryFsService", () => {
 	it("write / read round-trips through the underlying Storage", async () => {
-		const storage = new MemoryStorage();
-		const fs = new InMemoryFsService({ storage });
+		const site = new MemorySite();
+		const fs = new InMemoryFsService({ site });
 		await fs.write("/src/index.astro", enc("<p>hi</p>"));
 		const bytes = await fs.read("/src/index.astro");
 		expect(bytes).not.toBeNull();
@@ -16,15 +16,15 @@ describe("InMemoryFsService", () => {
 	});
 
 	it("read returns null when the file does not exist", async () => {
-		const storage = new MemoryStorage();
-		const fs = new InMemoryFsService({ storage });
+		const site = new MemorySite();
+		const fs = new InMemoryFsService({ site });
 		expect(await fs.read("/nope")).toBeNull();
 	});
 
 	it("write fires onWrite with the content hash", async () => {
-		const storage = new MemoryStorage();
+		const site = new MemorySite();
 		const onWrite = vi.fn();
-		const fs = new InMemoryFsService({ storage, onWrite });
+		const fs = new InMemoryFsService({ site, onWrite });
 		await fs.write("/x.txt", enc("hello"));
 		expect(onWrite).toHaveBeenCalledOnce();
 		const call = onWrite.mock.calls[0];
@@ -35,9 +35,9 @@ describe("InMemoryFsService", () => {
 	});
 
 	it("remove fires onRemove and the file becomes unstat-able", async () => {
-		const storage = new MemoryStorage();
+		const site = new MemorySite();
 		const onRemove = vi.fn();
-		const fs = new InMemoryFsService({ storage, onRemove });
+		const fs = new InMemoryFsService({ site, onRemove });
 		await fs.write("/a", enc("1"));
 		await fs.remove("/a");
 		expect(onRemove).toHaveBeenCalledWith("/a");
@@ -45,12 +45,12 @@ describe("InMemoryFsService", () => {
 	});
 
 	it("stat returns size + hash", async () => {
-		const storage = new MemoryStorage();
-		const fs = new InMemoryFsService({ storage });
+		const site = new MemorySite();
+		const fs = new InMemoryFsService({ site });
 		await fs.write("/x", enc("abcd"));
 		const s = await fs.stat("/x");
 		expect(s?.size).toBe(4);
-		// `Storage.stat` returns the 16-char content-addressed id, not a full
+		// `Site.statFile` returns the 16-char content-addressed id, not a full
 		// SHA-256 — the framework convention from `@astroflare/core`.
 		expect(s?.hash).toMatch(/^[a-f0-9]{16}$/);
 	});
