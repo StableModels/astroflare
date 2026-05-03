@@ -91,6 +91,7 @@ const RUNTIME_SYMBOLS = [
 	"$spreadAttrs",
 	"$defineVars",
 	"$hydrationMarker",
+	"$island",
 ] as const;
 
 const CLIENT_DIRECTIVE_MODES = new Set([
@@ -128,9 +129,15 @@ export function emitDocument(doc: AstroDocument, opts: EmitOptions = {}): EmitRe
 	// Compute scoping context so emitElement can decorate elements + style
 	// blocks with the right hash. `scopeHash` is supplied by compileAstro.
 	const hasScopedStyle = opts.scopeHash !== undefined && documentHasScopedStyle(doc.body);
+	// Phase 16: scan the frontmatter (post-hoisting; the original imports
+	// are still in `hoisted`) for `import` statements so emitComponent can
+	// look up an island's source path when generating $island URLs.
+	const islandImports = parseFrontmatterImports(hoisted);
 	const ctx: EmitContext = {
 		slotsRef: "$$slots",
 		scopeHash: hasScopedStyle ? (opts.scopeHash ?? null) : null,
+		islandImports,
+		importerPath: opts.filename ?? null,
 	};
 	const body = emitChildren(doc.body, "$$slots", ctx);
 	const hoistedBlock = hoisted.length > 0 ? `${hoisted.join("\n")}\n` : "";
@@ -377,10 +384,31 @@ interface EmitContext {
 	 * `data-aflare-h="<hash>"` to every HTML element.
 	 */
 	scopeHash: string | null;
+	/**
+	 * Map of component identifier → import specifier, parsed from the
+	 * frontmatter's `import` statements (Phase 16). Used by
+	 * `emitComponent` when a `client:*` directive is present so the
+	 * emitted `$island(...)` call can record where the component lives,
+	 * which the client-side hydration runtime fetches via the preview
+	 * server's `/_aflare/island` route.
+	 */
+	islandImports: Map<string, string>;
+	/**
+	 * Workspace path of the file being emitted (when known). Combined
+	 * with `componentSpec` at runtime to produce the absolute URL the
+	 * hydration runtime fetches. Null when the compiler has no filename
+	 * (test scenarios that compile bare strings).
+	 */
+	importerPath: string | null;
 }
 
 function emitChildren(nodes: readonly AstroNode[], slotsRef: string, parent?: EmitContext): string {
-	const ctx: EmitContext = parent ?? { slotsRef, scopeHash: null };
+	const ctx: EmitContext = parent ?? {
+		slotsRef,
+		scopeHash: null,
+		islandImports: new Map(),
+		importerPath: null,
+	};
 	let out = "";
 	for (const node of nodes) out += emitNode(node, ctx);
 	return out;
@@ -478,12 +506,46 @@ function emitComponent(node: AstroComponent, ctx: EmitContext): string {
 	const directives = collectDirectives(node.attrs);
 	const callExpr = `await $renderComponent(${node.name}, ${propsExpr}, ${slotsExpr})`;
 	if (directives.client) {
-		// Phase 8 wires real hydration; for now emit a marker before the
-		// rendered component so tests can verify the parse-and-route path.
-		const marker = `$hydrationMarker(${JSON.stringify({ mode: directives.client.mode, mediaQuery: directives.client.mediaQuery })})`;
-		return `${interpolate(marker)}${interpolate(callExpr)}`;
+		// Phase 16: emit a real `$island(...)` wrapper. The runtime helper
+		// produces `<astro-island …>…</astro-island>` markup; the client-
+		// side runtime (`hydration-client.ts`) registers the custom
+		// element and triggers hydration.
+		//
+		// For Astroflare components (.astro imports), SSR through the
+		// existing renderer is fine — pass the SSR callback so the island
+		// wraps real HTML. For React-style imports (.tsx / .jsx) the
+		// component reference will be undefined in the bundle (the inline
+		// bundler doesn't follow non-compilable imports), and even if it
+		// were available, our jsx-runtime doesn't support hooks. Pass
+		// `null` for those so the island starts empty and hydrates fresh.
+		const componentSpec = ctx.islandImports.get(node.name) ?? null;
+		const ssrCallback = canSsrIsland(componentSpec) ? `async () => ${callExpr}` : "null";
+		const islandOpts = JSON.stringify({
+			componentName: node.name,
+			componentSpec,
+			importerPath: ctx.importerPath,
+			directive: {
+				mode: directives.client.mode,
+				...(directives.client.mediaQuery !== undefined
+					? { mediaQuery: directives.client.mediaQuery }
+					: {}),
+			},
+		});
+		const islandCall = `await $island({...${islandOpts}, props: ${propsExpr}}, ${ssrCallback})`;
+		return interpolate(islandCall);
 	}
 	return interpolate(callExpr);
+}
+
+/**
+ * Decide whether the SSR callback for an island should run. Astroflare
+ * (`.astro`) and Markdown components SSR cleanly through the existing
+ * renderer; React (`.tsx` / `.jsx`) components don't, until Phase 16b
+ * lands real React SSR with hooks.
+ */
+function canSsrIsland(componentSpec: string | null): boolean {
+	if (!componentSpec) return true; // unknown source — best-effort SSR
+	return /\.(astro|md|mdx)$/.test(componentSpec);
 }
 
 function emitFragment(node: AstroFragmentNode, ctx: EmitContext): string {
@@ -674,6 +736,77 @@ function collectDirectives(attrs: readonly AstroAttribute[]): CollectedDirective
 		}
 	}
 	return out;
+}
+
+/**
+ * Phase 16: scan hoisted `import` statements for component identifiers
+ * and their source specifiers. Used to populate `EmitContext.islandImports`
+ * so `<Counter client:load />` can encode Counter's path in the
+ * `$island(...)` URL.
+ *
+ * Recognised forms (parity with the bundler's `parseImportClause`):
+ *   - `import X from "..."`                      default
+ *   - `import { a, b as c } from "..."`          named (with alias)
+ *   - `import * as ns from "..."`                namespace
+ *   - `import X, { a, b } from "..."`            mixed
+ *
+ * The map's keys are the *local* names (post-alias). Aliased imports
+ * register under the alias because that's what `<Counter />` references
+ * in the body.
+ */
+function parseFrontmatterImports(hoisted: readonly string[]): Map<string, string> {
+	const out = new Map<string, string>();
+	const re =
+		/^[ \t]*import[ \t]+([^"';\n]+?)[ \t]+from[ \t]+["']([^"']+)["']/gm;
+	for (const stmt of hoisted) {
+		if (!stmt.trimStart().startsWith("import")) continue;
+		re.lastIndex = 0;
+		let m: RegExpExecArray | null;
+		// biome-ignore lint/suspicious/noAssignInExpressions: idiomatic loop
+		while ((m = re.exec(stmt)) !== null) {
+			const clause = (m[1] as string).trim();
+			const spec = m[2] as string;
+			recordImportClause(out, clause, spec);
+		}
+	}
+	return out;
+}
+
+function recordImportClause(out: Map<string, string>, clause: string, spec: string): void {
+	if (clause.startsWith("{")) {
+		const close = clause.lastIndexOf("}");
+		if (close > 0) recordNamedList(out, clause.slice(1, close), spec);
+		return;
+	}
+	const nsMatch = /^\*[ \t]+as[ \t]+([A-Za-z_$][\w$]*)$/.exec(clause);
+	if (nsMatch) {
+		out.set(nsMatch[1] as string, spec);
+		return;
+	}
+	const defMatch = /^([A-Za-z_$][\w$]*)(?:[ \t]*,[ \t]*([\s\S]+))?$/.exec(clause);
+	if (!defMatch) return;
+	out.set(defMatch[1] as string, spec);
+	const rest = (defMatch[2] ?? "").trim();
+	if (rest.startsWith("{")) {
+		const close = rest.lastIndexOf("}");
+		if (close > 0) recordNamedList(out, rest.slice(1, close), spec);
+	} else {
+		const nm = /^\*[ \t]+as[ \t]+([A-Za-z_$][\w$]*)$/.exec(rest);
+		if (nm) out.set(nm[1] as string, spec);
+	}
+}
+
+function recordNamedList(out: Map<string, string>, inner: string, spec: string): void {
+	for (const part of inner.split(",")) {
+		const p = part.trim();
+		if (!p) continue;
+		const aliasMatch = /^([A-Za-z_$][\w$]*)[ \t]+as[ \t]+([A-Za-z_$][\w$]*)$/.exec(p);
+		if (aliasMatch) {
+			out.set(aliasMatch[2] as string, spec);
+		} else if (/^[A-Za-z_$][\w$]*$/.test(p)) {
+			out.set(p, spec);
+		}
+	}
 }
 
 function stripQuotes(expression: string): string {

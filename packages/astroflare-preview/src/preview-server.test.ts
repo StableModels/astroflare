@@ -346,6 +346,99 @@ describe("preview server: markdown routes", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Hydration / islands (Phase 16)
+// ---------------------------------------------------------------------------
+
+describe("preview server: hydration + islands", () => {
+	it("serves the hydration client at /_aflare/hydration.js", async () => {
+		const { server } = await fixture({
+			"/src/pages/index.astro": "<p>x</p>",
+		});
+		const r = await server.fetch(new Request("https://app/_aflare/hydration.js"));
+		expect(r.status).toBe(200);
+		expect(r.headers.get("content-type")).toContain("application/javascript");
+		const body = await r.text();
+		expect(body).toContain("customElements.define");
+		expect(body).toContain("astro-island");
+	});
+
+	it("compiles a .tsx island via /_aflare/island?path=...", async () => {
+		const { server } = await fixture({
+			"/components/Counter.tsx":
+				"export function mount(el: HTMLElement, props: { count?: number }) {\n" +
+				"  el.textContent = String(props.count ?? 0);\n" +
+				"}\n",
+			"/src/pages/index.astro": "<p>x</p>",
+		});
+		const r = await server.fetch(
+			new Request("https://app/_aflare/island?path=/components/Counter.tsx"),
+		);
+		expect(r.status).toBe(200);
+		expect(r.headers.get("content-type")).toContain("application/javascript");
+		const body = await r.text();
+		// TS annotations stripped (esbuild normalises `export function X` to
+		// `function X; export { X };` — both forms are valid ESM).
+		expect(body).toContain("function mount");
+		expect(body).toContain("export {");
+		expect(body).not.toContain(": HTMLElement");
+		expect(body).not.toContain(": { count");
+	});
+
+	it("returns 404 for an island source that doesn't exist", async () => {
+		const { server } = await fixture({
+			"/src/pages/index.astro": "<p>x</p>",
+		});
+		const r = await server.fetch(
+			new Request("https://app/_aflare/island?path=/nope.tsx"),
+		);
+		expect(r.status).toBe(404);
+	});
+
+	it("rejects unsupported island extensions", async () => {
+		const { server } = await fixture({
+			"/components/x.css": "p { color: red }",
+			"/src/pages/index.astro": "<p>x</p>",
+		});
+		const r = await server.fetch(
+			new Request("https://app/_aflare/island?path=/components/x.css"),
+		);
+		expect(r.status).toBe(415);
+	});
+
+	it("emits <astro-island> markup for client:load components", async () => {
+		const { server } = await fixture({
+			"/components/Counter.tsx":
+				"export function mount(el, props) { el.textContent = String(props.count); }",
+			"/src/pages/index.astro":
+				'---\nimport Counter from "../components/Counter.tsx";\n---\n' +
+				"<html><head></head><body>" +
+				'<Counter client:load count={42} />' +
+				"</body></html>",
+		});
+		const r = await server.fetch(new Request("https://app/"));
+		const body = await r.text();
+		if (r.status !== 200) {
+			throw new Error(`page render failed (${r.status}): ${body}`);
+		}
+		expect(body).toContain("<astro-island");
+		expect(body).toContain("client:load");
+		expect(body).toContain('"count":42');
+		expect(body).toContain("/_aflare/island?path=");
+		// Hydration script is injected when at least one island is present.
+		expect(body).toContain('src="/_aflare/hydration.js"');
+	});
+
+	it("does NOT inject hydration script when the page has no islands", async () => {
+		const { server } = await fixture({
+			"/src/pages/plain.astro": "<html><head></head><body><p>plain</p></body></html>",
+		});
+		const r = await server.fetch(new Request("https://app/plain"));
+		const body = await r.text();
+		expect(body).not.toContain("/_aflare/hydration.js");
+	});
+});
+
+// ---------------------------------------------------------------------------
 // MDX routes (Phase 14)
 // ---------------------------------------------------------------------------
 

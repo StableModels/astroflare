@@ -42,6 +42,8 @@ import RUNTIME_COOKIES_SRC from "../../packages/astroflare-runtime/dist/cookies.
 import RUNTIME_ENV_SRC from "../../packages/astroflare-runtime/dist/env.js?raw";
 // @ts-expect-error
 import RUNTIME_HMR_SRC from "../../packages/astroflare-runtime/dist/hmr-client.js?raw";
+// @ts-expect-error — Phase 16: runtime/index.js re-exports hydration-client.
+import RUNTIME_HYDRATION_SRC from "../../packages/astroflare-runtime/dist/hydration-client.js?raw";
 // Vite's `?raw` plugin works inside vitest-pool-workers. The relative
 // path bypasses the runtime package's `exports` map (which doesn't expose
 // `dist/`). The pretest `tsc -b` step builds the dist artifacts.
@@ -64,6 +66,7 @@ const RUNTIME_BUNDLE_MODULES: Record<string, string> = {
 	"runtime/components.js": RUNTIME_COMPONENTS_SRC as string,
 	"runtime/jsx-runtime.js": RUNTIME_JSX_RUNTIME_SRC as string,
 	"runtime/env.js": RUNTIME_ENV_SRC as string,
+	"runtime/hydration-client.js": RUNTIME_HYDRATION_SRC as string,
 };
 
 const RUNTIME_IMPORT = "./runtime/index.js";

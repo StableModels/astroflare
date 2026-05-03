@@ -188,24 +188,36 @@ isolate `getSecret` (threading env through the task context);
 these block the next-phase plan; they ride along when demand
 surfaces.
 
-### Phase 16 — Hydration runtime + React integration
+### Phase 16 — Hydration runtime + island plumbing ✓
 
-`<astro-island>` custom element implementing `client:load|idle|visible|media`.
-Per-island serialization protocol (props serialized as JSON in a `<script
-type="application/json">`, hydration script reads + boots the framework).
-React integration via esbuild-wasm JSX — the smallest compile path
-and largest audience. Preact's runtime is JSX-compatible so it falls
-out for free for users who alias the JSX runtime.
+**Done.** Retro: [`docs/phases/phase-16-hydration.md`](./phases/phase-16-hydration.md).
+25 new tests; 599 total. Compiler emits real `$island(...)` for
+`client:*` directives (was Phase 2's placeholder comment). Server
+helper produces `<astro-island>` markup with directive attributes,
+props as JSON, and SSR'd content (for `.astro`/`.md`/`.mdx` imports
+where SSR works) or empty (for `.tsx`/`.jsx` where SSR awaits
+React DOM Server). Hydration client (`hydration-client.ts`) defines
+`<astro-island>` custom element with all four trigger types
+(`load` / `idle` / `visible` / `media`); `HYDRATION_CLIENT_SOURCE`
+exported as a string for the preview server to ship verbatim.
+Preview server: `/_aflare/hydration.js` route + `/_aflare/island?path=...`
+route that compiles `.ts`/`.tsx`/`.jsx` via esbuild-wasm and passes
+`.js`/`.mjs` through. Hydration script auto-injected on pages that
+contain at least one `<astro-island>`.
 
-Per-island client bundling at deploy time (each island gets its own
-content-hashed JS file under `/site/<deployHash>/_islands/`). Deploy
-server serves them with appropriate cache-control.
+**Phase 16a (deferred):** automatic React adapter. Today's
+framework-agnostic `mount(el, props)` contract works for vanilla-JS
+islands; React requires user-written glue. 16a bundles
+React + ReactDOM into the per-island artifact and wraps a default-
+exported component with `ReactDOM.createRoot(...).render(...)`.
+
+**Phase 16b (deferred):** React SSR with hooks. Today's `.tsx`
+islands skip SSR (empty placeholder + client-side mount). 16b
+bundles React DOM Server into the SSR runtime and routes `.tsx`
+component invocation through `renderToString`.
 
 **Out of scope (deliberately):** Vue, Svelte, Solid, Lit. Opinionated
-bet that React covers the user base for now. Revisit only after real
-demand surfaces.
-
-**Defer:** `client:only` (no SSR fallback) — Phase 17 if needed.
+bet that React covers the user base for now.
 
 ### Phase 17 — Polish: view transitions, prefetch, RSS, sitemap
 

@@ -367,10 +367,9 @@ export interface HydrationDirective {
 }
 
 /**
- * Phase 2: emit a placeholder comment so we can verify the parser/emitter
- * pipeline routes client directives correctly. Phase 8 replaces this with a
- * real `<astro-island>` custom element instance and per-island client bundle
- * URL.
+ * Phase 2 placeholder — kept as a thin wrapper for back-compat. Phase 16
+ * upgrades the real hydration path to `$island(...)` (see below); the
+ * marker stays in case anything still consults it.
  */
 export function $hydrationMarker(directive: HydrationDirective): RawHtml {
 	const meta = `mode=${directive.mode}${
@@ -380,6 +379,156 @@ export function $hydrationMarker(directive: HydrationDirective): RawHtml {
 		__astroRaw: true,
 		html: `<!-- astroflare:hydration ${meta} -->`,
 	};
+}
+
+// ---------------------------------------------------------------------------
+// Phase 16: islands — real `<astro-island>` wrapping for `client:*` directives
+// ---------------------------------------------------------------------------
+
+export interface IslandOptions {
+	/** The component identifier as written by the user (e.g., `"Counter"`). */
+	componentName: string;
+	/**
+	 * The import specifier that brought the component in (e.g.,
+	 * `"../components/Counter.tsx"`). Null if the component wasn't
+	 * imported (defined inline) — that case is rare and the URL will be
+	 * empty. Combined with `importerPath` to construct an absolute URL.
+	 */
+	componentSpec: string | null;
+	/**
+	 * The workspace path of the file emitting the island (e.g.,
+	 * `"/src/pages/index.astro"`). Used as the resolution base for
+	 * `componentSpec`.
+	 */
+	importerPath: string | null;
+	/** Hydration trigger directive (`load` / `idle` / `visible` / `media`). */
+	directive: HydrationDirective;
+	/** Props the component receives at hydration time. JSON-serialised. */
+	props: Record<string, unknown>;
+}
+
+/**
+ * Server-side island wrapper. Produces `<astro-island>` markup containing:
+ *   - hydration metadata as attributes (uid, component-url, client:directive)
+ *   - props as a `<script type="application/json" data-aflare-props>`
+ *   - the SSR'd component HTML when `ssrCallback` is provided (and succeeds);
+ *     empty otherwise — the client-side hydration runtime mounts fresh
+ *
+ * The `<astro-island>` custom element is defined by the hydration client
+ * (`hydration-client.ts`); it boots the right trigger handler on
+ * connection and dynamically imports the component bundle on hydration.
+ *
+ * Phase 16 carve-out: SSR through React with hooks isn't supported. If the
+ * user's component is a `.astro` (server-renderable), `ssrCallback` runs and
+ * the SSR HTML is included. If it's a `.tsx`/`.jsx` import, the compiler
+ * passes `null` for `ssrCallback` and the island wraps an empty placeholder
+ * — equivalent to `client:only` for now. Phase 16b adds React SSR.
+ */
+export async function $island(
+	opts: IslandOptions,
+	ssrCallback: (() => Promise<unknown>) | null,
+): Promise<RawHtml> {
+	let ssrHtml = "";
+	if (ssrCallback) {
+		try {
+			const result = await ssrCallback();
+			if (isRawHtml(result)) {
+				ssrHtml = result.html;
+			} else if (result != null) {
+				ssrHtml = await flatten(result);
+			}
+		} catch {
+			// SSR failed — most likely the component reference was undefined
+			// because the import got stripped from the bundle. Fall back to
+			// empty island; client hydration will mount fresh.
+		}
+	}
+
+	const uid = generateIslandUid();
+	const componentUrl = buildComponentUrl(opts);
+	const directiveAttr = directiveToAttribute(opts.directive);
+	const propsJson = JSON.stringify(opts.props ?? {});
+
+	return {
+		__astroRaw: true,
+		html:
+			`<astro-island uid="${uid}"` +
+			` component-url="${$escape(componentUrl)}"` +
+			` component-name="${$escape(opts.componentName)}"` +
+			directiveAttr +
+			">" +
+			`<script type="application/json" data-aflare-props>${embedJson(propsJson)}</script>` +
+			ssrHtml +
+			"</astro-island>",
+	};
+}
+
+let islandCounter = 0;
+
+/**
+ * Generate a per-render island UID. Falls back to a process-local counter
+ * when `crypto.randomUUID` isn't available (older Node, some test
+ * environments). The UID only needs to be unique within a single page
+ * render — it's how the client-side runtime distinguishes islands when
+ * multiple appear on the page.
+ */
+function generateIslandUid(): string {
+	const c = (globalThis as { crypto?: { randomUUID?: () => string } }).crypto;
+	if (c?.randomUUID) {
+		return c.randomUUID().replace(/-/g, "").slice(0, 8);
+	}
+	return `i${(islandCounter++).toString(36).padStart(4, "0")}`;
+}
+
+/**
+ * Build the URL the hydration runtime fetches the component bundle from.
+ * Resolves `componentSpec` relative to `importerPath`'s directory so the
+ * preview / deploy server can locate the source file.
+ *
+ * Returns an empty string if the spec is null — caller should treat that
+ * as "no source available, hydration will be a no-op."
+ */
+function buildComponentUrl(opts: IslandOptions): string {
+	if (!opts.componentSpec) return "";
+	const importerDir = opts.importerPath ? dirOf(opts.importerPath) : "/";
+	const resolved = resolveSpec(importerDir, opts.componentSpec);
+	const params = new URLSearchParams();
+	params.set("path", resolved);
+	return `/_aflare/island?${params.toString()}`;
+}
+
+function dirOf(path: string): string {
+	const i = path.lastIndexOf("/");
+	return i < 0 ? "" : path.slice(0, i);
+}
+
+/** Tiny POSIX-style path resolver — sufficient for relative spec → workspace path. */
+function resolveSpec(base: string, spec: string): string {
+	if (spec.startsWith("/")) return spec;
+	const segments = `${base}/${spec}`.split("/");
+	const stack: string[] = [];
+	for (const seg of segments) {
+		if (seg === "" || seg === ".") continue;
+		if (seg === "..") {
+			stack.pop();
+			continue;
+		}
+		stack.push(seg);
+	}
+	return `/${stack.join("/")}`;
+}
+
+function directiveToAttribute(d: HydrationDirective): string {
+	let attr = ` client:${d.mode}`;
+	if (d.mediaQuery) attr += `="${$escape(d.mediaQuery)}"`;
+	return attr;
+}
+
+/** Defang `</script>` and `<!--` inside embedded JSON so the surrounding
+ * `<script type="application/json">` block can't be terminated early.
+ */
+function embedJson(json: string): string {
+	return json.replace(/<\/script/gi, "<\\/script").replace(/<!--/g, "<\\!--");
 }
 
 /**

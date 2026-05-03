@@ -172,15 +172,53 @@ describe("emitter — directives", () => {
 		expect(code).toContain("$defineVars({ user })");
 	});
 
-	it("client:load on a component emits a hydration marker", () => {
+	it("client:load on a component emits a $island wrapper (Phase 16)", () => {
 		const code = compile("<Counter client:load count={1} />");
-		expect(code).toContain("$hydrationMarker(");
+		expect(code).toContain("$island(");
 		expect(code).toContain('"mode":"load"');
+		expect(code).toContain('"componentName":"Counter"');
 	});
 
 	it("client:media captures the media query", () => {
 		const code = compile('<Counter client:media="(min-width: 800px)" />');
 		expect(code).toContain('"mediaQuery":"(min-width: 800px)"');
+	});
+
+	it("$island encodes the import spec for components in frontmatter", () => {
+		const code = compile(
+			'---\nimport Counter from "../components/Counter.tsx";\n---\n<Counter client:load />',
+		);
+		expect(code).toContain('"componentSpec":"../components/Counter.tsx"');
+	});
+
+	it(".astro imports get an SSR callback (Astroflare components SSR cleanly)", () => {
+		const code = compile(
+			'---\nimport Card from "./Card.astro";\n---\n<Card client:visible label="Hi" />',
+		);
+		expect(code).toContain("$island(");
+		// Astroflare components: SSR is wired (the inline-bundled output
+		// still includes the renderComponent call).
+		expect(code).toContain("await $renderComponent(Card");
+	});
+
+	it(".tsx imports skip the SSR callback (no React SSR yet)", () => {
+		const code = compile(
+			'---\nimport Counter from "./Counter.tsx";\n---\n<Counter client:load />',
+		);
+		expect(code).toContain("$island(");
+		// React-side imports: SSR callback is `null` so the island starts
+		// empty and the client runtime mounts fresh.
+		expect(code).toContain(", null)");
+		expect(code).not.toContain("await $renderComponent(Counter");
+	});
+
+	it("$island falls back to best-effort SSR when import isn't tracked", () => {
+		// Bare `<X client:load />` with no frontmatter import — emit still
+		// produces an island; the runtime $island helper handles the
+		// undefined-component case gracefully.
+		const code = compile("<Inline client:load />");
+		expect(code).toContain("$island(");
+		expect(code).toContain('"componentSpec":null');
 	});
 });
 

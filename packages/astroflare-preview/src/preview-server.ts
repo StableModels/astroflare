@@ -37,6 +37,7 @@
  *     findings (no workerd-compatible Executor yet).
  */
 import { COMPILER_VERSION, compileAstro } from "@astroflare/compiler";
+import { transformTS } from "@astroflare/compiler/ts";
 import {
 	type AstroflareConfig,
 	type HmrMessage,
@@ -47,7 +48,7 @@ import {
 	type TaskBundle,
 	contentIdWithConfig,
 } from "@astroflare/core";
-import { HMR_CLIENT_SOURCE } from "@astroflare/runtime";
+import { HMR_CLIENT_SOURCE, HYDRATION_CLIENT_SOURCE } from "@astroflare/runtime";
 import { inlineBundle } from "./bundle.js";
 import { type EndpointContext, runEndpoint } from "./endpoint.js";
 import { renderErrorPage } from "./error-page.js";
@@ -85,6 +86,8 @@ const DEFAULT_WORKSPACE_ID = "default";
 const WRAPPER_NAME = "main.js";
 const HMR_PATH = "/_aflare/hmr";
 const ASSET_PREFIX = "/_aflare/asset/";
+const HYDRATION_PATH = "/_aflare/hydration.js";
+const ISLAND_PATH = "/_aflare/island";
 const PAGES_PREFIX = "/src/pages/";
 
 const IMAGE_CONTENT_TYPES: Record<string, string> = {
@@ -198,6 +201,25 @@ export function createPreviewServer(opts: PreviewServerOptions): PreviewServer {
 					return await serveAsset(opts.host, url.pathname.slice(ASSET_PREFIX.length));
 				}
 
+				// Hydration runtime (Phase 16). Served as a small ESM module
+				// that defines `<astro-island>` and the directive triggers.
+				if (url.pathname === HYDRATION_PATH) {
+					return serveHydrationClient();
+				}
+
+				// Island component bundles (Phase 16). The compiler emits
+				// `component-url="/_aflare/island?path=/components/Counter.tsx"`;
+				// this route reads the source from storage, runs `.ts`/`.tsx`/
+				// `.jsx` through esbuild-wasm, and returns ESM the browser
+				// can dynamic-import.
+				if (url.pathname === ISLAND_PATH) {
+					const path = url.searchParams.get("path");
+					if (!path) {
+						return new Response("missing path", { status: 400 });
+					}
+					return serveIslandModule(opts.host, path);
+				}
+
 				const match = router.match(url.pathname);
 				if (!match) {
 					opts.host.logger.event("preview.notfound", { pathname: url.pathname });
@@ -255,7 +277,15 @@ export function createPreviewServer(opts: PreviewServerOptions): PreviewServer {
 					if (result.kind === "response") {
 						return buildResponseFromResult(result);
 					}
-					const htmlWithHmr = injectHmrScript(result.html, HMR_CLIENT_SOURCE);
+					let html = result.html;
+					// Inject hydration runtime first (when the rendered HTML
+					// has at least one `<astro-island>`), then HMR. Order is
+					// only cosmetic — both are `<script type="module">` and
+					// run independently.
+					if (html.includes("<astro-island")) {
+						html = injectHydrationScript(html);
+					}
+					const htmlWithHmr = injectHmrScript(html, HMR_CLIENT_SOURCE);
 					return buildHtmlResponse(htmlWithHmr, result.cookies);
 				};
 
@@ -378,6 +408,101 @@ async function serveAsset(host: Host, encodedPath: string): Promise<Response> {
 			"cache-control": "public, max-age=31536000, immutable",
 		},
 	});
+}
+
+// ---------------------------------------------------------------------------
+// Hydration + island routes (Phase 16)
+// ---------------------------------------------------------------------------
+
+const dec = new TextDecoder();
+const ISLAND_TS_EXTENSIONS = [".ts", ".tsx", ".jsx", ".mts"] as const;
+const ISLAND_JS_EXTENSIONS = [".js", ".mjs"] as const;
+
+/**
+ * Serve `HYDRATION_CLIENT_SOURCE` as an ESM module. Cached aggressively;
+ * the source string is fixed for a given runtime version.
+ */
+function serveHydrationClient(): Response {
+	return new Response(HYDRATION_CLIENT_SOURCE, {
+		status: 200,
+		headers: {
+			"content-type": "application/javascript;charset=utf-8",
+			"cache-control": "public, max-age=300",
+		},
+	});
+}
+
+/**
+ * Read an island source file from storage and return JS the browser can
+ * `import()`. `.ts`/`.tsx`/`.jsx`/`.mts` go through esbuild-wasm's
+ * TS-strip + JSX transform; `.js`/`.mjs` pass through verbatim.
+ *
+ * Phase 16 carve-out: framework-specific JSX runtime resolution (React /
+ * Preact) isn't wired here. The compiled output uses esbuild's default
+ * automatic JSX with `react/jsx-runtime` as the source; the browser
+ * either resolves that via an import map or the user ships a vanilla-JS
+ * island that doesn't rely on a framework runtime. Phase 16a adds an
+ * automatic React adapter that bundles the runtime.
+ */
+async function serveIslandModule(host: Host, path: string): Promise<Response> {
+	// Reject path traversal — workspace paths start with `/` and use
+	// `..` only inside the segment list, which is fine; absolute paths
+	// outside the workspace aren't possible.
+	const normalized = path.startsWith("/") ? path : `/${path}`;
+
+	const ext = ISLAND_TS_EXTENSIONS.find((e) => normalized.endsWith(e))
+		?? ISLAND_JS_EXTENSIONS.find((e) => normalized.endsWith(e))
+		?? null;
+	if (!ext) {
+		return new Response("unsupported island extension", { status: 415 });
+	}
+
+	const stat = await host.storage.stat(normalized);
+	if (!stat) {
+		return new Response("island source not found", { status: 404 });
+	}
+	const sourceBytes = await host.storage.read(normalized);
+	let source = dec.decode(sourceBytes);
+
+	if ((ISLAND_TS_EXTENSIONS as readonly string[]).includes(ext)) {
+		try {
+			source = await transformTS(source, { filename: normalized });
+		} catch (err) {
+			return new Response(`island compile failed: ${(err as Error).message}`, {
+				status: 500,
+			});
+		}
+	}
+
+	return new Response(source, {
+		status: 200,
+		headers: {
+			"content-type": "application/javascript;charset=utf-8",
+			// Source-content-hashed → safe to cache while the file
+			// hasn't changed. Tied to source hash via etag.
+			etag: `"${stat.hash}"`,
+			"cache-control": "public, max-age=0, must-revalidate",
+		},
+	});
+}
+
+/**
+ * Insert a `<script type="module" src="/_aflare/hydration.js"></script>`
+ * tag into HTML that contains at least one `<astro-island>`. Same
+ * placement preference as the HMR script: head close, then body close,
+ * then append.
+ */
+function injectHydrationScript(html: string): string {
+	const tag = `<script type="module" src="${HYDRATION_PATH}"></script>`;
+	const headIdx = html.toLowerCase().lastIndexOf("</head>");
+	if (headIdx >= 0) {
+		return html.slice(0, headIdx) + tag + html.slice(headIdx);
+	}
+	const bodyIdx = html.toLowerCase().lastIndexOf("</body>");
+	if (bodyIdx >= 0) {
+		return html.slice(0, bodyIdx) + tag + html.slice(bodyIdx);
+	}
+	return html + tag;
 }
 
 // Re-exports kept so downstream packages have a single import surface.

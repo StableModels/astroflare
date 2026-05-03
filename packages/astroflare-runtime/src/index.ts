@@ -16,6 +16,10 @@ export * from "./render.js";
 export * from "./hmr-client.js";
 export { CookieJar } from "./cookies.js";
 export { Image, Picture } from "./components.js";
+// Phase 16: hydration runtime — `HYDRATION_CLIENT_SOURCE` is the JS
+// the preview / deploy server serves at `/_aflare/hydration.js`;
+// `registerAstroIsland` is the programmatic registration entrypoint.
+export { HYDRATION_CLIENT_SOURCE, registerAstroIsland } from "./hydration-client.js";
 // JSX runtime — re-exported so a `runtimeImport` URL pointing at this
 // entrypoint can supply `jsx`, `jsxs`, `jsxDEV`, and `Fragment` from a
 // single source. The MDX compiler post-processes its output to alias

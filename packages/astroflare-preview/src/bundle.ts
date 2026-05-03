@@ -44,6 +44,7 @@ const BUNDLE_RUNTIME_SYMBOLS = [
 	"$spreadAttrs",
 	"$defineVars",
 	"$hydrationMarker",
+	"$island",
 	"render",
 	"jsx",
 	"jsxs",

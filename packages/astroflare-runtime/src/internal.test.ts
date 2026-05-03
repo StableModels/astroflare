@@ -5,6 +5,7 @@ import {
 	$defineVars,
 	$escape,
 	$hydrationMarker,
+	$island,
 	$rawHtml,
 	$render,
 	$renderComponent,
@@ -204,6 +205,124 @@ describe("$hydrationMarker", () => {
 	it("includes media for client:media", () => {
 		const r = $hydrationMarker({ mode: "media", mediaQuery: "(min-width: 800px)" });
 		expect(r.html).toBe('<!-- astroflare:hydration mode=media media="(min-width: 800px)" -->');
+	});
+});
+
+describe("$island", () => {
+	it("wraps SSR'd output in an <astro-island> element with metadata", async () => {
+		const r = await $island(
+			{
+				componentName: "Counter",
+				componentSpec: "../components/Counter.tsx",
+				importerPath: "/src/pages/index.astro",
+				directive: { mode: "load" },
+				props: { count: 1 },
+			},
+			null,
+		);
+		expect(r.html).toMatch(/^<astro-island uid="[0-9a-f]+"/);
+		expect(r.html).toContain('component-name="Counter"');
+		expect(r.html).toContain("client:load");
+		expect(r.html).toContain('<script type="application/json" data-aflare-props>');
+		expect(r.html).toContain('"count":1');
+		expect(r.html).toContain("</astro-island>");
+	});
+
+	it("resolves componentSpec relative to importerPath into a /_aflare/island URL", async () => {
+		const r = await $island(
+			{
+				componentName: "Counter",
+				componentSpec: "../components/Counter.tsx",
+				importerPath: "/src/pages/index.astro",
+				directive: { mode: "load" },
+				props: {},
+			},
+			null,
+		);
+		// `/src/pages/index.astro` + `../components/Counter.tsx` →
+		// `/src/components/Counter.tsx`
+		expect(r.html).toContain(
+			"component-url=\"/_aflare/island?path=%2Fsrc%2Fcomponents%2FCounter.tsx\"",
+		);
+	});
+
+	it("includes the SSR'd HTML inside the island when ssrCallback succeeds", async () => {
+		const r = await $island(
+			{
+				componentName: "Card",
+				componentSpec: "./Card.astro",
+				importerPath: "/page.astro",
+				directive: { mode: "load" },
+				props: {},
+			},
+			async () => $rawHtml("<div>SSR'd content</div>"),
+		);
+		expect(r.html).toContain("<div>SSR'd content</div>");
+	});
+
+	it("falls back to empty content when ssrCallback throws", async () => {
+		const r = await $island(
+			{
+				componentName: "X",
+				componentSpec: null,
+				importerPath: null,
+				directive: { mode: "load" },
+				props: {},
+			},
+			async () => {
+				throw new Error("component undefined");
+			},
+		);
+		expect(r.html).toContain("</astro-island>");
+		// No SSR'd HTML between the props script and the closing tag.
+		const innerStart = r.html.indexOf("</script>") + "</script>".length;
+		const innerEnd = r.html.indexOf("</astro-island>");
+		expect(r.html.slice(innerStart, innerEnd)).toBe("");
+	});
+
+	it("encodes the media query for client:media", async () => {
+		const r = await $island(
+			{
+				componentName: "Drawer",
+				componentSpec: null,
+				importerPath: null,
+				directive: { mode: "media", mediaQuery: "(min-width: 800px)" },
+				props: {},
+			},
+			null,
+		);
+		expect(r.html).toContain('client:media="(min-width: 800px)"');
+	});
+
+	it("defangs </script> inside JSON-embedded props", async () => {
+		const r = await $island(
+			{
+				componentName: "X",
+				componentSpec: null,
+				importerPath: null,
+				directive: { mode: "load" },
+				props: { html: "</script>" },
+			},
+			null,
+		);
+		// Raw `</script>` inside the JSON would terminate the surrounding
+		// <script> block; embedJson swaps the slash for `\/`.
+		expect(r.html).not.toMatch(/<script[^>]*>[^<]*<\/script>/);
+		expect(r.html).toContain("<\\/script>");
+	});
+
+	it("escapes attribute values via $escape", async () => {
+		const r = await $island(
+			{
+				componentName: 'Bad"name',
+				componentSpec: null,
+				importerPath: null,
+				directive: { mode: "load" },
+				props: {},
+			},
+			null,
+		);
+		expect(r.html).toContain('component-name="Bad&quot;name"');
 	});
 });
 

@@ -36,6 +36,8 @@ import { describe, expect, it } from "vitest";
 
 // @ts-expect-error
 import RUNTIME_HMR_SRC from "../../packages/astroflare-runtime/dist/hmr-client.js?raw";
+// @ts-expect-error — Phase 16: runtime/index.js re-exports hydration-client.
+import RUNTIME_HYDRATION_SRC from "../../packages/astroflare-runtime/dist/hydration-client.js?raw";
 // @ts-expect-error — Phase 15a: runtime/index.js re-exports env.js.
 import RUNTIME_ENV_SRC from "../../packages/astroflare-runtime/dist/env.js?raw";
 /* eslint-disable @typescript-eslint/ban-ts-comment */
@@ -56,6 +58,7 @@ const RUNTIME_BUNDLE_MODULES: Record<string, string> = {
 	"runtime/hmr-client.js": RUNTIME_HMR_SRC as string,
 	"runtime/jsx-runtime.js": RUNTIME_JSX_RUNTIME_SRC as string,
 	"runtime/env.js": RUNTIME_ENV_SRC as string,
+	"runtime/hydration-client.js": RUNTIME_HYDRATION_SRC as string,
 };
 
 const enc = (s: string) => new TextEncoder().encode(s);
