@@ -48,8 +48,16 @@ import RUNTIME_INTERNAL_SRC from "../../packages/astroflare-runtime/dist/interna
 // @ts-expect-error — Phase 14: runtime index re-exports jsx-runtime, so
 // this file has to be present in the module map for workerd to resolve.
 import RUNTIME_JSX_RUNTIME_SRC from "../../packages/astroflare-runtime/dist/jsx-runtime.js?raw";
+// @ts-expect-error — Phase 17: runtime/index.js re-exports prefetch-client.
+import RUNTIME_PREFETCH_SRC from "../../packages/astroflare-runtime/dist/prefetch-client.js?raw";
 // @ts-expect-error
 import RUNTIME_RENDER_SRC from "../../packages/astroflare-runtime/dist/render.js?raw";
+// @ts-expect-error — Phase 17: runtime/index.js re-exports rss.
+import RUNTIME_RSS_SRC from "../../packages/astroflare-runtime/dist/rss.js?raw";
+// @ts-expect-error — Phase 17: runtime/index.js re-exports sitemap.
+import RUNTIME_SITEMAP_SRC from "../../packages/astroflare-runtime/dist/sitemap.js?raw";
+// @ts-expect-error — Phase 17: runtime/index.js re-exports view-transitions-client.
+import RUNTIME_VT_SRC from "../../packages/astroflare-runtime/dist/view-transitions-client.js?raw";
 
 const RUNTIME_BUNDLE_MODULES: Record<string, string> = {
 	"runtime/index.js": RUNTIME_INDEX_SRC as string,
@@ -59,6 +67,10 @@ const RUNTIME_BUNDLE_MODULES: Record<string, string> = {
 	"runtime/jsx-runtime.js": RUNTIME_JSX_RUNTIME_SRC as string,
 	"runtime/env.js": RUNTIME_ENV_SRC as string,
 	"runtime/hydration-client.js": RUNTIME_HYDRATION_SRC as string,
+	"runtime/view-transitions-client.js": RUNTIME_VT_SRC as string,
+	"runtime/prefetch-client.js": RUNTIME_PREFETCH_SRC as string,
+	"runtime/rss.js": RUNTIME_RSS_SRC as string,
+	"runtime/sitemap.js": RUNTIME_SITEMAP_SRC as string,
 };
 
 const enc = (s: string) => new TextEncoder().encode(s);

@@ -15,11 +15,40 @@ export * from "./internal.js";
 export * from "./render.js";
 export * from "./hmr-client.js";
 export { CookieJar } from "./cookies.js";
-export { Image, Picture } from "./components.js";
+export { Image, Picture, ViewTransitions, Prefetch } from "./components.js";
 // Phase 16: hydration runtime — `HYDRATION_CLIENT_SOURCE` is the JS
 // the preview / deploy server serves at `/_aflare/hydration.js`;
 // `registerAstroIsland` is the programmatic registration entrypoint.
 export { HYDRATION_CLIENT_SOURCE, registerAstroIsland } from "./hydration-client.js";
+// Phase 17: view-transitions + prefetch client scripts. Surfaced both
+// as typed installers (for tests and programmatic users) and as source
+// strings the preview/deploy server ships at fixed `/_aflare/*` paths.
+export {
+	VIEW_TRANSITIONS_CLIENT_SOURCE,
+	installViewTransitions,
+	type ViewTransitionsClient,
+	type InstallViewTransitionsOptions,
+} from "./view-transitions-client.js";
+export {
+	PREFETCH_CLIENT_SOURCE,
+	installPrefetch,
+	type PrefetchClient,
+	type InstallPrefetchOptions,
+} from "./prefetch-client.js";
+// Phase 17: RSS + sitemap XML helpers. Pure functions — caller wires
+// them into an endpoint route.
+export {
+	generateRss,
+	formatRssDate,
+	type RssFeedInput,
+	type RssFeedItem,
+} from "./rss.js";
+export {
+	generateSitemap,
+	formatSitemapDate,
+	type SitemapInput,
+	type SitemapUrlEntry,
+} from "./sitemap.js";
 // JSX runtime — re-exported so a `runtimeImport` URL pointing at this
 // entrypoint can supply `jsx`, `jsxs`, `jsxDEV`, and `Fragment` from a
 // single source. The MDX compiler post-processes its output to alias

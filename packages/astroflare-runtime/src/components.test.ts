@@ -6,7 +6,7 @@
  */
 import type { ImageMetadata } from "@astroflare/core";
 import { describe, expect, it } from "vitest";
-import { Image, Picture } from "./components.js";
+import { Image, Picture, Prefetch, ViewTransitions } from "./components.js";
 
 describe("<Image>", () => {
 	it("renders an <img> from ImageMetadata", async () => {
@@ -78,5 +78,26 @@ describe("<Picture>", () => {
 		const r = await Picture({ src: meta, alt: "p" }, {});
 		if (r instanceof Response) throw new Error("expected RawHtml");
 		expect(r.html).toBe('<picture><img src="/p.png" alt="p" width="100" height="50" /></picture>');
+	});
+});
+
+describe("<ViewTransitions> (Phase 17)", () => {
+	it("emits the marker meta + the view-transitions script tag", async () => {
+		// biome-ignore lint/suspicious/noExplicitAny: zero-arg component
+		const r = await ViewTransitions({} as any, {});
+		if (r instanceof Response) throw new Error("expected RawHtml");
+		expect(r.html).toContain('<meta name="aflare-view-transitions"');
+		expect(r.html).toContain('src="/_aflare/view-transitions.js"');
+		expect(r.html).toContain('type="module"');
+	});
+});
+
+describe("<Prefetch> (Phase 17)", () => {
+	it("emits the prefetch script tag", async () => {
+		// biome-ignore lint/suspicious/noExplicitAny: zero-arg component
+		const r = await Prefetch({} as any, {});
+		if (r instanceof Response) throw new Error("expected RawHtml");
+		expect(r.html).toContain('src="/_aflare/prefetch.js"');
+		expect(r.html).toContain('type="module"');
 	});
 });

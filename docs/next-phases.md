@@ -219,13 +219,20 @@ component invocation through `renderToString`.
 **Out of scope (deliberately):** Vue, Svelte, Solid, Lit. Opinionated
 bet that React covers the user base for now.
 
-### Phase 17 — Polish: view transitions, prefetch, RSS, sitemap
+### Phase 17 — Polish: view transitions, prefetch, RSS, sitemap ✓
 
-Shorter phase combining the small Tier 2 tail. View transitions (Astro's
-`<ViewTransitions />` + browser API registration). Prefetch (link-hover
-+ intersection-observer hooks). RSS via content collections. Sitemap
-likewise. Each is small in isolation; they cluster naturally because
-they all sit on top of routing + content collections.
+**Done.** Retro: [`docs/phases/phase-17-polish.md`](./phases/phase-17-polish.md).
+29 new tests; 628 total. `<ViewTransitions />` + `<Prefetch />`
+runtime components; `/_aflare/view-transitions.js` +
+`/_aflare/prefetch.js` preview-server routes; `generateRss()` +
+`generateSitemap()` pure-function helpers exported from
+`@astroflare/runtime`. Same `_CLIENT_SOURCE` string + typed-installer
+pattern Phase 5 / 16 use.
+
+**Defer:** auto-built sitemap from the route table; Atom feed
+alternative; `<a data-aflare-reload>` opt-out for view transitions;
+`tap` prefetch strategy; custom directive registry. Picked up if
+there's demand.
 
 ### Phase 18 — i18n routing
 

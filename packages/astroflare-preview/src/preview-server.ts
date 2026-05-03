@@ -48,7 +48,12 @@ import {
 	type TaskBundle,
 	contentIdWithConfig,
 } from "@astroflare/core";
-import { HMR_CLIENT_SOURCE, HYDRATION_CLIENT_SOURCE } from "@astroflare/runtime";
+import {
+	HMR_CLIENT_SOURCE,
+	HYDRATION_CLIENT_SOURCE,
+	PREFETCH_CLIENT_SOURCE,
+	VIEW_TRANSITIONS_CLIENT_SOURCE,
+} from "@astroflare/runtime";
 import { inlineBundle } from "./bundle.js";
 import { type EndpointContext, runEndpoint } from "./endpoint.js";
 import { renderErrorPage } from "./error-page.js";
@@ -88,6 +93,10 @@ const HMR_PATH = "/_aflare/hmr";
 const ASSET_PREFIX = "/_aflare/asset/";
 const HYDRATION_PATH = "/_aflare/hydration.js";
 const ISLAND_PATH = "/_aflare/island";
+// Phase 17 client scripts. Both are tiny static ESM modules served
+// from in-memory string constants.
+const VIEW_TRANSITIONS_PATH = "/_aflare/view-transitions.js";
+const PREFETCH_PATH = "/_aflare/prefetch.js";
 const PAGES_PREFIX = "/src/pages/";
 
 const IMAGE_CONTENT_TYPES: Record<string, string> = {
@@ -205,6 +214,17 @@ export function createPreviewServer(opts: PreviewServerOptions): PreviewServer {
 				// that defines `<astro-island>` and the directive triggers.
 				if (url.pathname === HYDRATION_PATH) {
 					return serveHydrationClient();
+				}
+
+				// Phase 17 — view-transitions and prefetch client scripts.
+				// Both are inert until a page imports `<ViewTransitions />`
+				// or `<Prefetch />` (which inject the `<script>` tag); the
+				// route just serves the inlined source.
+				if (url.pathname === VIEW_TRANSITIONS_PATH) {
+					return serveStaticClient(VIEW_TRANSITIONS_CLIENT_SOURCE);
+				}
+				if (url.pathname === PREFETCH_PATH) {
+					return serveStaticClient(PREFETCH_CLIENT_SOURCE);
 				}
 
 				// Island component bundles (Phase 16). The compiler emits
@@ -423,7 +443,15 @@ const ISLAND_JS_EXTENSIONS = [".js", ".mjs"] as const;
  * the source string is fixed for a given runtime version.
  */
 function serveHydrationClient(): Response {
-	return new Response(HYDRATION_CLIENT_SOURCE, {
+	return serveStaticClient(HYDRATION_CLIENT_SOURCE);
+}
+
+/**
+ * Generic static-source ESM response — same shape as the hydration
+ * route, used for the Phase 17 view-transitions + prefetch scripts.
+ */
+function serveStaticClient(source: string): Response {
+	return new Response(source, {
 		status: 200,
 		headers: {
 			"content-type": "application/javascript;charset=utf-8",

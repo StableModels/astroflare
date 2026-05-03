@@ -433,6 +433,36 @@ describe("preview server: hydration + islands", () => {
 });
 
 // ---------------------------------------------------------------------------
+// View transitions + prefetch (Phase 17)
+// ---------------------------------------------------------------------------
+
+describe("preview server: view-transitions + prefetch routes", () => {
+	it("serves the view-transitions client at /_aflare/view-transitions.js", async () => {
+		const { server } = await fixture({
+			"/src/pages/index.astro": "<p>x</p>",
+		});
+		const r = await server.fetch(new Request("https://app/_aflare/view-transitions.js"));
+		expect(r.status).toBe(200);
+		expect(r.headers.get("content-type")).toContain("application/javascript");
+		const body = await r.text();
+		expect(body).toContain("startViewTransition");
+		expect(body).toContain("x-aflare-vt");
+	});
+
+	it("serves the prefetch client at /_aflare/prefetch.js", async () => {
+		const { server } = await fixture({
+			"/src/pages/index.astro": "<p>x</p>",
+		});
+		const r = await server.fetch(new Request("https://app/_aflare/prefetch.js"));
+		expect(r.status).toBe(200);
+		expect(r.headers.get("content-type")).toContain("application/javascript");
+		const body = await r.text();
+		expect(body).toContain("data-aflare-prefetch");
+		expect(body).toContain("x-aflare-prefetch");
+	});
+});
+
+// ---------------------------------------------------------------------------
 // MDX routes (Phase 14)
 // ---------------------------------------------------------------------------
 

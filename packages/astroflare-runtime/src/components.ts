@@ -22,7 +22,7 @@
  */
 
 import type { ImageMetadata } from "@astroflare/core";
-import { $component, $render, type RawHtml } from "./internal.js";
+import { $component, $rawHtml, $render, type RawHtml } from "./internal.js";
 
 /** Common props for `<Image>` and `<Picture>`. */
 interface ImageProps {
@@ -120,3 +120,30 @@ function escapeAttr(value: string): string {
 		.replace(/</g, "&lt;")
 		.replace(/>/g, "&gt;");
 }
+
+/**
+ * `<ViewTransitions />` — opts the page in to View Transitions API
+ * navigation. Emits a marker `<meta>` (so the host can detect the
+ * page wants transitions) and a `<script type="module">` pointing at
+ * `/_aflare/view-transitions.js`. Place it inside `<head>`.
+ *
+ * Phase 17. The script implements same-origin link interception +
+ * `document.startViewTransition` swap, with graceful fallback for
+ * browsers without the API.
+ */
+export const ViewTransitions = $component(async (): Promise<RawHtml> => {
+	return $rawHtml(
+		'<meta name="aflare-view-transitions" content="enabled" />' +
+			'<script type="module" src="/_aflare/view-transitions.js"></script>',
+	);
+});
+
+/**
+ * `<Prefetch />` — opts the page in to link prefetching for any
+ * `<a data-aflare-prefetch>` (default: `hover`) or
+ * `<a data-aflare-prefetch="viewport">`. Emits the script tag only;
+ * users mark up their links with the data attribute themselves.
+ */
+export const Prefetch = $component(async (): Promise<RawHtml> => {
+	return $rawHtml('<script type="module" src="/_aflare/prefetch.js"></script>');
+});
