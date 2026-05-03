@@ -82,11 +82,9 @@ export function inlineSourceMappingURL(map: SourceMapV3): string {
 }
 
 function base64encode(s: string): string {
-	if (typeof Buffer !== "undefined") {
-		return Buffer.from(s, "utf8").toString("base64");
-	}
-	// btoa works on Latin-1 only; encode via TextEncoder + chunk to
-	// stay within the 0–255 byte range.
+	// `btoa` works on Latin-1; encode via TextEncoder + map each byte to
+	// a Latin-1 char before handing it over. Same behavior in Node 22+,
+	// workerd, and browsers, no `Buffer` ambient required.
 	const bytes = new TextEncoder().encode(s);
 	let bin = "";
 	for (const b of bytes) bin += String.fromCharCode(b);

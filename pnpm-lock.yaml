@@ -216,6 +216,12 @@ importers:
         specifier: workspace:*
         version: link:../runtime
     devDependencies:
+      '@astroflare/starter':
+        specifier: workspace:*
+        version: link:../starter
+      '@astroflare/test-utils':
+        specifier: workspace:*
+        version: link:../test-utils
       '@cloudflare/vitest-pool-workers':
         specifier: ^0.10.0
         version: 0.10.15(@cloudflare/workers-types@4.20260502.1)(@vitest/runner@2.1.8)(@vitest/snapshot@2.1.8)(vitest@2.1.8(@types/node@22.19.17)(happy-dom@15.11.7))

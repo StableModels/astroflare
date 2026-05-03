@@ -84,10 +84,15 @@ build cleanly into deployable bundles.
   the source of truth; `scripts/generate-starter-files.mjs`
   inlines it as base64 into `src/starter-files.generated.ts`,
   also part of `pnpm build`.
-- `buildRenderTask` (in `@astroflare/build`) is the shared shim
-  that wraps compiled `.astro` route code into a `TaskBundle` for
-  the executor. Used by `createPreviewHandler` and `buildSite`
-  (workers).
+- `buildRenderTask` / `buildClosureRenderTask` (in
+  `@astroflare/build`) are the shared shims that wrap compiled
+  `.astro` route code into a `TaskBundle` for the executor.
+  `buildClosureRenderTask` is the multi-module shape used after
+  `inlineBundle` flattens an import closure; both
+  `createPreviewHandler` and `buildSite` (workers) walk the closure
+  via `ModuleGraph` (re-exported from `@astroflare/preview/module-graph`)
+  so layouts, shared components, and `.md`/`.mdx` deps end up in the
+  bundle alongside the route.
 
 Phase plans:
 [`docs/phases/phase-26-host-driven-preview.md`](docs/phases/phase-26-host-driven-preview.md),

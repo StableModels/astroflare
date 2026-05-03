@@ -78,3 +78,49 @@ export function buildRenderTask(opts: BuildRenderTaskOptions): TaskBundle {
 		},
 	};
 }
+
+export interface BuildClosureRenderTaskOptions {
+	/**
+	 * The pre-bundled ESM produced by `inlineBundle()` from
+	 * `@astroflare/preview/bundle`. Its default export must be
+	 * `async (ctx) => RenderResult` — the bundle's own wrapper handles
+	 * the call into `render(...)`.
+	 */
+	bundleCode: string;
+}
+
+/**
+ * Build a `TaskBundle` for a multi-module closure (route + transitively-
+ * imported `.astro`/`.md`/`.mdx` deps) that has already been flattened
+ * into a single ESM by `inlineBundle()`. The shim's job is just the
+ * JSON ↔ live-object marshalling at the executor boundary; the bundle
+ * itself owns module-resolution and the `render` call.
+ *
+ * Mirrors `buildRenderTask` in shape — same input fields, same
+ * `RenderResult` output — so callers can swap `buildRenderTask` for
+ * this without touching the executor wiring.
+ */
+export function buildClosureRenderTask(opts: BuildClosureRenderTaskOptions): TaskBundle {
+	const shim = [
+		'import bundle from "./bundle.js";',
+		"export default async (input) => {",
+		'  const request = new Request(input.url, { method: input.method ?? "GET" });',
+		"  const ctx = {",
+		"    props: input.props ?? {},",
+		"    params: input.params ?? {},",
+		"    request,",
+		"    url: new URL(input.url),",
+		"    site: input.site,",
+		"  };",
+		"  return await bundle(ctx);",
+		"};",
+	].join("\n");
+
+	return {
+		mainModule: "main.js",
+		modules: {
+			"main.js": shim,
+			"bundle.js": opts.bundleCode,
+		},
+	};
+}

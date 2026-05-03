@@ -10,12 +10,20 @@ export default defineWorkersProject({
 	test: {
 		name: "host-cloudflare",
 		include: ["src/**/*.test.ts"],
+		// Closure-walked compile + render in `preview-handler.test.ts`
+		// goes through a real executor — bumped from the default 5s.
+		testTimeout: 30_000,
 		poolOptions: {
 			workers: {
 				singleWorker: true,
 				miniflare: {
-					compatibilityDate: "2024-12-01",
+					// Bumped from `2024-12-01` so the `[[worker_loaders]]`
+					// block in `wrangler.toml` resolves.
+					compatibilityDate: "2025-09-01",
 					compatibilityFlags: ["nodejs_compat"],
+					workerLoaders: {
+						LOADER: {},
+					},
 				},
 			},
 		},

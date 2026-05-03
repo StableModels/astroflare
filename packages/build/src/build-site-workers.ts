@@ -11,13 +11,17 @@
  * to a Node side-car.
  *
  * Shape parity with the Node version:
- *   - astro-only (`/src/pages/**\/*.astro`); dynamic routes need
+ *   - astro/markdown pages under `/src/pages/`; dynamic routes need
  *     `getStaticPaths` (not yet supported, same as Node)
  *   - yields `SnapshotEntry` one at a time so callers can stream
  *     them straight into a `SnapshotSink.put`
  *   - route keys match `R2SnapshotSink`'s convention: leading /
  *     trailing slashes stripped, `/` → `index.html`
  *   - SHA-256 hex hash via Web Crypto, deterministic across runs
+ *   - **closure-walking**: each page is rendered with its full
+ *     transitive `.astro`/`.md`/`.mdx` import graph in the bundle, so
+ *     pages that import a layout or a shared component render
+ *     correctly.
  *
  * Differences from the Node version:
  *   - no `tmpDir` option (no filesystem)
@@ -28,16 +32,15 @@
  *     `node:url` / `node:module` imports
  */
 
-import { compileAstro } from "@astroflare/compiler/astro";
+import type { Cache, Executor, Logger, RenderResult, Site, SnapshotEntry } from "@astroflare/core";
+import { sha256Hex } from "@astroflare/core";
+import { inlineBundle } from "@astroflare/preview/bundle";
+import { ModuleGraph } from "@astroflare/preview/module-graph";
 import {
-	type Executor,
-	type Logger,
-	type RenderResult,
-	type Site,
-	type SnapshotEntry,
-	sha256Hex,
-} from "@astroflare/core";
-import { DEFAULT_RUNTIME_IMPORT, type RenderTaskInput, buildRenderTask } from "./render-task.js";
+	DEFAULT_RUNTIME_IMPORT,
+	type RenderTaskInput,
+	buildClosureRenderTask,
+} from "./render-task.js";
 
 export interface WorkersBuildSiteOptions {
 	/** Read-only file capability — `WorkspaceSite`, `MemorySite`, etc. */
@@ -49,6 +52,16 @@ export interface WorkersBuildSiteOptions {
 	 */
 	executor: Executor;
 	/**
+	 * Optional compile cache. The closure walker memoises compiled
+	 * `.astro`/`.md`/`.mdx` bytes here, keyed by source content +
+	 * compiler config. When absent, every page recompiles every
+	 * dependency from scratch — fine for one-shot CI builds, slow for
+	 * repeated runs against the same source. Hosts that build often
+	 * (Ember's per-snapshot agent loop, for example) should pass a
+	 * `SqlCache` or equivalent.
+	 */
+	cache?: Cache;
+	/**
 	 * Optional route-prefix mounted under each built page. Defaults
 	 * to `""` — pages under `/src/pages/index.astro` become route
 	 * `/`. Mirrors the Node version's `prefix` option.
@@ -59,21 +72,36 @@ export interface WorkersBuildSiteOptions {
 }
 
 /**
- * Walk `Site.glob("/src/pages/**\/*.astro")`, compile + render each
- * page through the supplied executor, emit a `SnapshotEntry`. Yields
- * entries one-at-a-time so callers pipe to a `SnapshotSink` without
- * buffering the whole site in memory.
+ * Walk `Site.glob("/src/pages/**\/*.{astro,md,mdx}")`, compile + render
+ * each page through the supplied executor, emit a `SnapshotEntry`. Each
+ * page's full import closure (layouts, shared components, content
+ * modules) is bundled together so cross-file imports resolve at render
+ * time. Yields entries one-at-a-time so callers pipe to a
+ * `SnapshotSink` without buffering the whole site in memory.
  *
  * Static-only. Dynamic routes (`[slug].astro`) need `getStaticPaths`
  * enumeration — not yet supported here.
  */
 export async function* buildSite(opts: WorkersBuildSiteOptions): AsyncIterable<SnapshotEntry> {
 	const enc = new TextEncoder();
-	const dec = new TextDecoder();
-	const pagesGlob = "/src/pages/**/*.astro";
+	const cache = opts.cache ?? createNoopCache();
+	const moduleGraph = new ModuleGraph(
+		{ site: opts.site, cache, logger: opts.logger },
+		{ runtimeImport: DEFAULT_RUNTIME_IMPORT },
+	);
+
+	const pagePatterns = [
+		"/src/pages/**/*.astro",
+		"/src/pages/**/*.md",
+		"/src/pages/**/*.mdx",
+	] as const;
+	const seen = new Set<string>();
 	const pages: string[] = [];
-	for await (const path of opts.site.glob(pagesGlob)) {
-		if (path.startsWith("/src/pages/") && path.endsWith(".astro")) {
+	for (const pattern of pagePatterns) {
+		for await (const path of opts.site.glob(pattern)) {
+			if (!path.startsWith("/src/pages/")) continue;
+			if (seen.has(path)) continue;
+			seen.add(path);
 			pages.push(path);
 		}
 	}
@@ -88,17 +116,7 @@ export async function* buildSite(opts: WorkersBuildSiteOptions): AsyncIterable<S
 			);
 		}
 		const route = prefixRoute(opts.prefix ?? "", localRoute);
-		const sourceBytes = await opts.site.readFile(sourcePath);
-		if (!sourceBytes) {
-			throw new Error(`buildSite: missing source bytes for ${sourcePath}`);
-		}
-		const html = await compileAndRender(
-			opts.executor,
-			sourcePath,
-			dec.decode(sourceBytes),
-			route,
-			opts.logger,
-		);
+		const html = await compileAndRender(moduleGraph, opts.executor, sourcePath, route, opts.logger);
 		const bytes = enc.encode(html);
 		const hash = await sha256Hex(bytes);
 		yield {
@@ -110,10 +128,13 @@ export async function* buildSite(opts: WorkersBuildSiteOptions): AsyncIterable<S
 	}
 }
 
-/** `/src/pages/index.astro` → `/`; `/src/pages/about.astro` → `/about`. */
+/**
+ * `/src/pages/index.astro` → `/`; `/src/pages/about.astro` → `/about`;
+ * `/src/pages/about.md` → `/about`; `/src/pages/blog/index.astro` → `/blog`.
+ */
 function pageRoute(sourcePath: string): string | null {
 	const noPrefix = sourcePath.replace(/^\/src\/pages\//, "/");
-	const noExt = noPrefix.replace(/\.astro$/, "");
+	const noExt = noPrefix.replace(/\.(astro|mdx|md)$/, "");
 	if (/\[[^\]]+\]/.test(noExt)) return null;
 	if (noExt === "/index") return "/";
 	if (noExt.endsWith("/index")) return noExt.slice(0, -"/index".length);
@@ -128,19 +149,15 @@ function prefixRoute(prefix: string, route: string): string {
 }
 
 async function compileAndRender(
+	moduleGraph: ModuleGraph,
 	executor: Executor,
 	sourcePath: string,
-	source: string,
 	route: string,
 	logger: Logger | undefined,
 ): Promise<string> {
-	let compiled: { code: string };
+	let closure: Awaited<ReturnType<ModuleGraph["closure"]>>;
 	try {
-		compiled = await compileAstro(source, {
-			filename: sourcePath,
-			skipTsTransform: true,
-			runtimeImport: DEFAULT_RUNTIME_IMPORT,
-		});
+		closure = await moduleGraph.closure(sourcePath);
 	} catch (err) {
 		logger?.event("buildSite.compile.failed", {
 			path: sourcePath,
@@ -149,10 +166,6 @@ async function compileAndRender(
 		throw new Error(`buildSite: compile failed for ${sourcePath}: ${(err as Error).message}`);
 	}
 
-	const task = buildRenderTask({
-		routeCode: compiled.code,
-		runtimeImport: DEFAULT_RUNTIME_IMPORT,
-	});
 	const input: RenderTaskInput = {
 		url: `http://stack.local${route}`,
 		method: "GET",
@@ -162,7 +175,14 @@ async function compileAndRender(
 
 	let result: RenderResult;
 	try {
-		result = await executor.runOnce<RenderResult>(task, input);
+		result = await executor.runCached<RenderResult>(
+			closure.bundleKey,
+			() => {
+				const code = inlineBundle(closure.modules, DEFAULT_RUNTIME_IMPORT);
+				return buildClosureRenderTask({ bundleCode: code });
+			},
+			input,
+		);
 	} catch (err) {
 		logger?.event("buildSite.render.failed", {
 			path: sourcePath,
@@ -173,4 +193,15 @@ async function compileAndRender(
 
 	if (result.kind === "html") return result.html;
 	throw new Error(`buildSite: ${sourcePath} returned non-HTML render result (kind=${result.kind})`);
+}
+
+function createNoopCache(): Cache {
+	return {
+		async get(): Promise<Uint8Array | null> {
+			return null;
+		},
+		async put(): Promise<void> {
+			/* no-op */
+		},
+	};
 }

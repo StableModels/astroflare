@@ -36,9 +36,12 @@
 
 import { COMPILER_VERSION, compileAstro, compileMarkdown, compileMdx } from "@astroflare/compiler";
 import {
-	type Host,
+	type Cache,
 	type ImageMetadata,
+	type ImageService,
+	type Logger,
 	type ModuleNode,
+	type Site,
 	contentId,
 	contentIdWithConfig,
 	dirname,
@@ -75,6 +78,22 @@ export interface ModuleGraphOptions {
 	env?: Record<string, unknown>;
 }
 
+/**
+ * Capabilities `ModuleGraph` reads. Structurally compatible with the full
+ * `Host` interface (so existing call-sites that pass `host` still work),
+ * but narrower: only `site` + `cache` are required. `coordinator.graphPut`
+ * is the only graph method we touch — accepting a `Pick` lets the host-
+ * driven architecture's `AstroflareCoordinator` (which has the same
+ * method, plus a few extras) flow in cleanly.
+ */
+export interface ModuleGraphDeps {
+	site: Site;
+	cache: Cache;
+	logger?: Logger;
+	coordinator?: { graphPut(node: ModuleNode): Promise<void> };
+	imageService?: ImageService;
+}
+
 export interface ClosureResult {
 	/** All modules reachable from the root, root first. */
 	modules: readonly ModuleInfo[];
@@ -86,12 +105,12 @@ export interface ClosureResult {
 }
 
 export class ModuleGraph {
-	readonly #host: Host;
+	readonly #deps: ModuleGraphDeps;
 	readonly #opts: ModuleGraphOptions;
 	readonly #inFlight = new Map<string, Promise<ModuleInfo>>();
 
-	constructor(host: Host, opts: ModuleGraphOptions) {
-		this.#host = host;
+	constructor(deps: ModuleGraphDeps, opts: ModuleGraphOptions) {
+		this.#deps = deps;
 		this.#opts = opts;
 	}
 
@@ -107,7 +126,7 @@ export class ModuleGraph {
 	}
 
 	async #compileImpl(path: string): Promise<ModuleInfo> {
-		const sourceBytes = await this.#host.site.readFile(path);
+		const sourceBytes = await this.#deps.site.readFile(path);
 		if (!sourceBytes) {
 			throw new Error(`module-graph.compile: source not found: ${path}`);
 		}
@@ -119,15 +138,15 @@ export class ModuleGraph {
 		});
 
 		let compiled: string;
-		const cached = await this.#host.cache.get(compileKey);
+		const cached = await this.#deps.cache.get(compileKey);
 		if (cached) {
 			compiled = dec.decode(cached);
-			this.#host.logger.event("module-graph.cache.hit", { path, compileKey });
+			this.#deps.logger?.event("module-graph.cache.hit", { path, compileKey });
 		} else {
 			const source = dec.decode(sourceBytes);
 			compiled = await this.#compileSource(path, source);
-			await this.#host.cache.put(compileKey, enc.encode(compiled));
-			this.#host.logger.event("module-graph.compile", { path, compileKey });
+			await this.#deps.cache.put(compileKey, enc.encode(compiled));
+			this.#deps.logger?.event("module-graph.compile", { path, compileKey });
 		}
 
 		const resolvedImports = extractCompilableImports(path, compiled);
@@ -138,7 +157,7 @@ export class ModuleGraph {
 			imports: resolvedImports,
 			importedBy: [],
 		};
-		await this.#host.coordinator.graphPut(node);
+		await this.#deps.coordinator?.graphPut(node);
 
 		return { path, sourceHash, compileKey, compiled, resolvedImports };
 	}
@@ -189,7 +208,7 @@ export class ModuleGraph {
 	 * that don't exercise images.
 	 */
 	async #substituteImageImports(importerPath: string, source: string): Promise<string> {
-		const service = this.#host.imageService;
+		const service = this.#deps.imageService;
 		if (!service) return source;
 		const matches: Array<{ start: number; end: number; replacement: string }> = [];
 		const re = /^[ \t]*import[ \t]+([A-Za-z_$][\w$]*)[ \t]+from[ \t]+["']([^"']+)["'];?[ \t]*$/gm;
@@ -204,7 +223,7 @@ export class ModuleGraph {
 			try {
 				metadata = await service.getMetadata(resolved);
 			} catch (err) {
-				this.#host.logger.event("module-graph.image-import.unresolved", {
+				this.#deps.logger?.event("module-graph.image-import.unresolved", {
 					importer: importerPath,
 					spec,
 					message: (err as Error).message,

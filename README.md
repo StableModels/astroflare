@@ -157,6 +157,12 @@ export class SiteDurableObject extends DurableObject<Env> {
 			coordinator: this.#coordinator,
 			executor: createWorkerdExecutor({
 				loader: this.env.LOADER,
+				// `nodejs_compat` is required — Astroflare's runtime
+				// imports `node:async_hooks` to scope per-request state.
+				// Add this to your worker's `wrangler.toml` AND pass it
+				// through here so spawned compile/render isolates inherit
+				// it.
+				compatibilityFlags: ["nodejs_compat"],
 				runtime: runtimeModules,
 			}),
 			cache: this.#cache,
