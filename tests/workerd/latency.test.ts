@@ -54,6 +54,10 @@ import RUNTIME_INTERNAL_SRC from "../../packages/astroflare-runtime/dist/interna
 import RUNTIME_JSX_RUNTIME_SRC from "../../packages/astroflare-runtime/dist/jsx-runtime.js?raw";
 // @ts-expect-error — Phase 17: runtime/index.js re-exports prefetch-client.
 import RUNTIME_PREFETCH_SRC from "../../packages/astroflare-runtime/dist/prefetch-client.js?raw";
+// @ts-expect-error — Phase 16a: runtime/index.js re-exports react-adapter.
+import RUNTIME_REACT_ADAPTER_SRC from "../../packages/astroflare-runtime/dist/react-adapter.js?raw";
+// @ts-expect-error — Phase 16b: internal.js re-exports $ssrReactIsland.
+import RUNTIME_REACT_SSR_SRC from "../../packages/astroflare-runtime/dist/react-ssr.js?raw";
 // @ts-expect-error
 import RUNTIME_RENDER_SRC from "../../packages/astroflare-runtime/dist/render.js?raw";
 // @ts-expect-error — Phase 17: runtime/index.js re-exports rss.
@@ -77,6 +81,8 @@ const RUNTIME_BUNDLE_MODULES: Record<string, string> = {
 	"runtime/sitemap.js": RUNTIME_SITEMAP_SRC as string,
 	"runtime/i18n.js": RUNTIME_I18N_SRC as string,
 	"runtime/error-overlay.js": RUNTIME_ERROR_OVERLAY_SRC as string,
+	"runtime/react-adapter.js": RUNTIME_REACT_ADAPTER_SRC as string,
+	"runtime/react-ssr.js": RUNTIME_REACT_SSR_SRC as string,
 };
 
 const enc = (s: string) => new TextEncoder().encode(s);

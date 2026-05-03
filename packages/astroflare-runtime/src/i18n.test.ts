@@ -1,6 +1,12 @@
 import type { I18nConfig } from "@astroflare/core";
 import { describe, expect, it } from "vitest";
-import { deriveLocale, getRelativeLocaleUrl } from "./i18n.js";
+import {
+	deriveLocale,
+	getAbsoluteLocaleUrl,
+	getLocaleByPath,
+	getRelativeLocaleUrl,
+	parsePreferredLocales,
+} from "./i18n.js";
 
 const PREFIX_OTHER: I18nConfig = {
 	locales: ["en", "fr", "de"],
@@ -64,5 +70,63 @@ describe("getRelativeLocaleUrl", () => {
 
 	it("normalises a missing leading slash", () => {
 		expect(getRelativeLocaleUrl("fr", "about", PREFIX_OTHER)).toBe("/fr/about");
+	});
+});
+
+describe("getLocaleByPath (alias for deriveLocale)", () => {
+	it("returns the same value as deriveLocale", () => {
+		expect(getLocaleByPath("/fr/about", PREFIX_OTHER)).toBe("fr");
+		expect(getLocaleByPath("/about", PREFIX_OTHER)).toBe("en");
+	});
+});
+
+describe("getAbsoluteLocaleUrl", () => {
+	it("combines site origin + relative locale URL", () => {
+		expect(getAbsoluteLocaleUrl("fr", "/about", PREFIX_OTHER, "https://app.example/")).toBe(
+			"https://app.example/fr/about",
+		);
+		expect(getAbsoluteLocaleUrl("en", "/about", PREFIX_OTHER, "https://app.example")).toBe(
+			"https://app.example/about",
+		);
+	});
+
+	it("normalises a trailing-slash on site", () => {
+		expect(getAbsoluteLocaleUrl("fr", "/", PREFIX_OTHER, "https://x.example/")).toBe(
+			"https://x.example/fr",
+		);
+	});
+});
+
+describe("parsePreferredLocales", () => {
+	const cfg = {
+		locales: ["en", "fr", "de"],
+		defaultLocale: "en",
+	} satisfies I18nConfig;
+
+	it("returns the ordered project-supported locales", () => {
+		expect(parsePreferredLocales("fr,en;q=0.5,de;q=0.1", cfg)).toEqual(["fr", "en", "de"]);
+	});
+
+	it("filters out unsupported locales", () => {
+		expect(parsePreferredLocales("ja,fr;q=0.9", cfg)).toEqual(["fr"]);
+	});
+
+	it("falls back to language-only prefix when full tag not supported", () => {
+		// `fr-CA` isn't in `locales`; we accept `fr` as the base language.
+		expect(parsePreferredLocales("fr-CA,en", cfg)).toEqual(["fr", "en"]);
+	});
+
+	it("returns empty for missing or wildcard headers", () => {
+		expect(parsePreferredLocales(null, cfg)).toEqual([]);
+		expect(parsePreferredLocales("", cfg)).toEqual([]);
+		expect(parsePreferredLocales("*", cfg)).toEqual([]);
+	});
+
+	it("dedupes when both `fr-CA` and `fr` are present", () => {
+		expect(parsePreferredLocales("fr-CA;q=0.9,fr;q=0.8", cfg)).toEqual(["fr"]);
+	});
+
+	it("respects q= ordering", () => {
+		expect(parsePreferredLocales("de;q=0.1,en;q=0.9,fr", cfg)).toEqual(["fr", "en", "de"]);
 	});
 });

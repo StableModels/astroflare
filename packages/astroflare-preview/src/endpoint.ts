@@ -32,6 +32,10 @@ export interface EndpointContext {
 	site?: string;
 	/** Phase 18: resolved locale when an `i18n` config is active. */
 	currentLocale?: string;
+	/** Phase 18+: best `Accept-Language` match within `i18n.locales`. */
+	preferredLocale?: string;
+	/** Phase 18+: every project-supported `Accept-Language` match, sorted. */
+	preferredLocaleList?: readonly string[];
 }
 
 export interface EndpointResult {

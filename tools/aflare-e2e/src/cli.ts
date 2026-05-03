@@ -27,8 +27,11 @@
 
 import { execSync } from "node:child_process";
 import { type CloudflareClient, makeCloudflareClient } from "./api.js";
+import { findOrphanWorkers } from "./commands/gc.js";
+import { inspectFixture } from "./commands/inspect.js";
 import { listFixtures } from "./commands/list.js";
 import { provisionFixture } from "./commands/provision.js";
+import { statusReport } from "./commands/status.js";
 import { teardownFixture } from "./commands/teardown.js";
 import type { FixtureState } from "./state.js";
 
@@ -73,6 +76,12 @@ export class Cli {
 				return await this.#teardownAll();
 			case "list":
 				return this.#list();
+			case "inspect":
+				return this.#inspect(rest);
+			case "status":
+				return await this.#status();
+			case "gc":
+				return await this.#gc();
 			case undefined:
 			case "--help":
 			case "-h":
@@ -165,6 +174,66 @@ export class Cli {
 		return 0;
 	}
 
+	#inspect(args: readonly string[]): number {
+		const [fixture] = args;
+		if (!fixture) {
+			this.#log("usage: aflare-e2e inspect <fixture>");
+			return 1;
+		}
+		const state = inspectFixture({
+			rootDir: this.#opts.env.rootDir,
+			sha7: this.#opts.env.sha7,
+			fixture,
+		});
+		if (!state) {
+			this.#log(`no state for ${fixture} (run \`aflare-e2e provision ${fixture}\` first)`);
+			return 1;
+		}
+		this.#log(JSON.stringify(state, null, 2));
+		return 0;
+	}
+
+	async #status(): Promise<number> {
+		const report = await statusReport({
+			rootDir: this.#opts.env.rootDir,
+			sha7: this.#opts.env.sha7,
+		});
+		if (report.length === 0) {
+			this.#log("no fixtures provisioned for this SHA");
+			return 0;
+		}
+		let exitCode = 0;
+		for (const r of report) {
+			if (r.error) {
+				this.#log(`${r.fixture}\t-\t${r.error}`);
+				exitCode = 1;
+			} else if (r.httpStatus !== 200) {
+				this.#log(`${r.fixture}\t${r.httpStatus}\t${r.latencyMs}ms`);
+				exitCode = 1;
+			} else {
+				this.#log(`${r.fixture}\t${r.httpStatus}\t${r.latencyMs}ms`);
+			}
+		}
+		return exitCode;
+	}
+
+	async #gc(): Promise<number> {
+		const result = await findOrphanWorkers({
+			rootDir: this.#opts.env.rootDir,
+			client: this.#client,
+		});
+		if (result.orphans.length === 0) {
+			this.#log("no orphan workers");
+			return 0;
+		}
+		this.#log(`${result.orphans.length} orphan worker(s):`);
+		for (const o of result.orphans) {
+			this.#log(`  ${o.id}${o.created_on ? `\t${o.created_on}` : ""}`);
+		}
+		this.#log("(re-run with `--purge` to delete; not yet implemented)");
+		return 0;
+	}
+
 	#log(line: string): void {
 		(this.#opts.log ?? console.log)(line);
 	}
@@ -180,6 +249,9 @@ Commands:
   teardown  <fixture>      Destroy resources, remove state
   teardown-all             Destroy every fixture for the current SHA
   list                     List provisioned fixtures
+  inspect   <fixture>      Print the state file for a fixture
+  status                   HEAD / each provisioned URL; report status + latency
+  gc                       List orphan workers in the account not in local state
 
 Environment:
   CLOUDFLARE_ACCOUNT_ID    The Cloudflare account hosting the test resources

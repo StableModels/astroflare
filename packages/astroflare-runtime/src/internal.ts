@@ -188,8 +188,11 @@ export async function $renderComponent<P>(
 	// Each component gets its own `Astro` (different `props`, shared request
 	// context, child-specific slot map). The wrapper-level `render()`
 	// establishes the context via `withRenderContext`; nested calls reach
-	// for it via the ALS.
-	const componentArg = Object.assign({ Astro: makeChildAstro(props, slots) }, props);
+	// for it via the ALS. `Astro.self` is the component itself, so
+	// recursive renders (`<Astro.self ... />`) work without any compile-
+	// time tracking.
+	const childAstro = makeChildAstro(props, slots, Component as AstroComponent<unknown>);
+	const componentArg = Object.assign({ Astro: childAstro }, props);
 	return Component(componentArg as P, slots);
 }
 
@@ -215,6 +218,17 @@ export interface SharedRenderContext {
 	 * `i18n` config is set.
 	 */
 	currentLocale?: string;
+	/**
+	 * The first project-supported locale from `Accept-Language`, or
+	 * `undefined` when none match. Surfaced as `Astro.preferredLocale`.
+	 */
+	preferredLocale?: string;
+	/**
+	 * Every project-supported locale in `Accept-Language`, sorted by
+	 * the client's `q=` preference. Surfaced as
+	 * `Astro.preferredLocaleList`.
+	 */
+	preferredLocaleList?: readonly string[];
 }
 
 const renderContextStore = new AsyncLocalStorage<SharedRenderContext>();
@@ -241,9 +255,20 @@ interface AstroLike<P> {
 	slots: AstroSlots;
 	/** Phase 18: the resolved locale, or `undefined` when no i18n config. */
 	currentLocale: string | undefined;
+	/** Phase 18+: best `Accept-Language` match within `i18n.locales`. */
+	preferredLocale: string | undefined;
+	/** Phase 18+: every `Accept-Language` match, sorted by client preference. */
+	preferredLocaleList: readonly string[] | undefined;
+	/**
+	 * Phase 10 carryover (deferred): `Astro.self` lets a component call
+	 * itself recursively, e.g. for tree views. Set when the component
+	 * is invoked through `$renderComponent`; `undefined` for top-level
+	 * route renders where there's no enclosing component reference.
+	 */
+	self: AstroComponent<unknown> | undefined;
 }
 
-function makeChildAstro<P>(props: P, slots: SlotMap): AstroLike<P> {
+function makeChildAstro<P>(props: P, slots: SlotMap, self?: AstroComponent<unknown>): AstroLike<P> {
 	const ctx = renderContextStore.getStore();
 	return {
 		props,
@@ -258,6 +283,9 @@ function makeChildAstro<P>(props: P, slots: SlotMap): AstroLike<P> {
 		locals: ctx?.locals ?? {},
 		slots: makeAstroSlots(slots),
 		currentLocale: ctx?.currentLocale,
+		preferredLocale: ctx?.preferredLocale,
+		preferredLocaleList: ctx?.preferredLocaleList,
+		self,
 	};
 }
 
@@ -542,3 +570,12 @@ export async function renderToString(value: unknown): Promise<string> {
 	if (isRawHtml(value)) return value.html;
 	return flatten(value);
 }
+
+// Phase 16b — `$ssrReactIsland` is part of the runtime ABI the
+// emitter reaches for. Re-exported through `internal` (rather than
+// imported directly from `react-ssr.js`) so the emitter's
+// `RUNTIME_SYMBOLS` list and the bundle's `BUNDLE_RUNTIME_SYMBOLS`
+// list both resolve from the same place. The implementation lives
+// in `react-ssr.ts`; users typically pull it in via the top-level
+// `@astroflare/runtime` index.
+export { $ssrReactIsland } from "./react-ssr.js";

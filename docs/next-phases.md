@@ -205,16 +205,18 @@ route that compiles `.ts`/`.tsx`/`.jsx` via esbuild-wasm and passes
 `.js`/`.mjs` through. Hydration script auto-injected on pages that
 contain at least one `<astro-island>`.
 
-**Phase 16a (deferred):** automatic React adapter. Today's
-framework-agnostic `mount(el, props)` contract works for vanilla-JS
-islands; React requires user-written glue. 16a bundles
-React + ReactDOM into the per-island artifact and wraps a default-
-exported component with `ReactDOM.createRoot(...).render(...)`.
+**Phase 16a ✓ Done.** (Deferred sweep — see
+[phase-deferred-sweep.md](./phases/phase-deferred-sweep.md).)
+`wrapReactIslandSource(src)` injects mount glue around a default-
+exported `.tsx` / `.jsx` component; `MOUNT_REACT_ISLAND_SOURCE`
+serves at `/_aflare/react.js` and re-exports React + ReactDOM
+from esm.sh by default (overridable via the route).
 
-**Phase 16b (deferred):** React SSR with hooks. Today's `.tsx`
-islands skip SSR (empty placeholder + client-side mount). 16b
-bundles React DOM Server into the SSR runtime and routes `.tsx`
-component invocation through `renderToString`.
+**Phase 16b ✓ Done.** (Deferred sweep.) `ssrReactIsland(Component,
+props)` calls `react-dom/server#renderToString` at SSR time. The
+emitter routes `.tsx` / `.jsx` islands through it (gracefully falls
+back to client-only when React isn't bundled). `react@18.3.1` +
+`react-dom@18.3.1` runtime devDeps.
 
 **Out of scope (deliberately):** Vue, Svelte, Solid, Lit. Opinionated
 bet that React covers the user base for now.

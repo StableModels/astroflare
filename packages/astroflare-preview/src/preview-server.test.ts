@@ -494,6 +494,50 @@ describe("preview server: i18n", () => {
 // Error overlay (Phase 19)
 // ---------------------------------------------------------------------------
 
+describe("preview server: React adapter (Phase 16a)", () => {
+	it("serves the React adapter at /_aflare/react.js", async () => {
+		const { server } = await fixture({
+			"/src/pages/index.astro": "<p>x</p>",
+		});
+		const r = await server.fetch(new Request("https://example.com/_aflare/react.js"));
+		expect(r.status).toBe(200);
+		expect(r.headers.get("content-type")).toContain("application/javascript");
+		const body = await r.text();
+		expect(body).toContain("export function mountReactIsland");
+		expect(body).toContain("createRoot");
+	});
+
+	it("auto-wraps a .tsx default export with the adapter mount glue", async () => {
+		const { server } = await fixture({
+			"/components/Counter.tsx": "export default function Counter(props) { return null; }",
+			"/src/pages/index.astro": "<p>x</p>",
+		});
+		const r = await server.fetch(
+			new Request("https://example.com/_aflare/island?path=/components/Counter.tsx"),
+		);
+		const body = await r.text();
+		expect(body).toContain("__aflareDefault");
+		expect(body).toContain("__aflareMount");
+		expect(body).toContain('"/_aflare/react.js"');
+		expect(body).toContain("export function mount(__el, __props)");
+	});
+
+	it("does NOT wrap a .tsx that exports its own `mount` (no default export)", async () => {
+		const { server } = await fixture({
+			"/components/Vanilla.tsx":
+				"export function mount(el, props) { el.textContent = String(props.x); }",
+			"/src/pages/index.astro": "<p>x</p>",
+		});
+		const r = await server.fetch(
+			new Request("https://example.com/_aflare/island?path=/components/Vanilla.tsx"),
+		);
+		const body = await r.text();
+		expect(body).toContain("function mount(el, props)");
+		expect(body).not.toContain("__aflareMount");
+		expect(body).not.toContain('"/_aflare/react.js"');
+	});
+});
+
 describe("preview server: error overlay", () => {
 	it("serves the error overlay script at /_aflare/error-overlay.js", async () => {
 		const { server } = await fixture({

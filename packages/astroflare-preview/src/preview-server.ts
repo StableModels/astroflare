@@ -52,9 +52,12 @@ import {
 	ERROR_OVERLAY_CLIENT_SOURCE,
 	HMR_CLIENT_SOURCE,
 	HYDRATION_CLIENT_SOURCE,
+	MOUNT_REACT_ISLAND_SOURCE,
 	PREFETCH_CLIENT_SOURCE,
 	VIEW_TRANSITIONS_CLIENT_SOURCE,
 	deriveLocale,
+	parsePreferredLocales,
+	wrapReactIslandSource,
 } from "@astroflare/runtime";
 import { inlineBundle } from "./bundle.js";
 import { type EndpointContext, runEndpoint } from "./endpoint.js";
@@ -102,6 +105,10 @@ const PREFETCH_PATH = "/_aflare/prefetch.js";
 // Phase 19 error overlay — auto-injected on every preview HTML
 // response so hydration/HMR errors render in a modal.
 const ERROR_OVERLAY_PATH = "/_aflare/error-overlay.js";
+// Phase 16a React adapter — `MOUNT_REACT_ISLAND_SOURCE` lives here.
+// `.tsx` / `.jsx` islands with a default export get auto-wrapped so
+// the bundle exports `mount(el, props)` against the React glue.
+const REACT_ADAPTER_PATH = "/_aflare/react.js";
 const PAGES_PREFIX = "/src/pages/";
 
 const IMAGE_CONTENT_TYPES: Record<string, string> = {
@@ -236,6 +243,13 @@ export function createPreviewServer(opts: PreviewServerOptions): PreviewServer {
 				if (url.pathname === ERROR_OVERLAY_PATH) {
 					return serveStaticClient(ERROR_OVERLAY_CLIENT_SOURCE);
 				}
+				// Phase 16a — React adapter. Static module containing
+				// `mountReactIsland(Component, el, props)` plus default
+				// React + react-dom imports from esm.sh. Users override
+				// this route to self-host React.
+				if (url.pathname === REACT_ADAPTER_PATH) {
+					return serveStaticClient(MOUNT_REACT_ISLAND_SOURCE);
+				}
 
 				// Island component bundles (Phase 16). The compiler emits
 				// `component-url="/_aflare/island?path=/components/Counter.tsx"`;
@@ -266,14 +280,17 @@ export function createPreviewServer(opts: PreviewServerOptions): PreviewServer {
 							compiler: COMPILER_VERSION,
 							kind: "endpoint",
 						});
+						const i18n = opts.config.i18n;
+						const acceptLang = req.headers.get("accept-language");
+						const preferred = i18n ? parsePreferredLocales(acceptLang, i18n) : undefined;
 						const ctx: EndpointContext = {
 							request: req,
 							url,
 							params: match.params,
 							site: opts.config.site,
-							currentLocale: opts.config.i18n
-								? deriveLocale(url.pathname, opts.config.i18n)
-								: undefined,
+							currentLocale: i18n ? deriveLocale(url.pathname, i18n) : undefined,
+							preferredLocale: preferred?.[0],
+							preferredLocaleList: preferred,
 						};
 						return runEndpoint({
 							host: opts.host,
@@ -284,6 +301,9 @@ export function createPreviewServer(opts: PreviewServerOptions): PreviewServer {
 					}
 
 					const closure = await moduleGraph.closure(match.route.filePath);
+					const i18n = opts.config.i18n;
+					const acceptLang = req.headers.get("accept-language");
+					const preferred = i18n ? parsePreferredLocales(acceptLang, i18n) : undefined;
 					const ctx: RenderContext = {
 						props: {},
 						params: match.params,
@@ -291,9 +311,9 @@ export function createPreviewServer(opts: PreviewServerOptions): PreviewServer {
 						url,
 						site: opts.config.site,
 						locals: mwLocals ?? {},
-						currentLocale: opts.config.i18n
-							? deriveLocale(url.pathname, opts.config.i18n)
-							: undefined,
+						currentLocale: i18n ? deriveLocale(url.pathname, i18n) : undefined,
+						preferredLocale: preferred?.[0],
+						preferredLocaleList: preferred,
 					};
 					const result = await opts.host.executor.runCached<RenderResult>(
 						closure.bundleKey,
@@ -520,6 +540,14 @@ async function serveIslandModule(host: Host, path: string): Promise<Response> {
 				status: 500,
 			});
 		}
+	}
+
+	// Phase 16a — React adapter wrap. `.tsx`/`.jsx` sources with a
+	// top-level default export auto-gain a `mount(el, props)` export
+	// that creates a React root and renders the component. Existing
+	// vanilla-JS islands (no default export) pass through unchanged.
+	if (ext === ".tsx" || ext === ".jsx") {
+		source = wrapReactIslandSource(source);
 	}
 
 	return new Response(source, {

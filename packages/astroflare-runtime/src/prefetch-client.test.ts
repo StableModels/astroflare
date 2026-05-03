@@ -113,5 +113,36 @@ describe("installPrefetch", () => {
 	it("source string is non-empty + references the marker attribute", () => {
 		expect(PREFETCH_CLIENT_SOURCE).toContain("data-aflare-prefetch");
 		expect(PREFETCH_CLIENT_SOURCE).toContain("x-aflare-prefetch");
+		// Phase 19 follow-up: tap strategy fires on mousedown.
+		expect(PREFETCH_CLIENT_SOURCE).toContain("mousedown");
+		expect(PREFETCH_CLIENT_SOURCE).toContain("touchstart");
+	});
+
+	it("prefetches on mousedown for tap-strategy links", async () => {
+		document.body.innerHTML = `<a id="tap" href="/tap-target" data-aflare-prefetch="tap">go</a>`;
+		const fetchImpl = vi.fn().mockResolvedValue(new Response("ok"));
+		const client = installPrefetch({ fetchImpl });
+		try {
+			document.getElementById("tap")?.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+			await new Promise((r) => setTimeout(r, 0));
+			expect(fetchImpl).toHaveBeenCalledOnce();
+			expect(String(fetchImpl.mock.calls[0]?.[0])).toContain("/tap-target");
+		} finally {
+			client.dispose();
+		}
+	});
+
+	it("hover-strategy links are NOT triggered by mousedown", async () => {
+		const fetchImpl = vi.fn().mockResolvedValue(new Response("ok"));
+		const client = installPrefetch({ fetchImpl });
+		try {
+			document
+				.getElementById("hover")
+				?.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+			await new Promise((r) => setTimeout(r, 0));
+			expect(fetchImpl).not.toHaveBeenCalled();
+		} finally {
+			client.dispose();
+		}
 	});
 });

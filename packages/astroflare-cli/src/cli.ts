@@ -29,6 +29,7 @@
 import { parseArgs } from "node:util";
 import { type DeployConfig, resolveConfig } from "./commands/deploy.js";
 import { cmdDeploy, cmdRollback, cmdStatus } from "./commands/deploy.js";
+import { initProject } from "./commands/init.js";
 
 async function main(argv: readonly string[]): Promise<number> {
 	const [subcommand, ...rest] = argv;
@@ -39,6 +40,8 @@ async function main(argv: readonly string[]): Promise<number> {
 	}
 
 	switch (subcommand) {
+		case "init":
+			return runInit(rest);
 		case "deploy":
 			return runDeploy(rest);
 		case "status":
@@ -53,6 +56,39 @@ async function main(argv: readonly string[]): Promise<number> {
 			console.error(`aflare: unknown subcommand '${subcommand}'\n`);
 			printUsage();
 			return 1;
+	}
+}
+
+async function runInit(argv: readonly string[]): Promise<number> {
+	const { values, positionals } = parseArgs({
+		args: [...argv],
+		options: {
+			force: { type: "boolean" },
+			name: { type: "string" },
+			site: { type: "string" },
+		},
+		allowPositionals: true,
+	});
+	const dir = positionals[0];
+	if (!dir) {
+		console.error("aflare init: missing <dir> argument");
+		return 1;
+	}
+	try {
+		const result = initProject({
+			dir,
+			force: Boolean(values.force),
+			name: values.name as string | undefined,
+			site: values.site as string | undefined,
+		});
+		console.log(`Created ${result.created.length} files in ${dir}`);
+		if (result.skipped.length > 0) {
+			console.log(`Skipped (use --force to overwrite): ${result.skipped.join(", ")}`);
+		}
+		return 0;
+	} catch (err) {
+		console.error(`aflare init: ${(err as Error).message}`);
+		return 1;
 	}
 }
 
@@ -140,6 +176,7 @@ function printUsage(): void {
 			"  aflare <command> [options]",
 			"",
 			"COMMANDS",
+			"  init <dir>      Scaffold a new Astroflare project in <dir>",
 			"  deploy [dir]    Upload project files to R2 and run the deploy ceremony",
 			"  status          Show the active deploy hash",
 			"  rollback <hash> Flip /site/current to a previous deploy",

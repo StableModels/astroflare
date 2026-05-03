@@ -55,6 +55,8 @@ export async function render<P>(
 			cookies,
 			locals,
 			currentLocale: context.currentLocale,
+			preferredLocale: context.preferredLocale,
+			preferredLocaleList: context.preferredLocaleList,
 		},
 		async () => {
 			try {
@@ -117,5 +119,10 @@ export function createAstroGlobal<P>(
 		locals: parts.locals,
 		slots: makeAstroSlots(parts.slots),
 		currentLocale: context.currentLocale,
+		preferredLocale: context.preferredLocale,
+		preferredLocaleList: context.preferredLocaleList,
+		// Top-level route renders have no enclosing component; `self` only
+		// becomes meaningful when `$renderComponent` invokes a child.
+		self: undefined,
 	};
 }

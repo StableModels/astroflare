@@ -313,6 +313,73 @@ export interface Host {
 	 * and the runtime `<Image>` component renders the bare path).
 	 */
 	imageService?: ImageService;
+	/**
+	 * Phase 15b RPC services. Optional — when absent, the framework
+	 * uses degraded in-process defaults. The host package's
+	 * `createHost()` (Phase 15) constructs Cloudflare-bound versions
+	 * (Cloudflare Images for `imageService`, the project worker's
+	 * env binding for `envService`, the `Logger` for `logService`,
+	 * the storage for `fsService`).
+	 */
+	fsService?: FsService;
+	logService?: LogService;
+	envService?: EnvService;
+}
+
+/**
+ * Workspace-write RPC (§9.3 of the brief). External agents
+ * (LSP / IDE plugin / dev server) call `FsService.write(path, bytes)`
+ * to add or update a file; the implementation persists via `Storage`
+ * and notifies the framework so HMR fans out to connected previews.
+ *
+ * Phase 15b ships the interface plus an in-process default
+ * (`InMemoryFsService` from `@astroflare/test-utils`); a real
+ * Cap'n Web RPC class lands when the agent surface gets fleshed
+ * out.
+ */
+export interface FsService {
+	write(path: string, bytes: Uint8Array): Promise<void>;
+	read(path: string): Promise<Uint8Array | null>;
+	remove(path: string): Promise<void>;
+	stat(path: string): Promise<FsStat | null>;
+}
+
+export interface FsStat {
+	size: number;
+	hash: string;
+	/**
+	 * Last-modified timestamp in ms-since-epoch, when the underlying
+	 * `Storage` exposes one. The brief's `Storage.stat` doesn't yet
+	 * carry mtime; in-memory implementations use `0`. Wire from the
+	 * Cloudflare R2 binding's `uploaded` field when the host
+	 * implementation gets there.
+	 */
+	mtime?: number;
+}
+
+/**
+ * Structured logging RPC. Workers running inside a spawned isolate
+ * call `LogService.event(...)` to surface events into the parent
+ * worker's logger. Same shape as `Logger.event` so the parent's
+ * implementation can serve both sides.
+ */
+export interface LogService {
+	event(name: string, fields: Record<string, unknown>): Promise<void>;
+}
+
+/**
+ * Per-request env / secret RPC. Spawned isolates can't read the
+ * parent's `process.env` (each isolate has its own scope); the
+ * service shovels secrets across the boundary on demand.
+ *
+ * Phase 15b ships the interface; cross-isolate threading of
+ * `getSecret(name)` from inside user code is Phase 15c — until
+ * then the service is a parent-worker affordance, not yet wired
+ * into the spawned isolate's runtime.
+ */
+export interface EnvService {
+	getSecret(name: string): Promise<string | undefined>;
+	listSecretNames(): Promise<readonly string[]>;
 }
 
 /**
@@ -391,6 +458,23 @@ export interface AstroGlobal<P = Record<string, unknown>, L = Record<string, unk
 	 * (Phase 18). `undefined` when no `i18n` config is set.
 	 */
 	currentLocale?: string;
+	/**
+	 * Best `Accept-Language` match among `i18n.locales`. `undefined`
+	 * when no header is sent or no locales match.
+	 */
+	preferredLocale?: string;
+	/**
+	 * Full ordered list of project-supported locales from
+	 * `Accept-Language`, sorted by client preference.
+	 */
+	preferredLocaleList?: readonly string[];
+	/**
+	 * Astro-parity recursive-render handle (Phase 10 deferred follow-up).
+	 * Lets a component invoke itself: `<Astro.self items={children} />`.
+	 * `undefined` for top-level route renders.
+	 */
+	// biome-ignore lint/suspicious/noExplicitAny: erased component reference
+	self?: any;
 }
 
 /**
@@ -457,6 +541,10 @@ export interface RenderContext<P = Record<string, unknown>, L = Record<string, u
 	 * `i18n` config is present; surfaced as `Astro.currentLocale`.
 	 */
 	currentLocale?: string;
+	/** Best Accept-Language match — surfaced as `Astro.preferredLocale`. */
+	preferredLocale?: string;
+	/** Full Accept-Language preference list — `Astro.preferredLocaleList`. */
+	preferredLocaleList?: readonly string[];
 }
 
 /**

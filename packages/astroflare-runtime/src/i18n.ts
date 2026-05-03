@@ -68,3 +68,85 @@ function firstSegment(pathname: string): string {
 	const slash = trimmed.indexOf("/");
 	return slash === -1 ? trimmed : trimmed.slice(0, slash);
 }
+
+/**
+ * Astro-shaped alias for `deriveLocale`. Astro's i18n API exposes
+ * `getLocaleByPath(pathname)`; we keep both names available so users
+ * can copy patterns from Astro docs without an extra rename.
+ */
+export function getLocaleByPath(pathname: string, config: I18nConfig): string {
+	return deriveLocale(pathname, config);
+}
+
+/**
+ * Build an absolute URL by combining `site` with the locale-prefixed
+ * path. `site` should be the canonical origin (with or without a
+ * trailing slash); the trailing slash is normalised. Mirrors Astro's
+ * `getAbsoluteLocaleUrl(locale, path, opts)`.
+ */
+export function getAbsoluteLocaleUrl(
+	locale: string,
+	path: string,
+	config: I18nConfig,
+	site: string,
+): string {
+	const rel = getRelativeLocaleUrl(locale, path, config);
+	const stripped = site.endsWith("/") ? site.slice(0, -1) : site;
+	return `${stripped}${rel}`;
+}
+
+/**
+ * Parse an `Accept-Language` header into a preference-ordered list
+ * of locales the project supports. Quality values (`q=`) drive the
+ * ordering; ties keep the document order. Wildcards (`*`) and locales
+ * outside `config.locales` are filtered out.
+ *
+ * Returns the list with most-preferred first. The first element is
+ * also surfaced as `Astro.preferredLocale`; the full list is
+ * `Astro.preferredLocaleList`.
+ */
+export function parsePreferredLocales(
+	acceptLanguage: string | null | undefined,
+	config: I18nConfig,
+): readonly string[] {
+	if (!acceptLanguage) return [];
+	const items: { locale: string; q: number; order: number }[] = [];
+	let order = 0;
+	for (const part of acceptLanguage.split(",")) {
+		const trimmed = part.trim();
+		if (!trimmed) continue;
+		const [tagPart, ...rest] = trimmed.split(";").map((s) => s.trim());
+		if (!tagPart || tagPart === "*") continue;
+		// Match either the exact locale or the language-only prefix.
+		// `en-US` should match a project locale of `en` if `en-US`
+		// isn't supported.
+		const candidate = config.locales.includes(tagPart)
+			? tagPart
+			: matchLanguagePrefix(tagPart, config.locales);
+		if (!candidate) continue;
+		let q = 1;
+		for (const param of rest) {
+			const m = /^q=([0-9.]+)$/.exec(param);
+			if (m) q = Number.parseFloat(m[1] ?? "1");
+		}
+		items.push({ locale: candidate, q, order: order++ });
+	}
+	items.sort((a, b) => b.q - a.q || a.order - b.order);
+	// Dedupe while preserving order.
+	const seen = new Set<string>();
+	const out: string[] = [];
+	for (const it of items) {
+		if (seen.has(it.locale)) continue;
+		seen.add(it.locale);
+		out.push(it.locale);
+	}
+	return out;
+}
+
+function matchLanguagePrefix(tag: string, locales: readonly string[]): string | null {
+	const dash = tag.indexOf("-");
+	if (dash < 0) return null;
+	const prefix = tag.slice(0, dash);
+	for (const l of locales) if (l === prefix) return l;
+	return null;
+}

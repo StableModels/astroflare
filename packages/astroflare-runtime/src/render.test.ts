@@ -199,4 +199,54 @@ describe("render() — Astro.currentLocale (Phase 18)", () => {
 		if (result.kind !== "html") return;
 		expect(result.html).toBe("locale=undefined");
 	});
+
+	it("propagates preferredLocale + preferredLocaleList", async () => {
+		// biome-ignore lint/suspicious/noExplicitAny: ad-hoc test prop shape
+		const c = $component(async (props: any) => {
+			return $render`pref=${String(props.Astro.preferredLocale)}|list=${(
+				props.Astro.preferredLocaleList ?? []
+			).join(",")}`;
+		}) as AstroComponent<AstroProp>;
+		const result = await render(
+			c as never,
+			ctx({ preferredLocale: "fr", preferredLocaleList: ["fr", "en"] }),
+		);
+		expect(result.kind).toBe("html");
+		if (result.kind !== "html") return;
+		expect(result.html).toBe("pref=fr|list=fr,en");
+	});
+});
+
+describe("render() — Astro.self (recursive components, Phase 10 follow-up)", () => {
+	it("a child component receives itself as Astro.self", async () => {
+		// biome-ignore lint/suspicious/noExplicitAny: ad-hoc test prop shape
+		const Child = $component(async (props: any) => {
+			// Tag whether `Astro.self` is the same function as the component.
+			const isSelf = props.Astro.self === Child;
+			return $render`isSelf=${String(isSelf)}`;
+		}) as AstroComponent<AstroProp>;
+
+		// biome-ignore lint/suspicious/noExplicitAny: ad-hoc test prop shape
+		const Parent = $component(async (_props: any) => {
+			const { $renderComponent } = await import("./internal.js");
+			const html = await $renderComponent(Child as never, {});
+			return html;
+		}) as AstroComponent<AstroProp>;
+
+		const result = await render(Parent as never, ctx());
+		expect(result.kind).toBe("html");
+		if (result.kind !== "html") return;
+		expect(result.html).toBe("isSelf=true");
+	});
+
+	it("Astro.self is undefined for the top-level route render", async () => {
+		// biome-ignore lint/suspicious/noExplicitAny: ad-hoc test prop shape
+		const c = $component(async (props: any) => {
+			return $render`hasSelf=${String(props.Astro.self !== undefined)}`;
+		}) as AstroComponent<AstroProp>;
+		const result = await render(c as never, ctx());
+		expect(result.kind).toBe("html");
+		if (result.kind !== "html") return;
+		expect(result.html).toBe("hasSelf=false");
+	});
 });

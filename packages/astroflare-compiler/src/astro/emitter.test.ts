@@ -201,13 +201,29 @@ describe("emitter — directives", () => {
 		expect(code).toContain("await $renderComponent(Card");
 	});
 
-	it(".tsx imports skip the SSR callback (no React SSR yet)", () => {
+	it(".tsx imports get a React SSR callback (Phase 16b)", () => {
 		const code = compile('---\nimport Counter from "./Counter.tsx";\n---\n<Counter client:load />');
 		expect(code).toContain("$island(");
-		// React-side imports: SSR callback is `null` so the island starts
-		// empty and the client runtime mounts fresh.
-		expect(code).toContain(", null)");
+		// React imports: SSR via `$ssrReactIsland(Counter, props)`.
+		expect(code).toContain("$ssrReactIsland(Counter");
+		// And the Astroflare-renderer path is NOT used.
 		expect(code).not.toContain("await $renderComponent(Counter");
+	});
+
+	it(".jsx imports get a React SSR callback (Phase 16b)", () => {
+		const code = compile('---\nimport Foo from "./Foo.jsx";\n---\n<Foo client:idle />');
+		expect(code).toContain("$ssrReactIsland(Foo");
+	});
+
+	it("client:only skips the SSR callback regardless of source extension", () => {
+		const code = compile('---\nimport Counter from "./Counter.tsx";\n---\n<Counter client:only />');
+		expect(code).toContain("$island(");
+		// The directive's contract is to skip SSR — the second `$island`
+		// argument is `null` rather than a callback.
+		expect(code).toContain(", null)");
+		// `$ssrReactIsland` is in RUNTIME_SYMBOLS so it appears in the
+		// import line; what matters is no *call* exists.
+		expect(code).not.toContain("$ssrReactIsland(");
 	});
 
 	it("$island falls back to best-effort SSR when import isn't tracked", () => {

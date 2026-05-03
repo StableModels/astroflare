@@ -92,6 +92,7 @@ const RUNTIME_SYMBOLS = [
 	"$defineVars",
 	"$hydrationMarker",
 	"$island",
+	"$ssrReactIsland",
 ] as const;
 
 const CLIENT_DIRECTIVE_MODES = new Set([
@@ -585,15 +586,25 @@ function emitComponent(node: AstroComponent, ctx: EmitContext): string {
 		// side runtime (`hydration-client.ts`) registers the custom
 		// element and triggers hydration.
 		//
-		// For Astroflare components (.astro imports), SSR through the
-		// existing renderer is fine — pass the SSR callback so the island
-		// wraps real HTML. For React-style imports (.tsx / .jsx) the
-		// component reference will be undefined in the bundle (the inline
-		// bundler doesn't follow non-compilable imports), and even if it
-		// were available, our jsx-runtime doesn't support hooks. Pass
-		// `null` for those so the island starts empty and hydrates fresh.
+		// SSR callback rules:
+		//   - `.astro` / `.md` / `.mdx` → pass through `$renderComponent`,
+		//     which uses the Astroflare renderer (already supports the
+		//     compiled component shape).
+		//   - `.tsx` / `.jsx` → call `$ssrReactIsland(name, props)`
+		//     (Phase 16b). The runtime imports `react-dom/server`
+		//     dynamically at SSR time; if React is missing the helper
+		//     falls back to empty (client-only) rendering.
+		//   - `client:only` (any extension) → null. The directive's
+		//     contract is to skip SSR entirely.
+		//   - Unknown source → best-effort `$renderComponent`.
 		const componentSpec = ctx.islandImports.get(node.name) ?? null;
-		const ssrCallback = canSsrIsland(componentSpec) ? `async () => ${callExpr}` : "null";
+		const ssrCallback = ssrCallbackFor(
+			node.name,
+			propsExpr,
+			componentSpec,
+			directives.client.mode,
+			callExpr,
+		);
 		const islandOpts = JSON.stringify({
 			componentName: node.name,
 			componentSpec,
@@ -612,14 +623,26 @@ function emitComponent(node: AstroComponent, ctx: EmitContext): string {
 }
 
 /**
- * Decide whether the SSR callback for an island should run. Astroflare
- * (`.astro`) and Markdown components SSR cleanly through the existing
- * renderer; React (`.tsx` / `.jsx`) components don't, until Phase 16b
- * lands real React SSR with hooks.
+ * Choose the SSR callback expression for an island based on the
+ * component's source extension and the directive mode. See
+ * `emitComponent` for the rules.
  */
-function canSsrIsland(componentSpec: string | null): boolean {
-	if (!componentSpec) return true; // unknown source — best-effort SSR
-	return /\.(astro|md|mdx)$/.test(componentSpec);
+function ssrCallbackFor(
+	name: string,
+	propsExpr: string,
+	componentSpec: string | null,
+	mode: string,
+	astroCallExpr: string,
+): string {
+	if (mode === "only") return "null";
+	if (componentSpec && /\.(tsx|jsx)$/.test(componentSpec)) {
+		return `async () => $ssrReactIsland(${name}, ${propsExpr})`;
+	}
+	if (!componentSpec || /\.(astro|md|mdx)$/.test(componentSpec)) {
+		return `async () => ${astroCallExpr}`;
+	}
+	// Unknown extension — leave SSR off, mount on client.
+	return "null";
 }
 
 function emitFragment(node: AstroFragmentNode, ctx: EmitContext): string {

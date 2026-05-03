@@ -46,13 +46,23 @@ export {
 export {
 	generateSitemap,
 	formatSitemapDate,
+	buildSitemapFromRoutes,
 	type SitemapInput,
 	type SitemapUrlEntry,
+	type RouteForSitemap,
+	type BuildSitemapOptions,
 } from "./sitemap.js";
 // Phase 18: i18n routing helpers. `deriveLocale` is what the router
-// uses to populate `Astro.currentLocale`; `getRelativeLocaleUrl` is
-// the user-facing link helper.
-export { deriveLocale, getRelativeLocaleUrl } from "./i18n.js";
+// uses to populate `Astro.currentLocale`; the others are user-facing
+// link / negotiation helpers (`getRelativeLocaleUrl`,
+// `getAbsoluteLocaleUrl`, `getLocaleByPath`, `parsePreferredLocales`).
+export {
+	deriveLocale,
+	getRelativeLocaleUrl,
+	getAbsoluteLocaleUrl,
+	getLocaleByPath,
+	parsePreferredLocales,
+} from "./i18n.js";
 // Phase 19: dev/preview error overlay. Surfaces hydration + HMR
 // failures as a modal instead of a silent console.error. The string
 // form is auto-injected by the preview server so the overlay is
@@ -63,6 +73,21 @@ export {
 	dismissAstroflareError,
 	type AflareErrorReport,
 } from "./error-overlay.js";
+// Phase 16a: React adapter for `.tsx` islands. The compile-time
+// `wrapReactIslandSource(src)` injects mount glue around a default-
+// exported component; the runtime `/_aflare/react.js` route serves
+// `MOUNT_REACT_ISLAND_SOURCE` (default-resolves React via esm.sh).
+export {
+	MOUNT_REACT_ISLAND_SOURCE,
+	wrapReactIslandSource,
+	findDefaultExport,
+} from "./react-adapter.js";
+// Phase 16b: React SSR with hooks. `ssrReactIsland(Component, props)`
+// renders a `.tsx` island server-side via `react-dom/server#renderToString`.
+// Production deploys must include `react-dom/server` in the bundle;
+// the helper falls back to empty raw HTML (client-only render) when
+// the import fails.
+export { ssrReactIsland } from "./react-ssr.js";
 // JSX runtime — re-exported so a `runtimeImport` URL pointing at this
 // entrypoint can supply `jsx`, `jsxs`, `jsxDEV`, and `Fragment` from a
 // single source. The MDX compiler post-processes its output to alias

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { generateSitemap } from "./sitemap.js";
+import { buildSitemapFromRoutes, generateSitemap } from "./sitemap.js";
 
 describe("generateSitemap", () => {
 	it("emits a urlset with absolute loc URLs from string entries", () => {
@@ -67,5 +67,51 @@ describe("generateSitemap", () => {
 			urls: ["/search?q=1&sort=desc"],
 		});
 		expect(xml).toContain("<loc>https://app.example/search?q=1&amp;sort=desc</loc>");
+	});
+});
+
+describe("buildSitemapFromRoutes", () => {
+	it("includes static .astro pages and collapses index", () => {
+		const urls = buildSitemapFromRoutes([
+			{ filePath: "/src/pages/index.astro", isStatic: true, kind: "astro" },
+			{ filePath: "/src/pages/about.astro", isStatic: true, kind: "astro" },
+			{ filePath: "/src/pages/blog/index.astro", isStatic: true, kind: "astro" },
+		]);
+		expect(urls.sort()).toEqual(["/", "/about", "/blog"]);
+	});
+
+	it("excludes dynamic routes", () => {
+		const urls = buildSitemapFromRoutes([
+			{ filePath: "/src/pages/index.astro", isStatic: true, kind: "astro" },
+			{ filePath: "/src/pages/[slug].astro", isStatic: false, kind: "astro" },
+		]);
+		expect(urls).toEqual(["/"]);
+	});
+
+	it("excludes endpoints", () => {
+		const urls = buildSitemapFromRoutes([
+			{ filePath: "/src/pages/index.astro", isStatic: true, kind: "astro" },
+			{ filePath: "/src/pages/api/echo.ts", isStatic: true, kind: "endpoint" },
+		]);
+		expect(urls).toEqual(["/"]);
+	});
+
+	it("respects excludePatterns", () => {
+		const urls = buildSitemapFromRoutes(
+			[
+				{ filePath: "/src/pages/index.astro", isStatic: true, kind: "astro" },
+				{ filePath: "/src/pages/admin/dashboard.astro", isStatic: true, kind: "astro" },
+			],
+			{ excludePatterns: [/^\/admin/] },
+		);
+		expect(urls).toEqual(["/"]);
+	});
+
+	it("does not collapse index when collapseIndex: false", () => {
+		const urls = buildSitemapFromRoutes(
+			[{ filePath: "/src/pages/index.astro", isStatic: true, kind: "astro" }],
+			{ collapseIndex: false },
+		);
+		expect(urls).toEqual(["/index"]);
 	});
 });

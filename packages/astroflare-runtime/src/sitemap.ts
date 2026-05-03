@@ -88,3 +88,51 @@ function clampPriority(p: number): string {
 	// One decimal place — sitemaps spec recommends 0.0–1.0 increments of 0.1.
 	return p.toFixed(1);
 }
+
+/**
+ * Build a sitemap URL list from a route table (Phase 17 follow-up).
+ * Filters out dynamic routes and endpoints; static `.astro` / `.md`
+ * routes become root-relative paths that feed `generateSitemap`.
+ */
+export interface RouteForSitemap {
+	filePath: string;
+	isStatic: boolean;
+	kind: "astro" | "markdown" | "endpoint";
+}
+
+export interface BuildSitemapOptions {
+	/** Pathnames matching any of these regexes are excluded. */
+	excludePatterns?: readonly RegExp[];
+	/** Collapse `/foo/index` to `/foo` (and `/index` to `/`). Default true. */
+	collapseIndex?: boolean;
+}
+
+export function buildSitemapFromRoutes(
+	routes: readonly RouteForSitemap[],
+	opts: BuildSitemapOptions = {},
+): readonly string[] {
+	const collapseIndex = opts.collapseIndex !== false;
+	const excludes = opts.excludePatterns ?? [];
+	const out: string[] = [];
+	for (const r of routes) {
+		if (r.kind === "endpoint") continue;
+		if (!r.isStatic) continue;
+		const pathname = filePathToPathname(r.filePath, collapseIndex);
+		if (!pathname) continue;
+		if (excludes.some((re) => re.test(pathname))) continue;
+		out.push(pathname);
+	}
+	return out;
+}
+
+function filePathToPathname(filePath: string, collapseIndex: boolean): string | null {
+	const PAGES_PREFIX = "/src/pages";
+	if (!filePath.startsWith(`${PAGES_PREFIX}/`)) return null;
+	const rel = filePath.slice(PAGES_PREFIX.length);
+	const noExt = rel.replace(/\.(astro|md|mdx)$/, "");
+	if (collapseIndex) {
+		if (noExt === "/index") return "/";
+		if (noExt.endsWith("/index")) return noExt.slice(0, -"/index".length);
+	}
+	return noExt;
+}
