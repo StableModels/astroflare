@@ -34,8 +34,10 @@ export {
 
 export {
 	buildRenderTask,
+	buildClosureRenderTask,
 	DEFAULT_RUNTIME_IMPORT,
 	type BuildRenderTaskOptions,
+	type BuildClosureRenderTaskOptions,
 	type RenderTaskInput,
 } from "./render-task.js";
 

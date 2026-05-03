@@ -9,6 +9,18 @@
     ".": {
       "types": "./src/index.ts",
       "default": "./src/index.ts"
+    },
+    "./module-graph": {
+      "types": "./src/module-graph.ts",
+      "default": "./src/module-graph.ts"
+    },
+    "./bundle": {
+      "types": "./src/bundle.ts",
+      "default": "./src/bundle.ts"
+    },
+    "./router": {
+      "types": "./src/router.ts",
+      "default": "./src/router.ts"
     }
   },
   "scripts": {

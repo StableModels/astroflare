@@ -4,5 +4,13 @@
 # Project Worker's /deploy RPC and produce content-addressed artifacts.
 name = "astroflare-host-cloudflare-tests"
 main = "src/index.ts"
-compatibility_date = "2024-12-01"
+# `2025-09-01` matches the date the Worker Loader binding stabilised
+# — required for the `[[worker_loaders]]` block below.
+compatibility_date = "2025-09-01"
 compatibility_flags = ["nodejs_compat"]
+
+# Worker Loader binding — lets `preview-handler.test.ts` exercise the
+# real closure-walked-bundle path against a workerd executor (mirrors
+# how production hosts wire `createWorkerdExecutor`).
+[[worker_loaders]]
+binding = "LOADER"
