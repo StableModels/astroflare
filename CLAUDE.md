@@ -45,15 +45,35 @@ via the `Executor` abstraction. Mode B's **serve** step is a worker,
 fully subject to the rules: Astroflare ships a request-handler
 factory and an `R2Snapshots` adapter, never the worker entrypoint;
 the host owns the worker, the storage binding, and the path layout.
-Active alignment efforts:
-[`docs/phases/phase-26-host-driven-preview.md`](docs/phases/phase-26-host-driven-preview.md)
-(Mode A library refactor),
-[`docs/phases/phase-26b-host-driven-build.md`](docs/phases/phase-26b-host-driven-build.md)
-(Mode B library refactor), and
-[`docs/phases/phase-26c-agent-ops-cli.md`](docs/phases/phase-26c-agent-ops-cli.md)
-(CLI reshape so the agent can drive + debug Astroflare on real
-Cloudflare end-to-end). Parts of the code still reflect the
-pre-refactor shape until these land.
+**Status (post-Phase 26 / 26b / 26c finalization):** the public
+host API surface is fully aligned. Hosts write their own
+`SiteDurableObject` (Mode A) or deploy worker (Mode B); they
+import `createCoordinator` / `createPreviewHandler` /
+`acceptHmrSocket` / `SqlCache` / `createWorkerdExecutor` from
+`@astroflare/host-cloudflare` and `WorkspaceSite` from
+`@astroflare/site-workspace` (Mode A); `createSnapshotHandler`
+from `@astroflare/build` and `R2Snapshots` / `R2SnapshotSink`
+from `@astroflare/host-cloudflare` (Mode B). The legacy
+`stack-worker.ts`, `project-worker.ts`, `R2Storage`,
+`CoordinatorDurableObject`, `HmrDurableObject`,
+`createDeployServer`, and the `deploy()` build function are all
+gone. Reference fixtures
+([`tests/e2e/fixtures/preview-host-ref/`](tests/e2e/fixtures/preview-host-ref/),
+[`tests/e2e/fixtures/deploy-host-ref/`](tests/e2e/fixtures/deploy-host-ref/))
+build cleanly into deployable bundles.
+
+The `Storage` interface in `@astroflare/core` remains
+`@deprecated` but is still consumed by framework-internal code
+(`@astroflare/preview`'s preview-server, `@astroflare/content`'s
+collection reader, `@astroflare/test-utils`). Migrating those
+internals from `Storage` → `Site` + `Cache` is a separate refactor
+that doesn't change the host-facing API and doesn't violate the
+North Star (implementation detail, not host surface).
+
+Phase plans:
+[`docs/phases/phase-26-host-driven-preview.md`](docs/phases/phase-26-host-driven-preview.md),
+[`docs/phases/phase-26b-host-driven-build.md`](docs/phases/phase-26b-host-driven-build.md),
+[`docs/phases/phase-26c-agent-ops-cli.md`](docs/phases/phase-26c-agent-ops-cli.md).
 
 ## Project shape
 
