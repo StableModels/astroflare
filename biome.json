@@ -13,7 +13,10 @@
       "**/coverage/**",
       "**/*.tsbuildinfo",
       "**/.wrangler/**",
-      "**/.miniflare/**"
+      "**/.miniflare/**",
+      "**/*.astro",
+      "tests/e2e/.state/**",
+      "tests/e2e/fixtures/**"
     ]
   },
   "formatter": {
