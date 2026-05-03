@@ -91,6 +91,9 @@ importers:
       '@astroflare/core':
         specifier: workspace:*
         version: link:../astroflare-core
+      '@astroflare/starter':
+        specifier: workspace:*
+        version: link:../astroflare-starter
     devDependencies:
       '@types/node':
         specifier: ^22.10.0
@@ -286,6 +289,21 @@ importers:
         specifier: ^2.1.8
         version: 2.1.8(@types/node@22.19.17)(happy-dom@15.11.7)
 
+  packages/astroflare-starter:
+    devDependencies:
+      '@astroflare/preview':
+        specifier: workspace:*
+        version: link:../astroflare-preview
+      '@astroflare/runtime':
+        specifier: workspace:*
+        version: link:../astroflare-runtime
+      '@astroflare/test-utils':
+        specifier: workspace:*
+        version: link:../astroflare-test-utils
+      vitest:
+        specifier: ^2.1.8
+        version: 2.1.8(@types/node@22.19.17)(happy-dom@15.11.7)
+
   packages/astroflare-test-utils:
     dependencies:
       '@astroflare/core':
@@ -340,36 +358,17 @@ importers:
         specifier: ^0.28.0
         version: 0.28.0
 
-  tests/integration:
-    dependencies:
-      '@astroflare/core':
-        specifier: workspace:*
-        version: link:../../packages/astroflare-core
-      '@astroflare/host-cloudflare':
-        specifier: workspace:*
-        version: link:../../packages/astroflare-host-cloudflare
-      '@astroflare/test-utils':
-        specifier: workspace:*
-        version: link:../../packages/astroflare-test-utils
-    devDependencies:
-      '@cloudflare/vitest-pool-workers':
-        specifier: ^0.10.0
-        version: 0.10.15(@cloudflare/workers-types@4.20260502.1)(@vitest/runner@2.1.8)(@vitest/snapshot@2.1.8)(vitest@2.1.8(@types/node@22.19.17)(happy-dom@15.11.7))
-      '@cloudflare/workers-types':
-        specifier: ^4.20241224.0
-        version: 4.20260502.1
-      vitest:
-        specifier: 2.1.8
-        version: 2.1.8(@types/node@22.19.17)(happy-dom@15.11.7)
-      wrangler:
-        specifier: ^4.0.0
-        version: 4.87.0(@cloudflare/workers-types@4.20260502.1)
-
   tests/workerd:
     dependencies:
+      '@astroflare/build':
+        specifier: workspace:*
+        version: link:../../packages/astroflare-build
       '@astroflare/compiler':
         specifier: workspace:*
         version: link:../../packages/astroflare-compiler
+      '@astroflare/content':
+        specifier: workspace:*
+        version: link:../../packages/astroflare-content
       '@astroflare/core':
         specifier: workspace:*
         version: link:../../packages/astroflare-core
@@ -382,6 +381,9 @@ importers:
       '@astroflare/runtime':
         specifier: workspace:*
         version: link:../../packages/astroflare-runtime
+      '@astroflare/site-workspace':
+        specifier: workspace:*
+        version: link:../../packages/astroflare-site-workspace
       '@astroflare/test-utils':
         specifier: workspace:*
         version: link:../../packages/astroflare-test-utils

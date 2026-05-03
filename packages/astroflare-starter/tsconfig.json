@@ -3,14 +3,14 @@
   "compilerOptions": {
     "rootDir": "src",
     "outDir": "dist",
-    "tsBuildInfoFile": "dist/.tsbuildinfo",
-    "types": ["node"]
+    "tsBuildInfoFile": "dist/.tsbuildinfo"
   },
   "include": ["src/**/*"],
   "exclude": ["dist", "**/*.test.ts"],
   "references": [
     { "path": "../astroflare-core" },
-    { "path": "../astroflare-cli-lib" },
-    { "path": "../astroflare-starter" }
+    { "path": "../astroflare-preview" },
+    { "path": "../astroflare-runtime" },
+    { "path": "../astroflare-test-utils" }
   ]
 }

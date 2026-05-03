@@ -36,6 +36,10 @@ export default defineWorkersProject({
 					// parser predates `worker_loaders` and ignores the field; the
 					// programmatic Miniflare option is wired through directly.
 					workerLoaders: { LOADER: {} },
+					// In-process R2 binding so the buildSite + R2Snapshots round-trip
+					// can be exercised end-to-end inside workerd. Backed by miniflare's
+					// in-memory R2 implementation.
+					r2Buckets: ["SITE_R2"],
 				},
 			},
 		},

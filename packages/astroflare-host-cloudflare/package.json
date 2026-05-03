@@ -9,10 +9,15 @@
     ".": {
       "types": "./src/index.ts",
       "default": "./src/index.ts"
+    },
+    "./runtime-modules": {
+      "types": "./src/runtime-modules.ts",
+      "default": "./src/runtime-modules.ts"
     }
   },
   "scripts": {
-    "test": "vitest run --project host-cloudflare"
+    "test": "vitest run --project host-cloudflare",
+    "regen-runtime-modules": "node scripts/generate-runtime-modules.mjs"
   },
   "dependencies": {
     "@astroflare/core": "workspace:*",

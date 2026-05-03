@@ -11,6 +11,7 @@
     { "path": "./packages/astroflare-site-workspace" },
     { "path": "./packages/astroflare-content" },
     { "path": "./packages/astroflare-cli" },
-    { "path": "./packages/astroflare-cli-lib" }
+    { "path": "./packages/astroflare-cli-lib" },
+    { "path": "./packages/astroflare-starter" }
   ]
 }

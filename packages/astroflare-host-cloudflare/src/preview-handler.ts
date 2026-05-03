@@ -18,14 +18,15 @@
  * the coordinator inside their own routing.
  */
 
+import { DEFAULT_RUNTIME_IMPORT, buildRenderTask } from "@astroflare/build";
 import { compileAstro } from "@astroflare/compiler/astro";
-import type { Cache, Executor, Site, TaskBundle } from "@astroflare/core";
+import type { Cache, Executor, Site } from "@astroflare/core";
 import type { AstroflareCoordinator } from "./coordinator.js";
 
 /** Subpath of the workspace where Astroflare looks up routes. */
 const PAGES_PREFIX = "/src/pages";
 
-const RUNTIME_IMPORT = "./runtime/index.js";
+const RUNTIME_IMPORT = DEFAULT_RUNTIME_IMPORT;
 
 const dec = new TextDecoder();
 
@@ -101,29 +102,7 @@ async function renderRoute(
 	}
 
 	const url = new URL(request.url);
-	const shim = [
-		'import component from "./route.js";',
-		`import { render } from ${JSON.stringify(RUNTIME_IMPORT)};`,
-		"export default async (input) => {",
-		'  const request = new Request(input.url, { method: input.method ?? "GET" });',
-		"  const ctx = {",
-		"    props: input.props ?? {},",
-		"    params: input.params ?? {},",
-		"    request,",
-		"    url: new URL(input.url),",
-		"    site: input.site,",
-		"  };",
-		"  return await render(component, ctx);",
-		"};",
-	].join("\n");
-
-	const task: TaskBundle = {
-		mainModule: "main.js",
-		modules: {
-			"main.js": shim,
-			"route.js": compiled.code,
-		},
-	};
+	const task = buildRenderTask({ routeCode: compiled.code, runtimeImport: RUNTIME_IMPORT });
 
 	type RenderResult =
 		| { kind: "html"; html: string; cookies: readonly string[] }

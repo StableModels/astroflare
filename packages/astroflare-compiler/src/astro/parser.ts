@@ -635,7 +635,14 @@ class Parser {
 			throw new ParseFailure();
 		}
 
-		const isVoid = VOID_HTML_ELEMENTS.has(tagName.toLowerCase());
+		// Components (capitalized first letter, by Astro convention) are never
+		// HTML void elements: `<Base />` is a user-authored component named
+		// `Base`, not the void HTML `<base>` element. Without this guard, a
+		// component named `Base`/`Img`/`Br`/etc. would parse as void and its
+		// children would be promoted to siblings — see `Unexpected closing
+		// tag` regression on `<Base>...</Base>`.
+		const isComponent = isComponentName(tagName);
+		const isVoid = !isComponent && VOID_HTML_ELEMENTS.has(tagName.toLowerCase());
 		const isRawText = RAW_TEXT_ELEMENTS.has(tagName.toLowerCase());
 		let children: AstroNode[] = [];
 		if (!selfClosing && !isVoid) {

@@ -1,0 +1,23 @@
+---
+import Base from "../../layouts/Base.astro";
+
+export async function getStaticPaths() {
+	return [
+		{ params: { slug: "hello-world" }, props: { title: "Hello, World" } },
+		{ params: { slug: "second-post" }, props: { title: "Second post" } },
+	];
+}
+
+const { slug } = Astro.params;
+const { title } = Astro.props;
+---
+<Base title={title}>
+	<article>
+		<h1>{title}</h1>
+		<p>This page came from <code>src/pages/posts/[slug].astro</code> with slug <code>{slug}</code>.</p>
+		<p>For schema-validated entries from the filesystem, see
+			<code>src/content/blog/</code> — read them with
+			<code>getCollection("blog")</code> from <code>@astroflare/content</code>.</p>
+	</article>
+	<p><a href="/">back home</a></p>
+</Base>

@@ -62,6 +62,34 @@ gone. Reference fixtures
 [`tests/e2e/fixtures/deploy-host-ref/`](tests/e2e/fixtures/deploy-host-ref/))
 build cleanly into deployable bundles.
 
+**Embedding-friendly additions (post-26c):**
+- `@astroflare/build` (workers-safe entry) now exports `buildSite`
+  alongside `createSnapshotHandler`. The Workers-runtime version
+  takes a `Site` + `Executor` and yields `SnapshotEntry`s callers
+  pipe into a `SnapshotSink` — same streaming shape as the Node
+  version, no `node:*` imports. Lets hosts pre-render snapshots
+  to R2 from inside a Worker (Ember and other Worker-runtime
+  consumers). The Node version stays at `@astroflare/build/node`.
+- `@astroflare/host-cloudflare/runtime-modules` ships a pre-inlined
+  `runtimeModules: Record<string, string>` for
+  `createWorkerdExecutor({ runtime })`. Bundler-agnostic; replaces
+  the `__AFLARE_RUNTIME_MODULES__` global-substitution pattern as
+  the recommended path. The generator script
+  (`packages/astroflare-host-cloudflare/scripts/generate-runtime-modules.mjs`)
+  runs as part of `pnpm build`; CI checks the generated file is
+  up to date.
+- `@astroflare/starter` is the canonical project scaffold. Two
+  byte-identical consumption modes: `getStarterFiles()` for
+  in-Worker materialisation, `writeStarterFiles({ dir })`
+  (or `af new <dir>`) for on-disk. The `template/` directory is
+  the source of truth; `scripts/generate-starter-files.mjs`
+  inlines it as base64 into `src/starter-files.generated.ts`,
+  also part of `pnpm build`.
+- `buildRenderTask` (in `@astroflare/build`) is the shared shim
+  that wraps compiled `.astro` route code into a `TaskBundle` for
+  the executor. Used by `createPreviewHandler` and `buildSite`
+  (workers).
+
 The `Storage` interface in `@astroflare/core` remains
 `@deprecated` but is still consumed by framework-internal code
 (`@astroflare/preview`'s preview-server, `@astroflare/content`'s

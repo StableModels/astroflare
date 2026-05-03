@@ -10,14 +10,14 @@
   },
   "packageManager": "pnpm@10.28.2",
   "scripts": {
-    "build": "tsc -b",
+    "build": "tsc -b packages/astroflare-runtime && pnpm --filter @astroflare/host-cloudflare run regen-runtime-modules && pnpm --filter @astroflare/starter run regen-starter-files && tsc -b",
     "clean": "tsc -b --clean && rimraf 'packages/*/dist' 'examples/*/dist'",
     "typecheck": "tsc -b",
     "lint": "biome check .",
     "format": "biome format --write .",
-    "test": "tsc -b && vitest run",
+    "test": "pnpm build && vitest run",
     "test:watch": "vitest",
-    "test:coverage": "tsc -b && vitest run --coverage",
+    "test:coverage": "pnpm build && vitest run --coverage",
     "prepare": "husky"
   },
   "lint-staged": {

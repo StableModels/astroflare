@@ -349,3 +349,35 @@ describe("parser — error positions", () => {
 		expect(r.errors[0]?.start.column).toBe(4);
 	});
 });
+
+describe("parser — components named after HTML void elements", () => {
+	// Regression: components whose name lower-cases to an HTML void element
+	// (`<base>`, `<img>`, `<br>`, `<link>`, `<meta>`, etc.) used to be
+	// classified as void and have their children promoted to siblings,
+	// emitting a stray `</Component>` text node and a parse error.
+	const VOID_LIKE_NAMES = ["Base", "Img", "Br", "Link", "Meta", "Hr", "Input"];
+
+	for (const name of VOID_LIKE_NAMES) {
+		it(`<${name}>...</${name}> parses with children, not as void`, () => {
+			const r = parse(`<${name}><h1>x</h1></${name}>`);
+			expectNoErrors(r);
+			const top = r.doc.body[0] as AstroComponent;
+			expect(top.type).toBe("component");
+			expect(top.name).toBe(name);
+			expect(top.selfClosing).toBe(false);
+			expect(top.children).toHaveLength(1);
+			expect((top.children[0] as AstroElement).name).toBe("h1");
+		});
+	}
+
+	it("HTML <base> stays void", () => {
+		const r = parse('<base href="/"><p>after</p>');
+		expectNoErrors(r);
+		const baseEl = r.doc.body[0] as AstroElement;
+		expect(baseEl.type).toBe("element");
+		expect(baseEl.name).toBe("base");
+		expect(baseEl.selfClosing).toBe(true);
+		// `<p>after</p>` is a sibling, not a child of <base>.
+		expect(r.doc.body[1]).toMatchObject({ type: "element", name: "p" });
+	});
+});

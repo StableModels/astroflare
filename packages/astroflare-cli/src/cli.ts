@@ -67,6 +67,7 @@ import { type DeployConfig, resolveConfig } from "./commands/deploy.js";
 import { cmdDeploy, cmdRollback, cmdStatus } from "./commands/deploy.js";
 import { loadFixtureBundle } from "./commands/fixtures.js";
 import { initProject } from "./commands/init.js";
+import { newProject } from "./commands/new.js";
 
 async function main(argv: readonly string[]): Promise<number> {
 	const [subcommand, ...rest] = argv;
@@ -80,6 +81,8 @@ async function main(argv: readonly string[]): Promise<number> {
 		// Project lifecycle.
 		case "init":
 			return runInit(rest);
+		case "new":
+			return runNew(rest);
 		case "deploy":
 			return runDeploy(rest);
 		case "status":
@@ -165,6 +168,35 @@ async function runInit(argv: readonly string[]): Promise<number> {
 		return 0;
 	} catch (err) {
 		console.error(`af init: ${(err as Error).message}`);
+		return 1;
+	}
+}
+
+async function runNew(argv: readonly string[]): Promise<number> {
+	const { values, positionals } = parseArgs({
+		args: [...argv],
+		options: {
+			force: { type: "boolean" },
+		},
+		allowPositionals: true,
+	});
+	const dir = positionals[0];
+	if (!dir) {
+		console.error("af new: missing <dir> argument");
+		return 1;
+	}
+	try {
+		const result = newProject({
+			dir,
+			force: Boolean(values.force),
+		});
+		console.log(`Created ${result.created.length} files in ${dir}`);
+		if (result.skipped.length > 0) {
+			console.log(`Skipped (use --force to overwrite): ${result.skipped.join(", ")}`);
+		}
+		return 0;
+	} catch (err) {
+		console.error(`af new: ${(err as Error).message}`);
 		return 1;
 	}
 }
@@ -779,7 +811,9 @@ function printUsage(): void {
 			"  af <command> [options]",
 			"",
 			"PROJECT LIFECYCLE",
-			"  init <dir>      Scaffold a new Astroflare project",
+			"  init <dir>      Scaffold a tiny hello-world Astroflare project",
+			"  new  <dir>      Scaffold from @astroflare/starter (canonical seed:",
+			"                  layout + index + markdown + dynamic + content collection)",
 			"  deploy [dir]    Upload project files to R2 and run the deploy ceremony",
 			"  status          Show the active deploy hash",
 			"  rollback <hash> Flip /site/current to a previous deploy",

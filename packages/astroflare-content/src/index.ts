@@ -15,6 +15,32 @@
  * Phase 14 update: `.mdx` entries land alongside `.md`. The same
  * frontmatter / Zod-validation / slug derivation rules apply.
  *
+ * ## `Site` adapter compatibility
+ *
+ * The reader is parametric in the `Site` capability — `glob()` +
+ * `readFile()` + `statFile()`. Both `MemorySite` (test-utils) and
+ * `WorkspaceSite` (`@astroflare/site-workspace`, the host-driven
+ * preview adapter for `@cloudflare/shell`'s Workspace) are fully
+ * supported with no per-adapter quirks. Frontmatter parsing, Zod
+ * validation, schema defaults, glob discovery, and HMR-style mutation
+ * (write a new entry → next `getCollection` includes it) all behave
+ * identically across adapters; see
+ * `tests/workerd/content-collections-workspace.test.ts` for the
+ * WorkspaceSite-shaped end-to-end coverage.
+ *
+ * ## Note on calling from inside `.astro` frontmatter
+ *
+ * The framework's preview module-graph walks `.astro`/`.md`/`.mdx`
+ * imports but does NOT bundle the framework's own npm packages
+ * (`@astroflare/content`, etc.) into the spawned compile/render
+ * isolate. Hosts that want `import { getCollection } from
+ * "@astroflare/content"` to work inside `.astro` frontmatter need to
+ * thread the package's source into `createWorkerdExecutor({ runtime })`
+ * the same way `runtimeModules` does. The recommended pattern is to
+ * call `createContentReader(site, registry)` from a worker route or
+ * endpoint and pass the resulting entries into the page render as
+ * `Astro.props`.
+ *
  * Carve-outs (in retro):
  *   - Content-layer custom loaders (`loader: () => …`) — Astro's API for
  *     fetching from non-filesystem sources; the schema is in place but
