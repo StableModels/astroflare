@@ -441,6 +441,13 @@ export interface AstroflareConfig {
 	integrations?: readonly unknown[];
 	/** Markdown plugin chain. Phase 6+ defines the schema. */
 	markdown?: unknown;
+	/**
+	 * Compile-time `import.meta.env` substitutions. Each key becomes
+	 * accessible as `import.meta.env.<KEY>`; the compiler replaces the
+	 * access with the JSON-stringified value. Use this for build-time
+	 * configuration; runtime secrets land in Phase 15's `EnvService`.
+	 */
+	env?: Record<string, unknown>;
 	/** Vite is forbidden (§10) — kept here only so we can throw a clear error
 	 *  if someone copies an Astro config that includes it. */
 	vite?: never;

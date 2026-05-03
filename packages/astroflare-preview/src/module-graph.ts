@@ -65,6 +65,12 @@ export interface ModuleInfo {
 export interface ModuleGraphOptions {
 	/** Module specifier the compiled output uses for the runtime ABI imports. */
 	runtimeImport: string;
+	/**
+	 * Optional `import.meta.env` substitutions threaded into compileAstro.
+	 * The cache key includes a digest of these so a config change
+	 * invalidates compiled artifacts.
+	 */
+	env?: Record<string, unknown>;
 }
 
 export interface ClosureResult {
@@ -104,6 +110,7 @@ export class ModuleGraph {
 		const compileKey = await contentIdWithConfig(sourceBytes, {
 			compiler: COMPILER_VERSION,
 			runtimeImport: this.#opts.runtimeImport,
+			env: this.#opts.env ?? null,
 		});
 
 		let compiled: string;
@@ -143,6 +150,7 @@ export class ModuleGraph {
 		const result = await compileAstro(source, {
 			runtimeImport: this.#opts.runtimeImport,
 			filename: path,
+			env: this.#opts.env,
 		});
 		if (result.errors.length > 0) {
 			const first = result.errors[0];

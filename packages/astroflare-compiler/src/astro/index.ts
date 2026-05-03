@@ -10,6 +10,7 @@
  * superset of JS, so JS-only frontmatter passes through unchanged at
  * a sub-ms per-call cost after esbuild-wasm's one-time init.
  */
+import { contentId } from "@astroflare/core";
 import { transformTS } from "../ts.js";
 import type { AstroDocument, AstroError } from "./ast.js";
 import { type EmitOptions, type EmitResult, emitDocument } from "./emitter.js";
@@ -22,6 +23,12 @@ export interface CompileOptions extends EmitOptions {
 	 * `false`. Production code should leave this off.
 	 */
 	skipTsTransform?: boolean;
+	/**
+	 * `import.meta.env.<KEY>` substitutions, supplied from
+	 * `AstroflareConfig.env`. esbuild's `define` rewrites the accesses at
+	 * the TS-strip pass.
+	 */
+	env?: Record<string, unknown>;
 }
 
 export interface CompileResult extends EmitResult {
@@ -39,13 +46,20 @@ export async function compileAstro(
 	opts: CompileOptions = {},
 ): Promise<CompileResult> {
 	const { doc, errors } = parseAstro(source);
-	const emitted = emitDocument(doc, opts);
+	// Compute the per-component CSS scope hash up-front so the emitter can
+	// stamp `data-aflare-h="<hash>"` onto every element + scope CSS rules.
+	// 8 chars of content-addressed hash over the filename — Astro-style.
+	const scopeHash = opts.scopeHash ?? (await contentId(opts.filename ?? source)).slice(0, 8);
+	const emitted = emitDocument(doc, { ...opts, scopeHash });
 	if (opts.skipTsTransform) {
 		return { ...emitted, doc, errors };
 	}
 	let code = emitted.code;
 	try {
-		code = await transformTS(code, { filename: opts.filename });
+		code = await transformTS(code, {
+			filename: opts.filename,
+			define: defineFromEnv(opts.env),
+		});
 	} catch (err) {
 		const message = (err as Error).message ?? String(err);
 		if (isEsbuildEnvironmentError(message)) {
@@ -73,6 +87,22 @@ export async function compileAstro(
  */
 function isEsbuildEnvironmentError(message: string): boolean {
 	return /wasmURL|wasmModule|initialize|fetch.*esbuild/i.test(message);
+}
+
+/**
+ * Translate `AstroflareConfig.env` into esbuild's `define` shape. Each
+ * key becomes `import.meta.env.KEY` mapped to the JSON-stringified
+ * value. esbuild substitutes the access at the TS-strip pass.
+ */
+function defineFromEnv(
+	env: Record<string, unknown> | undefined,
+): Record<string, string> | undefined {
+	if (!env) return undefined;
+	const out: Record<string, string> = {};
+	for (const [k, v] of Object.entries(env)) {
+		out[`import.meta.env.${k}`] = JSON.stringify(v);
+	}
+	return Object.keys(out).length > 0 ? out : undefined;
 }
 
 export * from "./ast.js";

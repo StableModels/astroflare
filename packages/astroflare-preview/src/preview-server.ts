@@ -90,7 +90,7 @@ export function createPreviewServer(opts: PreviewServerOptions): PreviewServer {
 	const router = new Router();
 	const runtimeImport = opts.runtimeImport ?? DEFAULT_RUNTIME_IMPORT;
 	const workspaceId = opts.workspaceId ?? DEFAULT_WORKSPACE_ID;
-	const moduleGraph = new ModuleGraph(opts.host, { runtimeImport });
+	const moduleGraph = new ModuleGraph(opts.host, { runtimeImport, env: opts.config.env });
 
 	let routesReady: Promise<void> | null = null;
 	let hmrSub: Subscription | null = null;

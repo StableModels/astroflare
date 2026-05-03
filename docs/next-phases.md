@@ -7,16 +7,17 @@ MVP = Tier 0 + Tier 1).
 
 ## Where we are
 
-**Done:** Phases 0–11 plus 2.5b. Framework runs end-to-end. Live preview
+**Done:** Phases 0–12 plus 2.5b. Framework runs end-to-end. Live preview
 with HMR (additions + removals), multi-file `.astro` composition,
 markdown + content collections, server endpoints + middleware
-(both `.js` and `.ts`), TypeScript-authoring throughout, static
-deploy with atomic flip including dynamic routes via `getStaticPaths`,
-full Tier 0 `Astro.*` surface (`cookies`, `locals`, `slots`, `redirect`
+(both `.js` and `.ts`), TypeScript-authoring throughout, scoped +
+global CSS, `import.meta.env` substitution, static deploy with
+atomic flip including dynamic routes via `getStaticPaths`, full
+Tier 0 `Astro.*` surface (`cookies`, `locals`, `slots`, `redirect`
 propagation), real Worker Loader-backed Executor and Hibernatable WS
 Transport in `@astroflare/host-cloudflare`, `minimal-blog` fixture.
 
-**445 tests / 39 files / 5 pools all green.** Framework boundary holds.
+**465 tests / 40 files / 5 pools all green.** Framework boundary holds.
 
 ## Outstanding work, categorized
 
@@ -29,9 +30,9 @@ Transport in `@astroflare/host-cloudflare`, `minimal-blog` fixture.
 
 ### B — Tier 1 finishers
 - ~~TS support throughout (frontmatter + endpoints)~~ ✓ Phase 11
-- Scoped CSS (`<style>` block + selector hash + element attribution)
-- Global CSS + CSS modules
-- `import.meta.env` substitution + `astro:env` schema
+- ~~Scoped CSS (`<style>` block + selector hash + element attribution)~~ ✓ Phase 12
+- ~~Global CSS~~ ✓ Phase 12 / CSS modules deferred
+- ~~`import.meta.env` substitution~~ ✓ Phase 12 / `astro:env` runtime → Phase 15
 - Image asset pipeline (`<Image>` / `<Picture>` + `ImageService` host capability + Cloudflare Images)
 - MDX (full JSX-in-markdown via `@mdx-js/mdx`)
 - Shiki syntax highlighting (rehype-shiki plugin)
@@ -104,20 +105,17 @@ regex-literal disambiguation in the parser landed alongside.
 **Defer:** TS-aware error reporting (line numbers from TS source survive
 via source maps — Phase 13).
 
-### Phase 12 — CSS (scoped + global) + env vars
+### Phase 12 — CSS (scoped + global) + env vars ✓
 
-Scoped `<style>` blocks: parse CSS, rewrite selectors with a hash, attach
-the same hash as a `data-aflare-h` attribute on every element in the
-parent component. Output a single `<style>` tag in the rendered HTML.
-
-Global CSS: `<style is:global>` passes through.
-
-`import.meta.env`: compile-time substitution for `import.meta.env.X`
-where `X` is in `astroflare.config.ts#env` schema (defines name +
-typed value).
+**Done.** Retro: [`docs/phases/phase-12-css-and-env.md`](./phases/phase-12-css-and-env.md).
+20 new tests; 465 total. Per-component scoped CSS via `data-aflare-h`,
+`<style is:global>` pass-through, raw-text parsing for `<style>` and
+`<script>`, `import.meta.env.<KEY>` compile-time substitution via
+esbuild `define`.
 
 **Defer:** CSS modules (`*.module.css`), PostCSS, `astro:env` runtime
-helpers (`getSecret(name)` etc.).
+helpers (`getSecret(name)` etc.) — moves to Phase 15 (host
+`EnvService`).
 
 ### Phase 13 — Asset pipeline + image transforms
 

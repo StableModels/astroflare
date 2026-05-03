@@ -53,6 +53,13 @@ export interface TransformTsOptions {
 	filename?: string;
 	/** Loader hint — defaults to `"ts"`. JSX-bearing files pass `"tsx"`. */
 	loader?: "ts" | "tsx";
+	/**
+	 * `define` map passed to esbuild. Each key (e.g.
+	 * `"import.meta.env.MODE"`) is replaced wherever it appears as a
+	 * member access. Values are JSON-stringified literal source code —
+	 * `"\"production\""` for a string, `"42"` for a number, etc.
+	 */
+	define?: Record<string, string>;
 }
 
 /**
@@ -67,6 +74,7 @@ export async function transformTS(source: string, opts: TransformTsOptions = {})
 		target: "es2022",
 		format: "esm",
 		sourcefile: opts.filename,
+		define: opts.define,
 		// Don't introduce helper imports — the inline bundler later strips
 		// remaining imports anyway, but keeping output closure-free is
 		// friendlier to the bundler's regex-based rewrites.
@@ -89,6 +97,7 @@ export function transformTSSync(source: string, opts: TransformTsOptions = {}): 
 		target: "es2022",
 		format: "esm",
 		sourcefile: opts.filename,
+		define: opts.define,
 		treeShaking: false,
 	});
 	return result.code;

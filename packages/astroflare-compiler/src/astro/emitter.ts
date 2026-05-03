@@ -46,12 +46,21 @@ import type {
 	SpreadAttribute,
 	StaticAttribute,
 } from "./ast.js";
+import { scopeCss } from "./css-scope.js";
 
 export interface EmitOptions {
 	/** Module specifier for the runtime ABI imports. */
 	runtimeImport?: string;
 	/** Optional source filename used for error reporting and source maps. */
 	filename?: string;
+	/**
+	 * 8-char per-component CSS scope hash. When supplied, the emitter
+	 * attaches `data-aflare-h="<hash>"` to every HTML element it emits and
+	 * rewrites scoped `<style>` blocks so their selectors target only
+	 * elements bearing the same attribute. Computed by `compileAstro`
+	 * from the source filename.
+	 */
+	scopeHash?: string;
 }
 
 export interface EmitResult {
@@ -111,10 +120,37 @@ export function emitDocument(doc: AstroDocument, opts: EmitOptions = {}): EmitRe
 	// out of the frontmatter to module scope. The remainder runs inside the
 	// component arrow.
 	const { hoisted, remaining } = hoistTopLevelExports(fm);
-	const body = emitChildren(doc.body, "$$slots");
+	// Compute scoping context so emitElement can decorate elements + style
+	// blocks with the right hash. `scopeHash` is supplied by compileAstro.
+	const hasScopedStyle = opts.scopeHash !== undefined && documentHasScopedStyle(doc.body);
+	const ctx: EmitContext = {
+		slotsRef: "$$slots",
+		scopeHash: hasScopedStyle ? (opts.scopeHash ?? null) : null,
+	};
+	const body = emitChildren(doc.body, "$$slots", ctx);
 	const hoistedBlock = hoisted.length > 0 ? `${hoisted.join("\n")}\n` : "";
 	const code = `${importLine}\n${hoistedBlock}export default $component(async ({ Astro, ...$$props }, $$slots) => {\n${remaining}\nreturn $render\`${body}\`;\n});\n`;
 	return { code, map: null };
+}
+
+/**
+ * Does this document contain at least one `<style>` element WITHOUT
+ * `is:global`? Only those drive scoping; a global-only document shouldn't
+ * pay the per-element data-attribute cost.
+ */
+function documentHasScopedStyle(nodes: readonly AstroNode[]): boolean {
+	for (const node of nodes) {
+		if (node.type === "element") {
+			if (node.name.toLowerCase() === "style") {
+				const directives = collectDirectives(node.attrs);
+				if (!directives.isGlobal) return true;
+			}
+			if (documentHasScopedStyle(node.children)) return true;
+		} else if (node.type === "fragment" || node.type === "component") {
+			if (documentHasScopedStyle(node.children)) return true;
+		}
+	}
+	return false;
 }
 
 /**
@@ -326,10 +362,16 @@ function skipTemplate(source: string, start: number): number {
 
 interface EmitContext {
 	slotsRef: string;
+	/**
+	 * 8-char hash for scoped CSS, or `null` when the document has no
+	 * scoped `<style>` block. When set, `emitElement` adds
+	 * `data-aflare-h="<hash>"` to every HTML element.
+	 */
+	scopeHash: string | null;
 }
 
-function emitChildren(nodes: readonly AstroNode[], slotsRef: string): string {
-	const ctx: EmitContext = { slotsRef };
+function emitChildren(nodes: readonly AstroNode[], slotsRef: string, parent?: EmitContext): string {
+	const ctx: EmitContext = parent ?? { slotsRef, scopeHash: null };
 	let out = "";
 	for (const node of nodes) out += emitNode(node, ctx);
 	return out;
@@ -359,9 +401,16 @@ function emitNode(node: AstroNode, ctx: EmitContext): string {
 function emitElement(el: AstroElement, ctx: EmitContext): string {
 	const directives = collectDirectives(el.attrs);
 
+	// Scoped/global `<style>` elements emit verbatim CSS; no scope-attr.
+	if (el.name.toLowerCase() === "style") {
+		return emitStyleElement(el, ctx, directives);
+	}
+
 	// `set:html={x}` replaces children with the raw HTML.
 	if (directives.setHtml) {
-		const open = `<${el.name}${emitAttrs(el.attrs, /* skipSlot */ false, /* skipDirectives */ true)}>`;
+		const baseAttrs = emitAttrs(el.attrs, /* skipSlot */ false, /* skipDirectives */ true);
+		const scopeAttr = scopeAttrFor(ctx);
+		const open = `<${el.name}${baseAttrs}${scopeAttr}>`;
 		const close = `</${el.name}>`;
 		return `${open}${interpolate(`$rawHtml(${directives.setHtml})`)}${close}`;
 	}
@@ -372,19 +421,51 @@ function emitElement(el: AstroElement, ctx: EmitContext): string {
 		: "";
 
 	const attrs = emitAttrs(el.attrs, /* skipSlot */ false, /* skipDirectives */ true);
-	const open = `<${el.name}${attrs}`;
+	const scopeAttr = scopeAttrFor(ctx);
+	const open = `<${el.name}${attrs}${scopeAttr}`;
 
 	if (el.selfClosing || VOID_HTML_ELEMENTS.has(el.name.toLowerCase())) {
 		return `${open}/>`;
 	}
-	const children = emitChildren(el.children, ctx.slotsRef);
+	const children = emitChildren(el.children, ctx.slotsRef, ctx);
 	return `${open}>${definePrefix}${children}</${el.name}>`;
+}
+
+/**
+ * Emit a `<style>` element. Scripts and other raw-text elements pass
+ * through the normal text-child path, but `<style>` is special:
+ *
+ *   - `<style is:global>` — pass through as-is, dropping the directive.
+ *   - `<style>` — extract CSS, run through `scopeCss`, emit with the
+ *     same hash as the data attribute applied to surrounding elements.
+ *
+ * In both cases the output is a literal `<style>` tag in the HTML
+ * stream — no runtime template interpolation, so the CSS is opaque to
+ * the runtime's value flatteners.
+ */
+function emitStyleElement(
+	el: AstroElement,
+	ctx: EmitContext,
+	directives: CollectedDirectives,
+): string {
+	const css = el.children.length === 0 ? "" : (el.children[0] as { value: string }).value;
+	const attrsHtml = emitAttrs(el.attrs, /* skipSlot */ false, /* skipDirectives */ true);
+	if (directives.isGlobal || ctx.scopeHash === null) {
+		return `<style${attrsHtml}>${escapeTemplateLiteral(css)}</style>`;
+	}
+	const scoped = scopeCss(css, `[data-aflare-h="${ctx.scopeHash}"]`);
+	return `<style${attrsHtml}>${escapeTemplateLiteral(scoped)}</style>`;
+}
+
+function scopeAttrFor(ctx: EmitContext): string {
+	if (ctx.scopeHash === null) return "";
+	return ` data-aflare-h="${ctx.scopeHash}"`;
 }
 
 function emitComponent(node: AstroComponent, ctx: EmitContext): string {
 	const partitioned = partitionSlots(node.children);
 	const propsExpr = emitPropsExpression(node.attrs);
-	const slotsExpr = emitSlotsExpression(partitioned, ctx.slotsRef);
+	const slotsExpr = emitSlotsExpression(partitioned, ctx);
 	const directives = collectDirectives(node.attrs);
 	const callExpr = `await $renderComponent(${node.name}, ${propsExpr}, ${slotsExpr})`;
 	if (directives.client) {
@@ -397,13 +478,13 @@ function emitComponent(node: AstroComponent, ctx: EmitContext): string {
 }
 
 function emitFragment(node: AstroFragmentNode, ctx: EmitContext): string {
-	return emitChildren(node.children, ctx.slotsRef);
+	return emitChildren(node.children, ctx.slotsRef, ctx);
 }
 
 function emitSlot(node: AstroSlot, ctx: EmitContext): string {
 	const fallback =
 		node.children.length > 0
-			? `, async () => $render\`${emitChildren(node.children, ctx.slotsRef)}\``
+			? `, async () => $render\`${emitChildren(node.children, ctx.slotsRef, ctx)}\``
 			: "";
 	const callExpr = `await $renderSlot(${ctx.slotsRef}, ${JSON.stringify(node.name)}${fallback})`;
 	return interpolate(callExpr);
@@ -510,24 +591,22 @@ function childSlotName(child: AstroNode): string | null {
 	return null;
 }
 
-function emitSlotsExpression(slots: PartitionedSlots, slotsRef: string): string {
+function emitSlotsExpression(slots: PartitionedSlots, ctx: EmitContext): string {
 	const entries: string[] = [];
 	if (slots.default.length > 0) {
 		entries.push(
-			`default: async () => $render\`${emitChildrenStrippingSlot(slots.default, slotsRef)}\``,
+			`default: async () => $render\`${emitChildrenStrippingSlot(slots.default, ctx)}\``,
 		);
 	}
 	for (const [name, nodes] of slots.named) {
-		entries.push(
-			`${jsKey(name)}: async () => $render\`${emitChildrenStrippingSlot(nodes, slotsRef)}\``,
-		);
+		entries.push(`${jsKey(name)}: async () => $render\`${emitChildrenStrippingSlot(nodes, ctx)}\``);
 	}
 	if (entries.length === 0) return "{}";
 	return `{ ${entries.join(", ")} }`;
 }
 
-function emitChildrenStrippingSlot(nodes: readonly AstroNode[], slotsRef: string): string {
-	const ctx: EmitContext = { slotsRef };
+function emitChildrenStrippingSlot(nodes: readonly AstroNode[], parentCtx: EmitContext): string {
+	const ctx: EmitContext = parentCtx;
 	let out = "";
 	for (const node of nodes) {
 		// Drop the `slot=` attribute on direct slot children — it's been routed.
@@ -552,6 +631,7 @@ interface CollectedDirectives {
 	setHtml: string | null;
 	defineVars: string | null;
 	isRaw: boolean;
+	isGlobal: boolean;
 	client: { mode: string; mediaQuery?: string } | null;
 }
 
@@ -560,6 +640,7 @@ function collectDirectives(attrs: readonly AstroAttribute[]): CollectedDirective
 		setHtml: null,
 		defineVars: null,
 		isRaw: false,
+		isGlobal: false,
 		client: null,
 	};
 	for (const attr of attrs) {
@@ -571,6 +652,8 @@ function collectDirectives(attrs: readonly AstroAttribute[]): CollectedDirective
 			out.defineVars = dir.expression;
 		} else if (dir.name === "is:raw") {
 			out.isRaw = true;
+		} else if (dir.name === "is:global") {
+			out.isGlobal = true;
 		} else if (CLIENT_DIRECTIVE_MODES.has(dir.name)) {
 			const mode = dir.name.slice("client:".length);
 			out.client = {

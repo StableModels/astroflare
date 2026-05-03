@@ -145,6 +145,79 @@ describe("e2e: source .astro → compiled module → HTML", () => {
 		const src = "---\nconst raw = Astro.props.raw;\n---\n<p>{(raw as string).toUpperCase()}</p>";
 		expect(await render(src, { raw: "hi" })).toBe("<p>HI</p>");
 	});
+
+	// ---- Scoped CSS (Phase 12) -----------------------------------------------
+
+	it("scopes a <style> block — element gets data-aflare-h", async () => {
+		const src = "<p>hi</p><style>p { color: red }</style>";
+		const out = await render(src);
+		expect(out).toMatch(/<p data-aflare-h="[a-f0-9]{8}">hi<\/p>/);
+		expect(out).toMatch(/<style>p\[data-aflare-h="[a-f0-9]{8}"\] \{ color: red \}<\/style>/);
+	});
+
+	it("the scoped attribute on the element matches the selector hash", async () => {
+		const src = "<p>hi</p><style>p { color: red }</style>";
+		const out = await render(src);
+		const elMatch = out.match(/<p data-aflare-h="([a-f0-9]{8})">/);
+		const cssMatch = out.match(/p\[data-aflare-h="([a-f0-9]{8})"\] /);
+		expect(elMatch?.[1]).toBeDefined();
+		expect(elMatch?.[1]).toBe(cssMatch?.[1]);
+	});
+
+	it("preserves <style is:global> verbatim and skips per-element attrs", async () => {
+		const src = "<p>hi</p><style is:global>p { color: red }</style>";
+		const out = await render(src);
+		expect(out).toContain("<p>hi</p>");
+		expect(out).not.toContain("data-aflare-h");
+		expect(out).toContain("<style>p { color: red }</style>");
+	});
+
+	it("preserves <script> contents verbatim (raw-text element)", async () => {
+		const src = "<script>const x = { a: 1 };</script>";
+		const out = await render(src);
+		expect(out).toBe("<script>const x = { a: 1 };</script>");
+	});
+
+	// ---- import.meta.env substitution (Phase 12) -----------------------------
+
+	it("substitutes import.meta.env.X with values from config.env", async () => {
+		const src = "---\nconst mode = import.meta.env.MODE;\n---\n<p>{mode}</p>";
+		const { code } = await compileAstro(src, {
+			runtimeImport: RUNTIME_URL,
+			env: { MODE: "production" },
+		});
+		// The substitution happens at TS-strip time; verify the literal made
+		// it into the output (not just whichever pre-strip access shape).
+		expect(code).toContain('"production"');
+		expect(code).not.toContain("import.meta.env.MODE");
+	});
+
+	it("renders pages with substituted env vars correctly", async () => {
+		// End-to-end via the test runner: compile with env, run, expect
+		// the substituted value in the HTML.
+		const src = "---\nconst v = import.meta.env.MY_KEY;\n---\n<p>{v}</p>";
+		const { code, errors } = await compileAstro(src, {
+			runtimeImport: RUNTIME_URL,
+			env: { MY_KEY: "hello-env" },
+		});
+		if (errors.length) throw new Error(JSON.stringify(errors));
+		const result = await executor.runOnce<unknown>(
+			{
+				mainModule: "main.js",
+				modules: {
+					"main.js":
+						"export default async (input) => {" +
+						"  const { props, slots } = input;" +
+						'  const Component = (await import("./_inner.js")).default;' +
+						"  return await Component({ Astro: { props }, ...props }, slots);" +
+						"};",
+					"_inner.js": code,
+				},
+			},
+			{ props: {}, slots: {} },
+		);
+		expect(await renderToString(result)).toContain("hello-env");
+	});
 });
 
 // ---------------------------------------------------------------------------

@@ -43,6 +43,16 @@ import type {
 } from "./ast.js";
 import { locate } from "./ast.js";
 
+/**
+ * Elements whose content is true raw text — CSS braces, JS strings, and
+ * literal markup-like sequences pass through verbatim until the matching
+ * close tag. Limited to `<style>` and `<script>` because Astro convention
+ * lets users interpolate `{expr}` into `<title>` and `<textarea>` (HTML
+ * "escapable raw text" elements per spec, but Astro treats them as
+ * normal templating contexts).
+ */
+const RAW_TEXT_ELEMENTS = new Set(["style", "script"]);
+
 // Per HTML living standard.
 const VOID_HTML_ELEMENTS = new Set([
 	"area",
@@ -626,15 +636,77 @@ class Parser {
 		}
 
 		const isVoid = VOID_HTML_ELEMENTS.has(tagName.toLowerCase());
+		const isRawText = RAW_TEXT_ELEMENTS.has(tagName.toLowerCase());
 		let children: AstroNode[] = [];
 		if (!selfClosing && !isVoid) {
-			children = this.parseChildren(tagName);
-			if (!this.consumeClosingTag(tagName)) {
-				this.error(this.pos, `Unclosed tag <${tagName}>`);
+			if (isRawText) {
+				// `<style>` and `<script>` (and the other HTML raw-text elements)
+				// have content that's not parseable as Astro children — CSS
+				// braces, JS string literals, etc. must pass through verbatim.
+				// Scan forward to the matching closing tag and emit a single
+				// text node.
+				const contentStart = this.pos;
+				const contentEnd = this.findRawTextEnd(tagName);
+				children = [
+					{
+						type: "text",
+						value: this.source.slice(contentStart, contentEnd),
+						range: [contentStart, contentEnd],
+					},
+				];
+				this.pos = contentEnd;
+				if (!this.consumeClosingTag(tagName)) {
+					this.error(this.pos, `Unclosed tag <${tagName}>`);
+				}
+			} else {
+				children = this.parseChildren(tagName);
+				if (!this.consumeClosingTag(tagName)) {
+					this.error(this.pos, `Unclosed tag <${tagName}>`);
+				}
 			}
 		}
 		const range: Range = [start, this.pos];
 		return classifyElement(tagName, attrs, children, selfClosing || isVoid, range);
+	}
+
+	/**
+	 * Scan forward (case-insensitive) to the next `</tagName>`. Returns the
+	 * offset of the `<` so the caller can slice [contentStart, here] for
+	 * the raw content and consume the close tag separately.
+	 */
+	private findRawTextEnd(tagName: string): number {
+		const lower = tagName.toLowerCase();
+		let i = this.pos;
+		while (i < this.source.length) {
+			if (this.source.charCodeAt(i) !== CC_LT) {
+				i++;
+				continue;
+			}
+			if (this.source.charCodeAt(i + 1) !== CC_SLASH) {
+				i++;
+				continue;
+			}
+			// Match `</tagName` case-insensitively.
+			let ok = true;
+			for (let j = 0; j < lower.length; j++) {
+				const ch = this.source.charCodeAt(i + 2 + j);
+				const target = lower.charCodeAt(j);
+				if (ch === target) continue;
+				// Case-insensitive: allow upper/lower mismatch on letters.
+				if (ch >= 0x41 && ch <= 0x5a && ch + 0x20 === target) continue;
+				ok = false;
+				break;
+			}
+			if (!ok) {
+				i++;
+				continue;
+			}
+			// Whatever follows must be `>` or whitespace then `>`.
+			const after = this.source.charCodeAt(i + 2 + lower.length);
+			if (after === CC_GT || isWhitespace(after)) return i;
+			i++;
+		}
+		return this.source.length;
 	}
 
 	private parseFragmentShorthand(): AstroFragmentNode {
