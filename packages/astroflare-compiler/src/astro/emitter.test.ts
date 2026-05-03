@@ -220,6 +220,47 @@ describe("emitter — directives", () => {
 	});
 });
 
+describe("emitter — is:raw directive (Phase 19)", () => {
+	it("emits children of an is:raw element as literal text", () => {
+		const code = compile("<pre is:raw>{x} is not interpolated</pre>");
+		// The expression must not be passed to the template literal
+		// interpolation slot (`${...}`); it must show up as the literal
+		// `{x}` in the rendered HTML.
+		expect(code).toContain("<pre>{x} is not interpolated</pre>");
+		expect(code).not.toContain("${x}");
+	});
+
+	it("strips the is:raw directive from the rendered tag", () => {
+		const code = compile("<pre is:raw>literal {x}</pre>");
+		expect(code).not.toContain("is:raw");
+	});
+
+	it("does not compile child Astro components when inside is:raw", () => {
+		const code = compile("<div is:raw><Counter client:load /></div>");
+		// `<Counter />` inside `is:raw` should appear as-is, not become
+		// a `$renderComponent` call or a `$island(...)` wrapper.
+		expect(code).toContain("<Counter client:load");
+		expect(code).not.toContain("$renderComponent(Counter");
+		expect(code).not.toContain("$island(");
+	});
+
+	it("preserves nested element markup inside is:raw", () => {
+		const code = compile('<code is:raw><span class="k">if</span> truthy <em>x</em></code>');
+		expect(code).toContain('<code><span class="k">if</span> truthy <em>x</em></code>');
+	});
+
+	it("emits attribute expressions inside is:raw children as literal {expr}", () => {
+		const code = compile("<pre is:raw><span class={cls}>x</span></pre>");
+		// The attribute is preserved in {expr} form, not interpolated.
+		expect(code).toContain("<span class={cls}>x</span>");
+	});
+
+	it("preserves comments inside is:raw verbatim", () => {
+		const code = compile("<pre is:raw><!-- {x} --></pre>");
+		expect(code).toContain("<pre><!-- {x} --></pre>");
+	});
+});
+
 describe("emitter — fragments and comments", () => {
 	it("Fragment flattens children with no wrapping element", () => {
 		const code = compile("<Fragment><p>a</p><p>b</p></Fragment>");

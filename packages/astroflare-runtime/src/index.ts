@@ -53,6 +53,16 @@ export {
 // uses to populate `Astro.currentLocale`; `getRelativeLocaleUrl` is
 // the user-facing link helper.
 export { deriveLocale, getRelativeLocaleUrl } from "./i18n.js";
+// Phase 19: dev/preview error overlay. Surfaces hydration + HMR
+// failures as a modal instead of a silent console.error. The string
+// form is auto-injected by the preview server so the overlay is
+// available before any user JS runs.
+export {
+	ERROR_OVERLAY_CLIENT_SOURCE,
+	showAstroflareError,
+	dismissAstroflareError,
+	type AflareErrorReport,
+} from "./error-overlay.js";
 // JSX runtime — re-exported so a `runtimeImport` URL pointing at this
 // entrypoint can supply `jsx`, `jsxs`, `jsxDEV`, and `Fragment` from a
 // single source. The MDX compiler post-processes its output to alias

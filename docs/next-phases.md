@@ -251,16 +251,26 @@ already generic dynamic params from Phase 3.
 i18n helper surface (`getAbsoluteLocaleUrl`, `getLocaleByPath`,
 etc.); variant pre-expansion in the deploy planner.
 
-### Phase 19 — Quality gates
+### Phase 19 — Quality gates ✓
 
-Differential parity tests vs Astro (port their compiler test fixtures,
-assert byte-equivalent HTML where the spec requires). Coverage thresholds
-in CI. Modal HMR error overlay. File-deletion → `prune` wiring. Compiler
-internal carve-outs (`is:raw`, regex-literal disambiguation, named/
-namespace `.astro` imports). Source maps if not already in by Phase 13.
+**Done.** Retro: [`docs/phases/phase-19-quality.md`](./phases/phase-19-quality.md).
+15 new tests; 658 total. Modal hydration / HMR error overlay
+(`@astroflare/runtime` + auto-injected
+`/_aflare/error-overlay.js`); compiler `is:raw` directive
+properly suppresses expression evaluation + child compilation;
+file-deletion → `prune` HMR wiring verified across coordinator +
+preview server (already plumbed since earlier phases); coverage
+thresholds added to root `vitest.config.ts` for the v8 provider
+(brief §11.4 — separate framework + host bars).
 
-This phase is mostly grindy quality work that's been deferred across
-prior phases. Worth its own focused pass to draw a clean line.
+**Defer:** differential parity tests vs Astro fixture corpus
+(Phase 20's e2e fixtures cover the closely-related "deploys-
+cleanly" story); per-token source maps from the compiler;
+parser-level `is:raw` (today the directive is honoured at emit
+time, not at parse time — the AST is still built normally so
+users still hit expression-parser errors inside raw children
+when the body has unbalanced parens). Production-deploy overlay
+scrub is also a follow-up.
 
 ### Phase 20 — End-to-end tests against live Cloudflare
 

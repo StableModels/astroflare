@@ -464,8 +464,82 @@ function emitElement(el: AstroElement, ctx: EmitContext): string {
 	if (el.selfClosing || VOID_HTML_ELEMENTS.has(el.name.toLowerCase())) {
 		return `${open}/>`;
 	}
-	const children = emitChildren(el.children, ctx.slotsRef, ctx);
+	// `is:raw` (Phase 19): emit children as literal text — no expression
+	// evaluation, no nested element / component compilation. Useful for
+	// embedding other template engines or showing literal `{` / `}` in
+	// markup without escaping. The directive is lifted off the surrounding
+	// tag (it's compile-time-only), so the rendered HTML stays clean.
+	const children = directives.isRaw
+		? emitRawChildren(el.children)
+		: emitChildren(el.children, ctx.slotsRef, ctx);
 	return `${open}>${definePrefix}${children}</${el.name}>`;
+}
+
+/**
+ * Phase 19 — emit children of an `is:raw` element. Walks the AST,
+ * reconstructing source text from each child node:
+ *
+ *   - text → escaped (template-literal-safe)
+ *   - expression → re-emitted as `{...}` (literal source)
+ *   - element / component / fragment / slot → re-emitted as their
+ *     source HTML form (recursively rawified)
+ *
+ * The contract is observational: what a developer typed inside an
+ * `is:raw` element is what the browser sees, modulo template-literal
+ * escaping that the runtime handles transparently. No compilation,
+ * no interpolation, no slot resolution.
+ */
+function emitRawChildren(nodes: readonly AstroNode[]): string {
+	let out = "";
+	for (const node of nodes) {
+		out += emitRawNode(node);
+	}
+	return out;
+}
+
+function emitRawNode(node: AstroNode): string {
+	switch (node.type) {
+		case "text":
+			return escapeTemplateLiteral(node.value);
+		case "expression":
+			return escapeTemplateLiteral(`{${node.expression}}`);
+		case "comment":
+			return `<!--${escapeTemplateLiteral(node.value)}-->`;
+		case "doctype":
+			return `<!doctype ${node.value}>`;
+		case "element":
+		case "component": {
+			const attrs = node.attrs
+				.map((a) => {
+					switch (a.type) {
+						case "directive":
+							return a.expression == null ? ` ${a.name}` : ` ${a.name}={${a.expression}}`;
+						case "expression":
+							return ` ${a.name}={${a.expression}}`;
+						case "shorthand":
+							return ` {${a.expression}}`;
+						case "spread":
+							return ` {...${a.expression}}`;
+						case "template":
+							return ` ${a.name}={\`${a.expression}\`}`;
+						case "static":
+							if (a.boolean) return ` ${a.name}`;
+							return ` ${a.name}="${escapeTemplateLiteral(a.value)}"`;
+					}
+				})
+				.join("");
+			if (node.selfClosing) return `<${node.name}${attrs}/>`;
+			const inner = emitRawChildren(node.children);
+			return `<${node.name}${attrs}>${inner}</${node.name}>`;
+		}
+		case "fragment":
+			return emitRawChildren(node.children);
+		case "slot":
+			// Inside is:raw, slots are inert — emit their fallback children
+			// as raw text. This mirrors what authors would write to "show
+			// what a slot looks like" in docs.
+			return emitRawChildren(node.children);
+	}
 }
 
 /**

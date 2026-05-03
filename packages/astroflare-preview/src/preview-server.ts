@@ -49,6 +49,7 @@ import {
 	contentIdWithConfig,
 } from "@astroflare/core";
 import {
+	ERROR_OVERLAY_CLIENT_SOURCE,
 	HMR_CLIENT_SOURCE,
 	HYDRATION_CLIENT_SOURCE,
 	PREFETCH_CLIENT_SOURCE,
@@ -98,6 +99,9 @@ const ISLAND_PATH = "/_aflare/island";
 // from in-memory string constants.
 const VIEW_TRANSITIONS_PATH = "/_aflare/view-transitions.js";
 const PREFETCH_PATH = "/_aflare/prefetch.js";
+// Phase 19 error overlay — auto-injected on every preview HTML
+// response so hydration/HMR errors render in a modal.
+const ERROR_OVERLAY_PATH = "/_aflare/error-overlay.js";
 const PAGES_PREFIX = "/src/pages/";
 
 const IMAGE_CONTENT_TYPES: Record<string, string> = {
@@ -227,6 +231,11 @@ export function createPreviewServer(opts: PreviewServerOptions): PreviewServer {
 				if (url.pathname === PREFETCH_PATH) {
 					return serveStaticClient(PREFETCH_CLIENT_SOURCE);
 				}
+				// Phase 19 — modal error overlay. Auto-injected on every
+				// preview HTML response (see `injectErrorOverlay` below).
+				if (url.pathname === ERROR_OVERLAY_PATH) {
+					return serveStaticClient(ERROR_OVERLAY_CLIENT_SOURCE);
+				}
 
 				// Island component bundles (Phase 16). The compiler emits
 				// `component-url="/_aflare/island?path=/components/Counter.tsx"`;
@@ -305,6 +314,9 @@ export function createPreviewServer(opts: PreviewServerOptions): PreviewServer {
 						return buildResponseFromResult(result);
 					}
 					let html = result.html;
+					// Phase 19: error overlay first (so it's defined before
+					// hydration tries to call into it).
+					html = injectErrorOverlayScript(html);
 					// Inject hydration runtime first (when the rendered HTML
 					// has at least one `<astro-island>`), then HMR. Order is
 					// only cosmetic — both are `<script type="module">` and
@@ -530,6 +542,25 @@ async function serveIslandModule(host: Host, path: string): Promise<Response> {
  */
 function injectHydrationScript(html: string): string {
 	const tag = `<script type="module" src="${HYDRATION_PATH}"></script>`;
+	const headIdx = html.toLowerCase().lastIndexOf("</head>");
+	if (headIdx >= 0) {
+		return html.slice(0, headIdx) + tag + html.slice(headIdx);
+	}
+	const bodyIdx = html.toLowerCase().lastIndexOf("</body>");
+	if (bodyIdx >= 0) {
+		return html.slice(0, bodyIdx) + tag + html.slice(bodyIdx);
+	}
+	return html + tag;
+}
+
+/**
+ * Phase 19: insert the modal error-overlay script into the page so
+ * `window.__aflareShowError({...})` is available before any user JS
+ * (including hydration) runs. Inserts at `</head>` close, falling
+ * back to `</body>` close, then append.
+ */
+function injectErrorOverlayScript(html: string): string {
+	const tag = `<script src="${ERROR_OVERLAY_PATH}"></script>`;
 	const headIdx = html.toLowerCase().lastIndexOf("</head>");
 	if (headIdx >= 0) {
 		return html.slice(0, headIdx) + tag + html.slice(headIdx);

@@ -67,11 +67,18 @@ async function fixture(
 	return f;
 }
 
-/** Strip the injected `<script type="module">…</script>` so tests can compare
- * against the raw rendered HTML the user authored. The HMR injection itself is
- * verified separately under "preview server: HMR script injection". */
+/** Strip the injected `<script type="module">…</script>` plus the
+ * Phase 19 error-overlay `<script src="/_aflare/error-overlay.js">`
+ * tag, so tests can compare against the raw rendered HTML the user
+ * authored. The HMR / overlay injections are verified separately. */
 function stripHmr(html: string): string {
-	return html.replace(/<script type="module">[\s\S]*?<\/script>/g, "");
+	return html
+		.replace(/<script type="module">[\s\S]*?<\/script>/g, "")
+		.replace(/<script src="\/_aflare\/error-overlay\.js"><\/script>/g, "")
+		.replace(
+			/<script type="module" src="\/_aflare\/(hydration|view-transitions|prefetch)\.js"><\/script>/g,
+			"",
+		);
 }
 
 /** `await response.text()`, with the HMR script stripped — matches the
@@ -482,6 +489,33 @@ describe("preview server: i18n", () => {
 // ---------------------------------------------------------------------------
 // View transitions + prefetch (Phase 17)
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Error overlay (Phase 19)
+// ---------------------------------------------------------------------------
+
+describe("preview server: error overlay", () => {
+	it("serves the error overlay script at /_aflare/error-overlay.js", async () => {
+		const { server } = await fixture({
+			"/src/pages/index.astro": "<p>x</p>",
+		});
+		const r = await server.fetch(new Request("https://example.com/_aflare/error-overlay.js"));
+		expect(r.status).toBe(200);
+		expect(r.headers.get("content-type")).toContain("application/javascript");
+		const body = await r.text();
+		expect(body).toContain("__aflareShowError");
+		expect(body).toContain("aflare-error-overlay");
+	});
+
+	it("auto-injects the overlay script tag on every HTML response", async () => {
+		const { server } = await fixture({
+			"/src/pages/index.astro": "<html><head></head><body><p>x</p></body></html>",
+		});
+		const r = await server.fetch(new Request("https://example.com/"));
+		const body = await r.text();
+		expect(body).toContain('src="/_aflare/error-overlay.js"');
+	});
+});
 
 describe("preview server: view-transitions + prefetch routes", () => {
 	it("serves the view-transitions client at /_aflare/view-transitions.js", async () => {

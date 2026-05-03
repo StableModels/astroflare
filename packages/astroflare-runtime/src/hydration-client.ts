@@ -158,15 +158,35 @@ function buildIslandClass(): CustomElementConstructor {
 				const mod: IslandModule = (await import(url)) as IslandModule;
 				const mount = mod.mount ?? mod.default;
 				if (typeof mount !== "function") {
-					console.error(`[astroflare] island module at ${url} has no \`mount\` or default export`);
+					const message = `island module at ${url} has no \`mount\` or default export`;
+					console.error(`[astroflare] ${message}`);
+					reportHydrationError("Island has no mount function", url, message);
 					return;
 				}
 				await mount(this, props);
 			} catch (err) {
 				console.error("[astroflare] island hydration failed", url, err);
+				reportHydrationError(
+					"Island hydration failed",
+					url,
+					err instanceof Error ? `${err.message}\n${err.stack ?? ""}` : String(err),
+				);
 			}
 		}
 	};
+}
+
+/**
+ * Report a hydration error via the modal overlay (Phase 19) when one
+ * is available. Falls back to a no-op when running outside a browser
+ * or before the overlay script has loaded — the `console.error`
+ * above stays as the always-available signal.
+ */
+function reportHydrationError(title: string, source: string, detail: string): void {
+	const w = (typeof window !== "undefined" ? window : null) as unknown as {
+		__aflareShowError?: (r: { title: string; source?: string; detail?: string }) => void;
+	} | null;
+	w?.__aflareShowError?.({ title, source, detail });
 }
 
 function parseProps(json: string | null | undefined): Record<string, unknown> {
@@ -284,12 +304,20 @@ class AstroIslandElement extends HTMLElement {
 			const mod = await import(url);
 			const mount = mod.mount || mod.default;
 			if (typeof mount !== "function") {
-				console.error("[astroflare] island module at", url, "has no mount or default export");
+				const msg = "island module at " + url + " has no mount or default export";
+				console.error("[astroflare]", msg);
+				if (typeof window.__aflareShowError === "function") {
+					window.__aflareShowError({ title: "Island has no mount function", source: url, detail: msg });
+				}
 				return;
 			}
 			await mount(this, props);
 		} catch (err) {
 			console.error("[astroflare] island hydration failed", url, err);
+			if (typeof window.__aflareShowError === "function") {
+				const detail = err && err.stack ? err.message + "\\n" + err.stack : String(err);
+				window.__aflareShowError({ title: "Island hydration failed", source: url, detail });
+			}
 		}
 	}
 }

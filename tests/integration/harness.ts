@@ -23,6 +23,8 @@ import RUNTIME_COOKIES_SRC from "../../packages/astroflare-runtime/dist/cookies.
 // @ts-expect-error — Phase 15a: runtime/index.js re-exports env.js, so it
 // has to be present in the module map.
 import RUNTIME_ENV_SRC from "../../packages/astroflare-runtime/dist/env.js?raw";
+// @ts-expect-error — Phase 19: runtime/index.js re-exports error-overlay.
+import RUNTIME_ERROR_OVERLAY_SRC from "../../packages/astroflare-runtime/dist/error-overlay.js?raw";
 // @ts-expect-error
 import RUNTIME_HMR_SRC from "../../packages/astroflare-runtime/dist/hmr-client.js?raw";
 // @ts-expect-error — Phase 16: runtime/index.js re-exports hydration-client.
@@ -62,6 +64,7 @@ setProjectWorkerRuntime({
 	"runtime/rss.js": RUNTIME_RSS_SRC as string,
 	"runtime/sitemap.js": RUNTIME_SITEMAP_SRC as string,
 	"runtime/i18n.js": RUNTIME_I18N_SRC as string,
+	"runtime/error-overlay.js": RUNTIME_ERROR_OVERLAY_SRC as string,
 });
 
 export {
