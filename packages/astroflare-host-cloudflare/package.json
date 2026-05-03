@@ -9,10 +9,6 @@
     ".": {
       "types": "./src/index.ts",
       "default": "./src/index.ts"
-    },
-    "./project-worker": {
-      "types": "./src/project-worker.ts",
-      "default": "./src/project-worker.ts"
     }
   },
   "scripts": {

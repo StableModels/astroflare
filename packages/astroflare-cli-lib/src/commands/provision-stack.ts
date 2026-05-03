@@ -50,12 +50,16 @@ export interface ProvisionStackInput {
 
 const DEFAULT_NAME_PATTERN = (name: string, sha7: string): string => `aflare-stack-${name}-${sha7}`;
 
-const COORDINATOR_CLASS = "CoordinatorDurableObject";
-const HMR_CLASS = "HmrDurableObject";
-
 /**
  * Idempotent stack provisioning. Re-runs check existing state and
  * short-circuit (matches `provisionFixture`).
+ *
+ * Phase 26b finalization: provisions the *reference deploy host*
+ * worker (`tests/e2e/fixtures/deploy-host-ref`). Astroflare ships
+ * zero canonical DOs and zero canonical worker entrypoints — the
+ * "stack" is just the host application worker the user deploys.
+ * Bindings: one R2 bucket (`SITE_BUCKET`) + an optional
+ * `SITE_PREFIX` env var. No DO migrations.
  */
 export async function provisionStack(input: ProvisionStackInput): Promise<StackState> {
 	const namePattern = input.namePattern ?? DEFAULT_NAME_PATTERN;
@@ -69,31 +73,14 @@ export async function provisionStack(input: ProvisionStackInput): Promise<StackS
 
 	await input.client.createR2Bucket(bucketName);
 
-	// First-deploy migrations register the DO classes. SQLite-backed
-	// DOs match what the framework's Coordinator + Hibernating WS DOs
-	// assume; `new_sqlite_classes` works on both free + paid plans.
-	// Re-provisioning with `force: true` supplies a null migration —
-	// Cloudflare treats that as a no-op when the classes already exist.
-	const migrations = existing ? null : { new_sqlite_classes: [COORDINATOR_CLASS, HMR_CLASS] };
-
 	await input.client.uploadWorkerWithBindings({
 		name: workerName,
 		body: input.stackWorkerBundle,
 		bindings: [
-			{ type: "r2_bucket", name: "FILES", bucket_name: bucketName },
-			{
-				type: "durable_object_namespace",
-				name: "COORDINATOR_DO",
-				class_name: COORDINATOR_CLASS,
-			},
-			{
-				type: "durable_object_namespace",
-				name: "HMR_DO",
-				class_name: HMR_CLASS,
-			},
+			{ type: "r2_bucket", name: "SITE_BUCKET", bucket_name: bucketName },
 			{ type: "secret_text", name: "DEPLOY_TOKEN", text: deployToken },
 		],
-		migrations,
+		migrations: null,
 	});
 	await input.client.enableWorkerSubdomain(workerName);
 
@@ -171,16 +158,19 @@ export async function destroyStack(input: DestroyStackInput): Promise<DestroySta
 	return {
 		deletedWorker: state.workerName,
 		deletedBucket: state.bucketName,
-		deletedDOs: [COORDINATOR_CLASS, HMR_CLASS],
+		deletedDOs: [],
 	};
 }
 
-/** Read the pre-built stack-worker bundle from disk. */
+/**
+ * Read the pre-built reference deploy-host bundle from disk. Built
+ * by `tests/e2e/fixtures/deploy-host-ref/build.mjs`.
+ */
 export function loadStackWorkerBundle(rootDir: string): string {
-	const path = `${rootDir}/packages/astroflare-host-cloudflare/dist/stack-worker.bundle.js`;
+	const path = `${rootDir}/tests/e2e/fixtures/deploy-host-ref/dist/worker.bundle.js`;
 	if (!existsSync(path)) {
 		throw new Error(
-			`stack-worker bundle missing at ${path} — run \`node scripts/build-stack-worker.mjs\``,
+			`deploy-host-ref bundle missing at ${path} — run \`node tests/e2e/fixtures/deploy-host-ref/build.mjs\``,
 		);
 	}
 	return readFileSync(path, "utf8");

@@ -31,7 +31,7 @@ afterEach(() => {
 });
 
 describe("provisionStack", () => {
-	it("creates the bucket, uploads the worker with bindings + DO migrations, returns state", async () => {
+	it("creates the bucket, uploads the host worker with R2 binding + DEPLOY_TOKEN, returns state", async () => {
 		const client = makeMockClient();
 		const state = await provisionStack({
 			rootDir,
@@ -46,29 +46,23 @@ describe("provisionStack", () => {
 		const uploadCall = (client.uploadWorkerWithBindings as ReturnType<typeof vi.fn>).mock
 			.calls[0]?.[0];
 		expect(uploadCall.name).toBe("aflare-stack-test-abc1234");
+		// Phase 26b: bindings are exactly the host's needs — one R2 bucket + DEPLOY_TOKEN.
 		expect(uploadCall.bindings).toContainEqual({
 			type: "r2_bucket",
-			name: "FILES",
+			name: "SITE_BUCKET",
 			bucket_name: "aflare-stack-test-abc1234-store",
-		});
-		expect(uploadCall.bindings).toContainEqual({
-			type: "durable_object_namespace",
-			name: "COORDINATOR_DO",
-			class_name: "CoordinatorDurableObject",
-		});
-		expect(uploadCall.bindings).toContainEqual({
-			type: "durable_object_namespace",
-			name: "HMR_DO",
-			class_name: "HmrDurableObject",
 		});
 		expect(uploadCall.bindings).toContainEqual({
 			type: "secret_text",
 			name: "DEPLOY_TOKEN",
 			text: "fixed-token",
 		});
-		expect(uploadCall.migrations).toEqual({
-			new_sqlite_classes: ["CoordinatorDurableObject", "HmrDurableObject"],
-		});
+		// Phase 26b: no Astroflare-owned DO classes — host's own DOs (if any)
+		// are registered by the host's wrangler, not by `provisionStack`.
+		expect(uploadCall.bindings).not.toContainEqual(
+			expect.objectContaining({ type: "durable_object_namespace" }),
+		);
+		expect(uploadCall.migrations).toBeNull();
 		expect(client.enableWorkerSubdomain).toHaveBeenCalledWith("aflare-stack-test-abc1234");
 		expect(state.workerName).toBe("aflare-stack-test-abc1234");
 		expect(state.bucketName).toBe("aflare-stack-test-abc1234-store");
@@ -114,7 +108,7 @@ describe("provisionStack", () => {
 		expect(client.uploadWorkerWithBindings).toHaveBeenCalledTimes(1);
 	});
 
-	it("force: true re-runs without DO migrations (already registered)", async () => {
+	it("force: true re-runs the upload (no migrations either way)", async () => {
 		const client = makeMockClient();
 		await provisionStack({
 			rootDir,
@@ -135,10 +129,8 @@ describe("provisionStack", () => {
 		});
 		const calls = (client.uploadWorkerWithBindings as ReturnType<typeof vi.fn>).mock.calls;
 		expect(calls).toHaveLength(2);
-		// First call brings new_sqlite_classes; second skips them.
-		expect(calls[0]?.[0].migrations).toEqual({
-			new_sqlite_classes: ["CoordinatorDurableObject", "HmrDurableObject"],
-		});
+		// Phase 26b: no DO migrations, ever.
+		expect(calls[0]?.[0].migrations).toBeNull();
 		expect(calls[1]?.[0].migrations).toBeNull();
 	});
 });

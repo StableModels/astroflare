@@ -9,14 +9,6 @@
     ".": {
       "types": "./src/index.ts",
       "default": "./src/index.ts"
-    },
-    "./deploy-server": {
-      "types": "./src/deploy-server.ts",
-      "default": "./src/deploy-server.ts"
-    },
-    "./artifact": {
-      "types": "./src/artifact.ts",
-      "default": "./src/artifact.ts"
     }
   },
   "scripts": {

@@ -36,10 +36,6 @@ export default defineWorkersProject({
 					// parser predates `worker_loaders` and ignores the field; the
 					// programmatic Miniflare option is wired through directly.
 					workerLoaders: { LOADER: {} },
-					// Hibernating HMR Durable Object (Phase 2.5e).
-					durableObjects: {
-						HMR_DO: { className: "HmrDurableObject" },
-					},
 				},
 			},
 		},

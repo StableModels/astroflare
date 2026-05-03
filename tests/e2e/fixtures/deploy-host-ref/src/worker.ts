@@ -6,7 +6,10 @@
  * optional `prefix` for multi-env / multi-site path layouts), pass to
  * `createSnapshotHandler`, return its `fetch`.
  *
- * Total LOC: ~15.
+ * Adds a small `/_aflare/host/info` diagnostic endpoint so the e2e
+ * harness can read the active snapshot hash without spinning up
+ * extra infrastructure. The `/_aflare/stack/info` URL is preserved
+ * as an alias for back-compat with existing specs.
  */
 
 import { createSnapshotHandler } from "@astroflare/build";
@@ -23,6 +26,23 @@ export default {
 			bucket: env.SITE_BUCKET,
 			prefix: env.SITE_PREFIX ?? "",
 		});
+
+		const url = new URL(req.url);
+		if (
+			url.pathname === "/_aflare/host/info" ||
+			url.pathname === "/_aflare/stack/info" ||
+			url.pathname === "/_aflare/deploy/status"
+		) {
+			const currentDeploy = await snapshots.current();
+			return Response.json({
+				stackWorker: true,
+				host: true,
+				workspaceId: "default",
+				currentDeploy,
+				prefix: env.SITE_PREFIX ?? "",
+			});
+		}
+
 		return createSnapshotHandler({ snapshots }).fetch(req);
 	},
 };

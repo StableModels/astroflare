@@ -1,11 +1,10 @@
 /**
- * Test worker entrypoint. Exports the framework's Durable Object classes so
- * vitest-pool-workers can wire up the bindings, and provides a placeholder
- * `fetch` handler (tests invoke framework code directly via
- * `runInDurableObject` / direct construction; the entrypoint is mostly
- * for the boot step).
+ * Test worker entrypoint for the Layer-B (workerd-pool) project.
+ *
+ * Phase 26b: no Astroflare-owned DO classes to register here. The
+ * project's tests exercise the framework's compiler + runtime + the
+ * Worker Loader binding directly; they don't need DO bindings.
  */
-export { HmrDurableObject } from "@astroflare/host-cloudflare";
 
 export default {
 	async fetch(_req: Request): Promise<Response> {

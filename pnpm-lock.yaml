@@ -101,9 +101,15 @@ importers:
 
   packages/astroflare-cli-lib:
     dependencies:
+      '@astroflare/build':
+        specifier: workspace:*
+        version: link:../astroflare-build
       '@astroflare/compiler':
         specifier: workspace:*
         version: link:../astroflare-compiler
+      '@astroflare/core':
+        specifier: workspace:*
+        version: link:../astroflare-core
       '@astroflare/runtime':
         specifier: workspace:*
         version: link:../astroflare-runtime
