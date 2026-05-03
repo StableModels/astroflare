@@ -20,19 +20,6 @@ export interface RuntimeEnv {
 	stackUrl: string;
 	deployHash: string | null;
 	fixtures: readonly string[];
-	/** URL of the preview-worker stack (Phase 25, Mode A). */
-	previewUrl: string;
-	/**
-	 * Bearer token authorising `/_aflare/file` writes on the preview
-	 * worker. Specs that exercise file uploads pin this in their
-	 * Authorization header.
-	 */
-	previewDeployToken: string;
-	/**
-	 * Names of fixtures whose source trees were uploaded to the
-	 * preview workspace.
-	 */
-	previewFixtures: readonly string[];
 }
 
 function statePath(): string {

@@ -14,4 +14,11 @@ export * from "./transport.js";
 export * from "./r2-storage.js";
 export * from "./coordinator-do.js";
 
+// Phase 26 — host-driven preview architecture: the new shape.
+export * from "./coordinator.js";
+export * from "./preview-handler.js";
+export * from "./accept-hmr-socket.js";
+export * from "./sql-cache.js";
+export * from "./runtime-bundled-executor.js";
+
 export const HOST_CLOUDFLARE_VERSION = "0.0.0";

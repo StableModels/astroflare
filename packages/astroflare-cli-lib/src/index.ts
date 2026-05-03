@@ -65,17 +65,9 @@ export {
 	type DeployedRoute,
 	type FixtureSource,
 } from "./commands/deploy-static.js";
-export {
-	provisionPreview,
-	destroyPreview,
-	loadPreviewWorkerBundle,
-	type ProvisionPreviewInput,
-	type DestroyPreviewInput,
-	type DestroyPreviewResult,
-} from "./commands/provision-preview.js";
-export {
-	uploadFiles,
-	type UploadFilesInput,
-	type UploadFilesResult,
-	type UploadedFile,
-} from "./commands/upload-files.js";
+// Mode A preview is host-driven now (Phase 26): hosts write their own
+// SiteDurableObject + worker using @astroflare/host-cloudflare's
+// `createCoordinator`, `createPreviewHandler`, `acceptHmrSocket`, and
+// `@astroflare/site-workspace`'s `WorkspaceSite`. The CLI no longer has
+// `provision-preview` / `destroy-preview` / `upload-files` verbs — Mode A
+// provisioning belongs in the host application's lifecycle, not in `af`.

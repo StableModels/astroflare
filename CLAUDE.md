@@ -60,13 +60,19 @@ pre-refactor shape until these land.
 Astroflare is an Astro-compatible content framework that runs on
 Cloudflare's isolate primitives. Two lifecycles:
 
-- **Mode A — Preview / in-Worker compile + render.** Sources live in
-  R2; `preview-worker.ts` reads source on demand, compiles via
-  `compileAstro`, spawns a Worker Loader isolate to render.
-  *Requires the paid Workers plan* (Worker Loader binding).
+- **Mode A — Preview / in-Worker compile + render.** Host-driven
+  (Phase 26). The host application writes a `SiteDurableObject` that
+  owns a `@cloudflare/shell` `Workspace` + Astroflare's coordinator
+  (`createCoordinator`) + the HMR endpoint. The host's worker calls
+  `createPreviewHandler` to render. Astroflare ships zero DOs and
+  zero entrypoints. *Requires the paid Workers plan* (Worker
+  Loader binding). Reference fixture:
+  [`tests/e2e/fixtures/preview-host-ref/`](tests/e2e/fixtures/preview-host-ref/).
 - **Mode B — Production deploy.** Compile + render runs locally
   (Node), HTML lands in R2 under `files/site/<hash>/`,
-  `stack-worker.ts` (18 KiB) atomically serves it.
+  `stack-worker.ts` (18 KiB) atomically serves it. *Pending Phase
+  26b refactor* — under the new shape this becomes
+  `createSnapshotHandler` + `R2Snapshots` (host-owned worker).
 
 Founding spec: [`docs/cloudflare-validation-plan.md`](docs/cloudflare-validation-plan.md).
 Dual-mode plan: [`docs/dual-mode-validation-plan.md`](docs/dual-mode-validation-plan.md).
@@ -82,12 +88,12 @@ Run everything: `pnpm test`. Run one project: `pnpm vitest run --project <name>`
 | A — Node | `packages/*/src/*.test.ts` | node | Pure framework logic. Fast (~ms). |
 | B — workerd | `tests/workerd/` | workerd via `@cloudflare/vitest-pool-workers` | Code that depends on the workerd runtime (Hibernating WS, sqlite DOs) but doesn't need the full framework wired. |
 | C — integration | `tests/integration/` | Miniflare via `@cloudflare/vitest-pool-workers` | Full project-worker assembly under Miniflare. R2 + DO + Worker Loader all real (mock-free). Pre-seeds R2 via `env.FILES.put`. |
-| D — e2e | `tests/e2e/` | node | **Real Cloudflare.** Provisions one stack + one preview stack per run via the `af` CLI library, deploys fixtures, asserts live behaviour. Skips when `CLOUDFLARE_*` env vars are absent. |
+| D — e2e | `tests/e2e/` | node | **Real Cloudflare.** Provisions one stack per run via the `af` CLI library, deploys fixtures, asserts live behaviour. Skips when `CLOUDFLARE_*` env vars are absent. Mode A e2e coverage is deferred until the reference host fixture (`tests/e2e/fixtures/preview-host-ref/`) gets bundling + globalSetup wiring. |
 
-E2e details: globalSetup provisions both stacks, runs `deployStaticBundle`
-for Mode B and `uploadFiles` for Mode A, then writes
+E2e details: globalSetup provisions a Mode B stack, runs
+`deployStaticBundle` for the discovered fixtures, then writes
 `tests/e2e/.state/<sha7>/runtime.json` for spec workers to read.
-Teardown destroys both stacks. Stale state from a credential-less run
+Teardown destroys the stack. Stale state from a credential-less run
 is wiped automatically.
 
 ## Cloudflare CLI (`af`)
@@ -99,19 +105,23 @@ and automated tests share a single registry under
 
 Run from source (no build step): `pnpm exec tsx packages/astroflare-cli/src/cli.ts <verb>`.
 
-Worker bundles must be pre-built with esbuild scripts:
-`node scripts/build-stack-worker.mjs` and
-`node scripts/build-preview-worker.mjs`. Both write to
-`packages/astroflare-host-cloudflare/dist/`.
+Stack worker bundle: `node scripts/build-stack-worker.mjs` →
+`packages/astroflare-host-cloudflare/dist/stack-worker.bundle.js`
+(Mode B). Mode A's preview-worker.ts and its build script are gone
+(Phase 26) — preview is host-driven.
 
 | Verb | Purpose |
 | --- | --- |
 | `provision-stack <n>` / `destroy-stack <n>` | Mode B stack: worker + R2 + DOs + DEPLOY_TOKEN. |
 | `deploy-static <fixture-dir> --stack <n>` | Compile + render fixture locally, ship HTML to R2, flip `/site/current`. |
-| `provision-preview <n>` / `destroy-preview <n>` | Mode A stack: same as above + Worker Loader binding. |
-| `upload-files <fixture-dir> --preview <n>` | Push fixture sources to the preview workspace via `POST /_aflare/file`. |
 | `init / deploy / status / rollback` | Project lifecycle (Mode B end-user surface). |
 | `list / inspect / health / gc / destroy / destroy-all` | Account-wide ops. |
+
+Mode A has no `af` verbs — preview is host-driven (Phase 26). Hosts
+integrate via `@astroflare/host-cloudflare` (`createCoordinator`,
+`createPreviewHandler`, `acceptHmrSocket`, `SqlCache`,
+`createWorkerdExecutor`) and `@astroflare/site-workspace`
+(`WorkspaceSite`).
 
 Credentials: `.dev.vars` holds `CLOUDFLARE_API_TOKEN` (git-crypt locally;
 GitHub repo secret in CI). `CLOUDFLARE_ACCOUNT_ID` is exported by

@@ -43,22 +43,17 @@ import { parseArgs } from "node:util";
 import {
 	type CloudflareClient,
 	deployStaticBundle,
-	destroyPreview,
 	destroyStack,
 	findOrphanWorkers,
 	inspectFixture,
 	listFixtures,
-	loadPreviewWorkerBundle,
 	loadStackWorkerBundle,
 	makeCloudflareClient,
 	provisionFixture,
-	provisionPreview,
 	provisionStack,
-	readPreviewState,
 	readStackState,
 	statusReport,
 	teardownFixture,
-	uploadFiles,
 } from "@astroflare/cli-lib";
 import { type DeployConfig, resolveConfig } from "./commands/deploy.js";
 import { cmdDeploy, cmdRollback, cmdStatus } from "./commands/deploy.js";
@@ -107,12 +102,6 @@ async function main(argv: readonly string[]): Promise<number> {
 			return runDestroyStack(rest);
 		case "deploy-static":
 			return runDeployStatic(rest);
-		case "provision-preview":
-			return runProvisionPreview(rest);
-		case "destroy-preview":
-			return runDestroyPreview(rest);
-		case "upload-files":
-			return runUploadFiles(rest);
 
 		case "--version":
 		case "-v":
@@ -462,97 +451,6 @@ async function runDeployStatic(argv: readonly string[]): Promise<number> {
 	}
 }
 
-async function runProvisionPreview(argv: readonly string[]): Promise<number> {
-	const [name] = argv;
-	if (!name) {
-		console.error("af provision-preview: missing <name> argument");
-		return 1;
-	}
-	try {
-		const ctx = opsCtx();
-		const bundle = loadPreviewWorkerBundle(ctx.rootDir);
-		const state = await provisionPreview({
-			rootDir: ctx.rootDir,
-			sha7: ctx.sha7,
-			name,
-			client: ctx.client,
-			previewWorkerBundle: bundle,
-		});
-		console.log(`provisioned preview ${state.workerName} → ${state.url}`);
-		console.log(`deploy token: ${state.deployToken}`);
-		return 0;
-	} catch (err) {
-		console.error(`af provision-preview: ${(err as Error).message}`);
-		return 1;
-	}
-}
-
-async function runDestroyPreview(argv: readonly string[]): Promise<number> {
-	const [name] = argv;
-	if (!name) {
-		console.error("af destroy-preview: missing <name> argument");
-		return 1;
-	}
-	try {
-		const ctx = opsCtx();
-		const r = await destroyPreview({
-			rootDir: ctx.rootDir,
-			sha7: ctx.sha7,
-			name,
-			client: ctx.client,
-		});
-		if (r.deletedWorker) {
-			console.log(`destroyed preview ${r.deletedWorker} + ${r.deletedBucket}`);
-		} else {
-			console.log(`no state for preview ${name}`);
-		}
-		return 0;
-	} catch (err) {
-		console.error(`af destroy-preview: ${(err as Error).message}`);
-		return 1;
-	}
-}
-
-async function runUploadFiles(argv: readonly string[]): Promise<number> {
-	const { values, positionals } = parseArgs({
-		args: [...argv],
-		options: {
-			preview: { type: "string" },
-		},
-		allowPositionals: true,
-	});
-	const fixtureDir = positionals[0];
-	if (!fixtureDir) {
-		console.error("af upload-files: missing <fixture-dir>");
-		return 1;
-	}
-	const previewName = values.preview as string | undefined;
-	if (!previewName) {
-		console.error("af upload-files: --preview <name> required");
-		return 1;
-	}
-	try {
-		const ctx = opsCtx();
-		const previewState = readPreviewState(ctx.rootDir, ctx.sha7, previewName);
-		if (!previewState) {
-			console.error(
-				`af upload-files: no preview '${previewName}' for sha=${ctx.sha7} — run 'af provision-preview ${previewName}' first`,
-			);
-			return 1;
-		}
-		const result = await uploadFiles({ preview: previewState, fixtureDir });
-		console.log(`uploaded ${result.uploaded.length} file(s) to ${previewState.url}`);
-		for (const f of result.uploaded) {
-			console.log(`  ${f.workspacePath}\t${f.bytes}b\t${f.hash ?? "-"}`);
-		}
-		for (const s of result.skipped) console.log(`skipped: ${s}`);
-		return 0;
-	} catch (err) {
-		console.error(`af upload-files: ${(err as Error).message}`);
-		return 1;
-	}
-}
-
 async function runGc(): Promise<number> {
 	try {
 		const ctx = opsCtx();
@@ -631,11 +529,10 @@ function printUsage(): void {
 			"                           --stack <n>  stack name (default: preview)",
 			"                           --name  <n>  route prefix (default: fixture dir basename)",
 			"",
-			"CLOUDFLARE PREVIEW (in-Worker compile + render + HMR)",
-			"  provision-preview <n>    Create a preview-worker stack with Worker Loader",
-			"  destroy-preview <n>      Destroy a preview stack + its R2 bucket",
-			"  upload-files <fixture>   Upload a fixture's source tree to a preview workspace",
-			"                           --preview <n>  preview-stack name (required)",
+			"CLOUDFLARE PREVIEW (Mode A)",
+			"  Preview is host-driven: no Astroflare CLI verbs (Phase 26).",
+			"  Hosts integrate via @astroflare/host-cloudflare's createCoordinator,",
+			"  createPreviewHandler, and acceptHmrSocket inside their own DO.",
 			"",
 			"CLOUDFLARE OPERATIONS",
 			"  provision <n>   Create a managed Worker + R2 bucket from fixture <n>",
