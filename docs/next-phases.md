@@ -2,11 +2,27 @@
 
 > **2026-05-03 update.** Phases 0–25 are done. Both Cloudflare
 > lifecycles (Mode A preview, Mode B deploy) are green on real
-> Cloudflare. **Active plan for Phases 25b/c + 26 lives in
-> [`dual-mode-validation-plan.md`](./dual-mode-validation-plan.md);
-> read that first.** The sections below are the historical Tier-1
-> backlog from the Phase 13 era — useful as a long-term carve-out
-> reference but not the immediate roadmap.
+> Cloudflare. **Active queue: 26 → 26b → 26c → 27 → 24b.** The
+> 26-series phases reshape Astroflare into a pure library and the
+> CLI into an agent-driven ops surface:
+>
+> - [`phases/phase-26-host-driven-preview.md`](./phases/phase-26-host-driven-preview.md)
+>   — Mode A library refactor (host owns SiteDO + worker)
+> - [`phases/phase-26b-host-driven-build.md`](./phases/phase-26b-host-driven-build.md)
+>   — Mode B library refactor (host owns deploy worker; Snapshot
+>   primitives with prefix-based path control)
+> - [`phases/phase-26c-agent-ops-cli.md`](./phases/phase-26c-agent-ops-cli.md)
+>   — `af` reshape for agent-driven ops: JSON-first output,
+>   structured errors, deep introspection (workspace listing,
+>   module graph, snapshot diff, HMR tail, doctor)
+>
+> The previously-planned Phase 26 (dual-mode parity) renumbers to
+> Phase 27 and runs against the new architecture; see
+> [`dual-mode-validation-plan.md`](./dual-mode-validation-plan.md)
+> for the parity sketch (still accurate at the test-shape level).
+> The sections below are the historical Tier-1 backlog from the
+> Phase 13 era — long-term carve-out reference, not the immediate
+> roadmap.
 
 Plan for the work after Phase 2.5b. Synthesizes carryovers from every prior
 retrospective and the brief's tier targets into a phased order that respects

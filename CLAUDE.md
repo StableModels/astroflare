@@ -15,6 +15,46 @@ that touched the code.
   describes — move on.
 - If something here is stale, fix it. Don't work around it.
 
+## Architectural North Star — framework, not app
+
+Astroflare is a **library**. The host brings everything stateful:
+filesystem, Durable Objects, Worker entrypoint, lifecycle.
+Astroflare receives capabilities (`Site`, `Executor`, `Cache`) and
+runs framework logic over them. It may ship convenience helpers,
+but never *is* the app.
+
+Concretely:
+- **Zero Astroflare-owned DO classes.** The host's DO holds state;
+  Astroflare provides factories the host calls inside its DO
+  constructor.
+- **Zero canonical worker entrypoint.** The host writes its
+  worker; Astroflare provides request-handler factories.
+- **Storage is host-supplied** through the narrow `Site` interface.
+  Filesystem adapters (e.g. `@astroflare/site-workspace`) live in
+  separate opt-in packages so the framework doesn't import
+  `@cloudflare/shell`, R2 bindings, etc.
+- **Astroflare-internal state** (module graph, compile cache)
+  lives in the host's sqlite under the `aflare_*` table prefix.
+
+Guardrail when adding code: if a change makes Astroflare own a
+binding, a DO, a worker entrypoint, or runtime lifecycle, push it
+across the boundary into the host. Mode B's **build** step is a
+library function (`buildSite`) the host invokes — exempt from the
+runtime-ownership rules; runs from anywhere (local, CI, in-Worker)
+via the `Executor` abstraction. Mode B's **serve** step is a worker,
+fully subject to the rules: Astroflare ships a request-handler
+factory and an `R2Snapshots` adapter, never the worker entrypoint;
+the host owns the worker, the storage binding, and the path layout.
+Active alignment efforts:
+[`docs/phases/phase-26-host-driven-preview.md`](docs/phases/phase-26-host-driven-preview.md)
+(Mode A library refactor),
+[`docs/phases/phase-26b-host-driven-build.md`](docs/phases/phase-26b-host-driven-build.md)
+(Mode B library refactor), and
+[`docs/phases/phase-26c-agent-ops-cli.md`](docs/phases/phase-26c-agent-ops-cli.md)
+(CLI reshape so the agent can drive + debug Astroflare on real
+Cloudflare end-to-end). Parts of the code still reflect the
+pre-refactor shape until these land.
+
 ## Project shape
 
 Astroflare is an Astro-compatible content framework that runs on
