@@ -36,10 +36,10 @@ Transport in `@astroflare/host-cloudflare`, `minimal-blog` fixture.
 - ~~`import.meta.env` substitution~~ ✓ Phase 12 / `astro:env` runtime → Phase 15
 - Image asset pipeline (`<Image>` / `<Picture>` + `ImageService` host capability + Cloudflare Images)
 - MDX (full JSX-in-markdown via `@mdx-js/mdx`)
-- Shiki syntax highlighting (rehype-shiki plugin)
-- User remark/rehype plugin chains via `astroflare.config.ts#markdown`
+- Shiki syntax highlighting (shipped as the one default; not user-pluggable for now)
 - Named exports from `.md` (`import { frontmatter } from "./post.md"`)
-- Content-layer custom loaders
+- Content-layer custom loaders (deferred)
+- User remark/rehype plugin chains (deferred — surfacing only if real demand appears)
 
 ### C — Host implementation (production deploys)
 - `@astroflare/host-cloudflare/src/storage.ts` — `@cloudflare/workspace`-backed Storage
@@ -52,12 +52,10 @@ Transport in `@astroflare/host-cloudflare`, `minimal-blog` fixture.
 ### D — Tier 2 (interactive sites)
 - Hydration runtime + `<astro-island>` custom element (`client:load|idle|visible|media|only`)
 - Per-island client bundling at deploy time
-- Per-framework integrations — each is its own phase:
-  - React / Preact (esbuild-wasm JSX)
-  - Vue (`@vue/compiler-sfc`)
-  - Svelte (`svelte/compiler`)
-  - Solid (Babel-on-WASM)
-  - Lit (no compile)
+- React integration only (esbuild-wasm JSX). **Vue / Svelte / Solid /
+  Lit are explicitly out of scope** — opinionated bet that React (and
+  by extension Preact, sharing the JSX surface) covers the audience
+  for the foreseeable. Re-evaluate after a real userbase surfaces.
 - View transitions
 - Prefetch
 - i18n routing
@@ -129,16 +127,17 @@ runtime `<Image>` / `<Picture>` components; preview-server
 **Defer:** Image format conversion (AVIF/WebP), DPR variants, blurred
 placeholders, per-token source maps.
 
-### Phase 14 — MDX + Shiki + plugin chain
+### Phase 14 — MDX + Shiki + named `.md` exports
 
-Full MDX via `@mdx-js/mdx`. Plugin chain wiring (`AstroflareConfig.markdown
-.{remarkPlugins, rehypePlugins}` → unified pipeline). Shiki integration
-as the canonical syntax highlighter. Named exports from `.md` (so
-`import { frontmatter } from "./post.md"` works — the inline bundler
-needs cross-module named-export hoisting, which is the bigger lift in
-this phase).
+Full MDX via `@mdx-js/mdx`. Shiki shipped as the one opinionated
+syntax-highlighter default — not user-pluggable for now. Named
+exports from `.md` (so `import { frontmatter } from "./post.md"`
+works) — the inline bundler needs cross-module named-export hoisting,
+which is the bigger architectural lift in this phase.
 
-**Defer:** MDX components-from-config, content-layer custom loaders.
+**Defer:** User remark/rehype plugin chains (deferred until a real
+user wants to override — keeping the markdown pipeline minimal until
+then). MDX components-from-config, content-layer custom loaders.
 
 ### Phase 15 — Host implementation (production deploys)
 
@@ -157,28 +156,26 @@ under 30 s on Miniflare.
 `EnvService` (Phase 12's env vars). They slot in but don't drive Phase 15's
 shape.
 
-### Phase 16 — Hydration runtime + first integration (React/Preact)
+### Phase 16 — Hydration runtime + React integration
 
 `<astro-island>` custom element implementing `client:load|idle|visible|media`.
 Per-island serialization protocol (props serialized as JSON in a `<script
 type="application/json">`, hydration script reads + boots the framework).
-React/Preact integration first because it's the smallest compile path
-(esbuild-wasm JSX) and the largest market.
+React integration via esbuild-wasm JSX — the smallest compile path
+and largest audience. Preact's runtime is JSX-compatible so it falls
+out for free for users who alias the JSX runtime.
 
 Per-island client bundling at deploy time (each island gets its own
 content-hashed JS file under `/site/<deployHash>/_islands/`). Deploy
 server serves them with appropriate cache-control.
 
-**Defer:** Other framework integrations (Phase 17–20), `client:only`
-(no SSR fallback).
+**Out of scope (deliberately):** Vue, Svelte, Solid, Lit. Opinionated
+bet that React covers the user base for now. Revisit only after real
+demand surfaces.
 
-### Phase 17–20 — Additional framework integrations
+**Defer:** `client:only` (no SSR fallback) — Phase 17 if needed.
 
-One per phase: Vue (`@vue/compiler-sfc`), Svelte (`svelte/compiler`),
-Solid (Babel-on-WASM), Lit (no compile). Each phase ≈ a day of compiler
-+ runtime adapter + smoke test under Phase 16's hydration runtime.
-
-### Phase 21 — Polish: view transitions, prefetch, RSS, sitemap
+### Phase 17 — Polish: view transitions, prefetch, RSS, sitemap
 
 Shorter phase combining the small Tier 2 tail. View transitions (Astro's
 `<ViewTransitions />` + browser API registration). Prefetch (link-hover
@@ -186,13 +183,13 @@ Shorter phase combining the small Tier 2 tail. View transitions (Astro's
 likewise. Each is small in isolation; they cluster naturally because
 they all sit on top of routing + content collections.
 
-### Phase 22 — i18n routing
+### Phase 18 — i18n routing
 
 `[lang]/...` route segments, locale-aware route rewriting, `Astro.currentLocale`,
 `getRelativeLocaleUrl`. Belongs late because it touches routing (which
 is otherwise stable) and the deploy planner (variant explosion).
 
-### Phase 23 — Quality gates
+### Phase 19 — Quality gates
 
 Differential parity tests vs Astro (port their compiler test fixtures,
 assert byte-equivalent HTML where the spec requires). Coverage thresholds
@@ -211,11 +208,11 @@ naturally touches them:
 - **Modal HMR overlay** — fits inside Phase 16 (when we touch the HMR
   client for hydration anyway)
 - ~~**`graphRemove → prune`** — fits inside Phase 10~~ ✓ Phase 10
-- ~~**Source maps** — fits inside Phase 13~~ ✓ Phase 13 (structural placeholder; per-token in Phase 23)
+- ~~**Source maps** — fits inside Phase 13~~ ✓ Phase 13 (structural placeholder; per-token in Phase 19)
 - **`is:raw` proper handling** — fits inside Phase 14 (MDX touches the
   compiler)
 - ~~**Regex literal disambiguation** — fits inside Phase 11~~ ✓ Phase 11
-- **Coverage thresholds** — fits inside Phase 23 (quality pass)
+- **Coverage thresholds** — fits inside Phase 19 (quality pass)
 - **Workflow-driven parallel render fan-out** — fits inside Phase 15
   (host implementation)
 
@@ -236,9 +233,9 @@ real users.
   collections, layout, scoped CSS, one image) is met.
 - **End of Phase 15:** real production deploys to Cloudflare possible.
   Acceptance §11.2/3 latency budgets measurable end-to-end.
-- **End of Phase 16:** first interactive site (React/Preact island in
-  an otherwise-static page) works end-to-end.
-- **End of Phase 23:** every acceptance criterion (§11.1–6) measurable
+- **End of Phase 16:** first interactive site (React island in an
+  otherwise-static page) works end-to-end.
+- **End of Phase 19:** every acceptance criterion (§11.1–6) measurable
   in CI with explicit gates.
 
 ## Order rationale (one paragraph)
@@ -249,9 +246,12 @@ Phase 10 (Tier 0 carryovers) closes a real gap — the brief lists
 Phase 11 (TS) is the highest-impact unlock for real-world adoption —
 most Astro projects are TS-first. Phase 12 (CSS) and Phase 13 (assets)
 make the framework usable for blogs / docs sites without major
-workarounds. Phase 14 (MDX + plugins) is content-site polish. Phase 15
-(host) is the moment we can deploy to production. Phase 16+ (Tier 2)
-adds interactivity. Phase 23 closes the quality loop. The dependency
-chain forces Phase 15 before any "ship to Cloudflare" claim and
-Phase 16 before any "real interactive site" claim — everything else
-is sequencing on user value.
+workarounds. Phase 14 (MDX + Shiki + named `.md` exports) is
+content-site polish; user-pluggable remark/rehype chains are
+deferred until real demand surfaces. Phase 15 (host) is the moment
+we can deploy to production. Phase 16 adds interactivity via
+React-only — Vue / Svelte / Solid / Lit are an opinionated cut.
+Phases 17–18 are Tier 2 polish + i18n. Phase 19 closes the quality
+loop. The dependency chain forces Phase 15 before any "ship to
+Cloudflare" claim and Phase 16 before any "real interactive site"
+claim — everything else is sequencing on user value.
