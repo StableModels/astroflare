@@ -274,6 +274,40 @@ users still hit expression-parser errors inside raw children
 when the body has unbalanced parens). Production-deploy overlay
 scrub is also a follow-up.
 
+### Phases 21–24 — Cloudflare-validation plan
+
+The next active work. **See
+[`cloudflare-validation-plan.md`](./cloudflare-validation-plan.md)
+for the detailed plan.** Closes the gap exposed at the end of
+Phase 20: today's e2e tests validate the orchestration loop
+(`af` CLI → Cloudflare REST → live Worker URL) but the deployed
+Workers are hand-written `worker.js` files, so the framework
+itself has never been exercised on real Cloudflare.
+
+The plan delineates **Astroflare** (the framework — what we own)
+from **Cloudflare** (the runtime environment — what we run on).
+It deliberately under-tests the mechanism for getting Astroflare
+into Cloudflare (users do that differently) and over-tests every
+framework mechanism that's supposed to run there once it's
+running.
+
+- **Phase 21** — Stack provisioning. `af provision-stack <name>`
+  spins up the project worker with all bindings (R2, DOs, Worker
+  Loader, DEPLOY_TOKEN). Light coverage of the mechanism; it's
+  the substrate for the rest.
+- **Phase 22** — Framework-on-Cloudflare end-to-end. ~14
+  fixtures, each a real Astroflare project (no hand-written
+  `worker.js`), deployed via `af deploy` to a Phase-21 stack.
+  Specs assert deployed output matches local-preview parity.
+- **Phase 23** — Per-mechanism integration tests. Targeted
+  Cloudflare tests for deploy-ceremony atomicity, HMR
+  hibernation, Coordinator persistence, R2 round-trip, Worker
+  Loader cold/warm, secrets, image binding.
+- **Phase 24** — Pre-release acceptance. §11.1–6 verified
+  against real Cloudflare; release-readiness checklist
+  (docs / backwards-compat / soak / version pinning / secret
+  hygiene). Green Phase 24 → releasable.
+
 ### Phase 20 — End-to-end tests against live Cloudflare ✓
 
 **Done (scaffolding).** Retro: [`docs/phases/phase-20-e2e.md`](./phases/phase-20-e2e.md).
