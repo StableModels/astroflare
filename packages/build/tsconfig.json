@@ -1,0 +1,17 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist",
+    "tsBuildInfoFile": "dist/.tsbuildinfo"
+  },
+  "include": ["src/**/*"],
+  "exclude": ["dist", "**/*.test.ts"],
+  "references": [
+    { "path": "../core" },
+    { "path": "../compiler" },
+    { "path": "../preview" },
+    { "path": "../runtime" },
+    { "path": "../test-utils" }
+  ]
+}

@@ -1,16 +1,16 @@
 {
   "files": [],
   "references": [
-    { "path": "./packages/astroflare-core" },
-    { "path": "./packages/astroflare-compiler" },
-    { "path": "./packages/astroflare-runtime" },
-    { "path": "./packages/astroflare-preview" },
-    { "path": "./packages/astroflare-build" },
-    { "path": "./packages/astroflare-test-utils" },
-    { "path": "./packages/astroflare-host-cloudflare" },
-    { "path": "./packages/astroflare-site-workspace" },
-    { "path": "./packages/astroflare-content" },
-    { "path": "./packages/astroflare-cli" },
-    { "path": "./packages/astroflare-cli-lib" }
+    { "path": "./packages/core" },
+    { "path": "./packages/compiler" },
+    { "path": "./packages/runtime" },
+    { "path": "./packages/preview" },
+    { "path": "./packages/build" },
+    { "path": "./packages/test-utils" },
+    { "path": "./packages/host-cloudflare" },
+    { "path": "./packages/content" },
+    { "path": "./packages/cli" },
+    { "path": "./packages/cli-lib" },
+    { "path": "./packages/starter" }
   ]
 }

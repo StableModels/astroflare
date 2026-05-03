@@ -1,0 +1,35 @@
+{
+  "name": "@astroflare/host-cloudflare",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./runtime-modules": {
+      "types": "./src/runtime-modules.ts",
+      "default": "./src/runtime-modules.ts"
+    }
+  },
+  "scripts": {
+    "test": "vitest run --project host-cloudflare",
+    "regen-runtime-modules": "node scripts/generate-runtime-modules.mjs"
+  },
+  "dependencies": {
+    "@astroflare/core": "workspace:*",
+    "@astroflare/build": "workspace:*",
+    "@astroflare/compiler": "workspace:*",
+    "@astroflare/preview": "workspace:*",
+    "@astroflare/runtime": "workspace:*"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.10.0",
+    "@cloudflare/workers-types": "^4.20241224.0",
+    "vitest": "2.1.8",
+    "wrangler": "^4.0.0"
+  }
+}

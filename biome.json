@@ -16,7 +16,9 @@
       "**/.miniflare/**",
       "**/*.astro",
       "tests/e2e/.state/**",
-      "tests/e2e/fixtures/**"
+      "tests/e2e/fixtures/**",
+      "**/*.generated.ts",
+      "packages/starter/template/**"
     ]
   },
   "formatter": {

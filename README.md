@@ -62,7 +62,7 @@ export default {
 };
 ```
 
-Deploy a fixture:
+Deploy a fixture (Node — local CLI / CI):
 
 ```sh
 af provision-stack myapp           # one-time: provision worker + R2
@@ -73,6 +73,38 @@ The framework compiles + renders locally, writes one
 `SnapshotEntry` per route into R2 under
 `<prefix><snapshotHash>/<route-key>`, then atomically flips
 `<prefix>current`.
+
+### In-Worker publish (no Node side-car)
+
+`@astroflare/build` also exposes a workers-runtime-safe `buildSite`
+so an agent / DO can pre-render snapshots from inside a Worker.
+Pair it with `R2SnapshotSink` and `createWorkerdExecutor`:
+
+```ts
+import { buildSite } from "@astroflare/build";
+import {
+	R2SnapshotSink,
+	createWorkerdExecutor,
+} from "@astroflare/host-cloudflare";
+import { runtimeModules } from "@astroflare/host-cloudflare/runtime-modules";
+
+const sink = new R2SnapshotSink({ bucket: env.SITE_BUCKET, prefix: "sites/abc/" });
+const executor = createWorkerdExecutor({
+	loader: env.LOADER,
+	runtime: runtimeModules,
+});
+
+const snapshotHash = await computeSnapshotHash(); // your content-addressed id
+for await (const entry of buildSite({ site, executor })) {
+	await sink.put(snapshotHash, entry);
+}
+await sink.commit(snapshotHash);
+```
+
+The `site` argument is any `Site` adapter — `WorkspaceSite` if you're
+serving a `@cloudflare/shell` Workspace from a DO, `MemorySite` for
+in-memory fixtures, or your own implementation. No `node:*` imports
+in the build path.
 
 Working reference: [`tests/e2e/fixtures/deploy-host-ref/`](./tests/e2e/fixtures/deploy-host-ref/).
 
@@ -92,12 +124,11 @@ import {
 	createPreviewHandler,
 	createWorkerdExecutor,
 	SqlCache,
+	WorkspaceSite,
 } from "@astroflare/host-cloudflare";
-import { WorkspaceSite } from "@astroflare/site-workspace";
+import { runtimeModules } from "@astroflare/host-cloudflare/runtime-modules";
 
 interface Env { SITE_R2: R2Bucket; LOADER: WorkerLoader }
-
-declare const __AFLARE_RUNTIME_MODULES__: Record<string, string>;
 
 export class SiteDurableObject extends DurableObject<Env> {
 	#site: WorkspaceSite;
@@ -126,7 +157,7 @@ export class SiteDurableObject extends DurableObject<Env> {
 			coordinator: this.#coordinator,
 			executor: createWorkerdExecutor({
 				loader: this.env.LOADER,
-				runtime: __AFLARE_RUNTIME_MODULES__,
+				runtime: runtimeModules,
 			}),
 			cache: this.#cache,
 		}).fetch(req);
@@ -146,9 +177,44 @@ Files mutate via your own POST endpoint that calls
 `coordinator.notifyChanged(event)` — that drives HMR fanout to
 connected browsers automatically.
 
-Working reference: [`tests/e2e/fixtures/preview-host-ref/`](./tests/e2e/fixtures/preview-host-ref/)
-(includes the bundling script that inlines runtime modules into
-`__AFLARE_RUNTIME_MODULES__`).
+The `runtimeModules` import is the recommended way to wire the
+runtime module map into `createWorkerdExecutor`. It's a sub-path
+import that ships an inlined, bundler-agnostic `Record<string,
+string>` — no esbuild `define`, no custom plugin, no
+`__AFLARE_RUNTIME_MODULES__` global declaration. The legacy
+global-substitution pattern still works for hosts that prefer
+it but is no longer recommended.
+
+Working reference: [`tests/e2e/fixtures/preview-host-ref/`](./tests/e2e/fixtures/preview-host-ref/).
+
+## Starting a new project
+
+`@astroflare/starter` ships the canonical minimum-viable scaffold —
+layout component, index route, markdown route, dynamic `[slug]`
+route via `getStaticPaths`, content collection with Zod schema, and
+a public asset. Two consumption modes, both byte-identical:
+
+**On disk (Node):**
+
+```sh
+af new ./my-site
+```
+
+**Programmatic (in-Worker — for hosts materializing fresh sites
+inside a DO):**
+
+```ts
+import { getStarterFiles } from "@astroflare/starter";
+
+for (const [path, bytes] of Object.entries(getStarterFiles())) {
+	await workspaceSite.write(`/${path}`, bytes);
+}
+```
+
+Recommended seed for any host embedding Astroflare in a multi-tenant
+or agent workflow. The same map satisfies both modes so an agent
+that materializes a site in-Worker can later be `git clone`d locally
+and continue editing without drift.
 
 ## Multi-environment, multi-site
 
@@ -173,6 +239,8 @@ Agent-driven ops surface — JSON-first output, structured errors.
 | Verb | What |
 |---|---|
 | `af doctor` | Environment sanity check (creds, plan, state). |
+| `af new <dir>` | Scaffold from `@astroflare/starter` (canonical seed). |
+| `af init <dir>` | Scaffold a tiny hello-world project (legacy minimal scaffold). |
 | `af provision-stack <n>` / `af destroy-stack <n>` | Provision the reference deploy host worker + R2. |
 | `af deploy [dir]` / `af deploy-static <dir>` | Compile + render locally, ship a snapshot. |
 | `af status` / `af rollback <hash>` | Active snapshot / flip to a previous one. |
@@ -190,26 +258,41 @@ application's concern.
 ## Packages
 
 ```
-@astroflare/core              — interfaces (Site, Cache, Snapshots, Coordinator, Executor)
-@astroflare/compiler          — .astro/.md/.mdx compiler
-@astroflare/runtime           — render() + ABI + HMR client
-@astroflare/preview           — preview-server + module graph + router
-@astroflare/build             — buildSite + createSnapshotHandler (workers-runtime-safe)
-@astroflare/build/node        — LocalSite + buildSite (Node-only)
-@astroflare/content           — Zod-typed content collections
-@astroflare/host-cloudflare   — createCoordinator, createPreviewHandler, R2Snapshots, etc.
-@astroflare/site-workspace    — WorkspaceSite (adapter for @cloudflare/shell)
-@astroflare/cli  / cli-lib    — `af` binary + library
-@astroflare/test-utils        — in-memory implementations for framework tests
+@astroflare/core                              — interfaces (Site, Cache, Snapshots, Coordinator, Executor)
+@astroflare/compiler                          — .astro/.md/.mdx compiler
+@astroflare/runtime                           — render() + ABI + HMR client
+@astroflare/preview                           — preview-server + module graph + router
+@astroflare/build                             — buildSite + createSnapshotHandler (workers-runtime-safe)
+@astroflare/build/node                        — LocalSite + buildSite (Node-only)
+@astroflare/content                           — Zod-typed content collections
+@astroflare/host-cloudflare                   — the only Cloudflare-touching package: createCoordinator,
+                                                 createPreviewHandler, R2Snapshots, WorkspaceSite, etc.
+@astroflare/host-cloudflare/runtime-modules   — pre-inlined runtime modules map for createWorkerdExecutor
+@astroflare/starter                           — canonical project scaffold (programmatic + on-disk)
+@astroflare/starter/node                      — Node-only on-disk materialisation (writeStarterFiles)
+@astroflare/cli  / cli-lib                    — `af` binary + library
+@astroflare/test-utils                        — in-memory implementations for framework tests
 ```
 
-Only `@astroflare/host-cloudflare` and `@astroflare/site-workspace`
-import Cloudflare-specific APIs.
+`@astroflare/host-cloudflare` is the only package that imports
+Cloudflare-specific APIs (`@cloudflare/shell`, R2 bindings, Worker
+Loader bindings). Everything else in the framework is
+Cloudflare-agnostic.
 
 ## Status + roadmap
 
 Pre-v0.1.0. The architectural North Star (framework, not app) is
-realized at every layer. What remains:
+realized at every layer. The host-embedding surface (Mode A + Mode
+B) is now end-to-end usable from inside another Cloudflare Worker:
+
+- `@astroflare/build`'s workers-runtime `buildSite` lets hosts
+  pre-render snapshots into R2 without a Node side-car.
+- `@astroflare/host-cloudflare/runtime-modules` ships a
+  bundler-agnostic inlined runtime map for `createWorkerdExecutor`.
+- `@astroflare/starter` provides a canonical scaffold consumable
+  programmatically (in-Worker materialisation) and via `af new`.
+
+What remains:
 
 - **Phase 26d** — five debugging-recipe e2e tests against
   credentialed CI.

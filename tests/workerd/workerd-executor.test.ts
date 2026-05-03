@@ -1,7 +1,7 @@
 /**
  * `WorkerdExecutor` against real workerd via Worker Loader.
  *
- * Mirrors the property tests in `packages/astroflare-test-utils/src/inproc-executor.test.ts`
+ * Mirrors the property tests in `packages/test-utils/src/inproc-executor.test.ts`
  * — same invariants the brief's §7.1 spelled out, now under isolate-faithful
  * conditions:
  *

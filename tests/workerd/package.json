@@ -7,7 +7,9 @@
     "test": "vitest run --project workerd"
   },
   "dependencies": {
+    "@astroflare/build": "workspace:*",
     "@astroflare/compiler": "workspace:*",
+    "@astroflare/content": "workspace:*",
     "@astroflare/core": "workspace:*",
     "@astroflare/host-cloudflare": "workspace:*",
     "@astroflare/preview": "workspace:*",

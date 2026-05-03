@@ -30,9 +30,9 @@ Concretely:
 - **Zero canonical worker entrypoint.** The host writes its
   worker; Astroflare provides request-handler factories.
 - **Storage is host-supplied** through the narrow `Site` interface.
-  Filesystem adapters (e.g. `@astroflare/site-workspace`) live in
-  separate opt-in packages so the framework doesn't import
-  `@cloudflare/shell`, R2 bindings, etc.
+  Filesystem adapters live in `@astroflare/host-cloudflare` (the
+  one Cloudflare-touching package) so the framework core doesn't
+  import `@cloudflare/shell`, R2 bindings, etc.
 - **Astroflare-internal state** (module graph, compile cache)
   lives in the host's sqlite under the `aflare_*` table prefix.
 
@@ -49,11 +49,10 @@ the host owns the worker, the storage binding, and the path layout.
 host API surface is fully aligned. Hosts write their own
 `SiteDurableObject` (Mode A) or deploy worker (Mode B); they
 import `createCoordinator` / `createPreviewHandler` /
-`acceptHmrSocket` / `SqlCache` / `createWorkerdExecutor` from
-`@astroflare/host-cloudflare` and `WorkspaceSite` from
-`@astroflare/site-workspace` (Mode A); `createSnapshotHandler`
-from `@astroflare/build` and `R2Snapshots` / `R2SnapshotSink`
-from `@astroflare/host-cloudflare` (Mode B). The legacy
+`acceptHmrSocket` / `SqlCache` / `createWorkerdExecutor` /
+`WorkspaceSite` from `@astroflare/host-cloudflare` (Mode A);
+`createSnapshotHandler` from `@astroflare/build` and `R2Snapshots`
+/ `R2SnapshotSink` from `@astroflare/host-cloudflare` (Mode B). The legacy
 `stack-worker.ts`, `project-worker.ts`, `R2Storage`,
 `CoordinatorDurableObject`, `HmrDurableObject`,
 `createDeployServer`, and the `deploy()` build function are all
@@ -61,6 +60,34 @@ gone. Reference fixtures
 ([`tests/e2e/fixtures/preview-host-ref/`](tests/e2e/fixtures/preview-host-ref/),
 [`tests/e2e/fixtures/deploy-host-ref/`](tests/e2e/fixtures/deploy-host-ref/))
 build cleanly into deployable bundles.
+
+**Embedding-friendly additions (post-26c):**
+- `@astroflare/build` (workers-safe entry) now exports `buildSite`
+  alongside `createSnapshotHandler`. The Workers-runtime version
+  takes a `Site` + `Executor` and yields `SnapshotEntry`s callers
+  pipe into a `SnapshotSink` — same streaming shape as the Node
+  version, no `node:*` imports. Lets hosts pre-render snapshots
+  to R2 from inside a Worker (Ember and other Worker-runtime
+  consumers). The Node version stays at `@astroflare/build/node`.
+- `@astroflare/host-cloudflare/runtime-modules` ships a pre-inlined
+  `runtimeModules: Record<string, string>` for
+  `createWorkerdExecutor({ runtime })`. Bundler-agnostic; replaces
+  the `__AFLARE_RUNTIME_MODULES__` global-substitution pattern as
+  the recommended path. The generator script
+  (`packages/host-cloudflare/scripts/generate-runtime-modules.mjs`)
+  runs as part of `pnpm build`; CI checks the generated file is
+  up to date.
+- `@astroflare/starter` is the canonical project scaffold. Two
+  byte-identical consumption modes: `getStarterFiles()` for
+  in-Worker materialisation, `writeStarterFiles({ dir })`
+  (or `af new <dir>`) for on-disk. The `template/` directory is
+  the source of truth; `scripts/generate-starter-files.mjs`
+  inlines it as base64 into `src/starter-files.generated.ts`,
+  also part of `pnpm build`.
+- `buildRenderTask` (in `@astroflare/build`) is the shared shim
+  that wraps compiled `.astro` route code into a `TaskBundle` for
+  the executor. Used by `createPreviewHandler` and `buildSite`
+  (workers).
 
 The `Storage` interface in `@astroflare/core` remains
 `@deprecated` but is still consumed by framework-internal code
@@ -109,7 +136,7 @@ Run everything: `pnpm test`. Run one project: `pnpm vitest run --project <name>`
 | Layer | Where | Pool | Purpose |
 | --- | --- | --- | --- |
 | A — Node | `packages/*/src/*.test.ts` | node | Pure framework logic. Fast (~ms). |
-| B — workerd | `tests/workerd/` + per-package `host-cloudflare`, `site-workspace` | workerd via `@cloudflare/vitest-pool-workers` | Code that depends on the workerd runtime. |
+| B — workerd | `tests/workerd/` + per-package `host-cloudflare` | workerd via `@cloudflare/vitest-pool-workers` | Code that depends on the workerd runtime. |
 | D — e2e | `tests/e2e/` | node | **Real Cloudflare.** Provisions both modes per run via the `af` CLI library, deploys fixtures, asserts live behaviour. Skips when `CLOUDFLARE_*` env vars are absent. |
 
 The Phase-15-era Layer C (Miniflare integration project) was retired
@@ -133,7 +160,7 @@ The `@astroflare/cli` package exposes `af`. The same library
 and automated tests share a single registry under
 `tests/e2e/.state/<sha7>/`.
 
-Run from source (no build step): `pnpm exec tsx packages/astroflare-cli/src/cli.ts <verb>`.
+Run from source (no build step): `pnpm exec tsx packages/cli/src/cli.ts <verb>`.
 
 Reference host bundles (built per-fixture, not framework-shipped):
 - Mode B: `node tests/e2e/fixtures/deploy-host-ref/build.mjs` →
@@ -158,8 +185,7 @@ exposes `provisionPreviewHost` / `destroyPreviewHost` /
 `loadPreviewHostBundle` — used by the e2e harness, not the user
 surface. Hosts integrate via `@astroflare/host-cloudflare`
 (`createCoordinator`, `createPreviewHandler`, `acceptHmrSocket`,
-`SqlCache`, `createWorkerdExecutor`) and `@astroflare/site-workspace`
-(`WorkspaceSite`).
+`SqlCache`, `createWorkerdExecutor`, `WorkspaceSite`).
 
 Credentials: `.dev.vars` holds `CLOUDFLARE_API_TOKEN` (git-crypt locally;
 GitHub repo secret in CI). `CLOUDFLARE_ACCOUNT_ID` is exported by

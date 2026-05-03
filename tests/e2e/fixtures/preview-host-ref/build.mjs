@@ -22,7 +22,7 @@ const ROOT = resolve(__dirname, "../../../..");
 const ENTRY = resolve(__dirname, "src/worker.ts");
 const OUT_DIR = resolve(__dirname, "dist");
 const OUTFILE = resolve(OUT_DIR, "worker.bundle.js");
-const RUNTIME_DIST = resolve(ROOT, "packages/astroflare-runtime/dist");
+const RUNTIME_DIST = resolve(ROOT, "packages/runtime/dist");
 
 mkdirSync(OUT_DIR, { recursive: true });
 

@@ -44,7 +44,7 @@ target. That's the gap.
 
 ## Framework vs runtime: the delineation
 
-**Astroflare** is the framework — code in `packages/astroflare-*`.
+**Astroflare** is the framework — code in `packages/*`.
 The thing developers author against. The compiler. The runtime.
 The CLI. The host adapter. We own its correctness.
 
