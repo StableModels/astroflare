@@ -74,20 +74,29 @@ These are flagged for the maintainer to drive — not mechanical:
   bound in `tests/e2e/latency.spec.ts` with the brief's actual
   budgets.
 
-## Carryovers from earlier phases
+## Status post-finalization
 
-- **Phase 26c CLI five debugging recipes** — `tests/e2e/cli-workflows.spec.ts`.
-  Implemented as planned in `phase-26c-agent-ops-cli.md`; runs
-  against credentialed CI when wired up.
-- **Phase 26 deferral #1 finish** — full Storage interface removal
-  after migrating preview-server, module-graph, middleware,
-  endpoint, router, runtime/internal from `Storage` → `Site` +
-  `Cache`. Implementation detail; doesn't block the public
-  release shape.
-- **Reference fixture promotion** — move `preview-host-ref` and
-  `deploy-host-ref` from `tests/e2e/fixtures/` to top-level
-  `examples/` so users can install them as workspace packages.
-  Documentation concern.
+Updated 2026-05-03 after the North Star realization across Phases
+26 / 26b / 26c plus the P0 cleanup pass:
+
+- ✓ **Storage migration complete.** `Storage` interface deleted
+  from `@astroflare/core`; `MemoryStorage` deleted from
+  `@astroflare/test-utils`. Every framework consumer
+  (preview-server, module-graph, middleware, endpoint, router,
+  in-memory-services) now uses `Site` + `Cache`. The Host
+  interface dropped `storage`; `site` + `cache` are required.
+- ✓ **Stale-state cleanup.** `tests/integration/` retired,
+  `scripts/probe-*.mjs` removed, `tests/workerd/cloudflare-test.d.ts`
+  no longer references deleted DOs, root tsconfig registers
+  `@astroflare/site-workspace`, CLAUDE.md synced.
+- ⏳ **Phase 26d** (split out from Phase 26c) — five
+  debugging-recipe e2e tests. See
+  [`phase-26d-cli-debugging-recipes.md`](./phase-26d-cli-debugging-recipes.md).
+- ⏳ **Phase 28** — documentation pass + reference-fixture
+  promotion to `examples/`. See
+  [`phase-28-docs-and-examples.md`](./phase-28-docs-and-examples.md).
+- ⏳ **Phase 29** — Tier 1 polish carryovers. See
+  [`phase-29-tier1-polish.md`](./phase-29-tier1-polish.md).
 
 ## Acceptance
 

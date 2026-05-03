@@ -1,28 +1,49 @@
 # Next phases
 
-> **2026-05-03 update.** Phases 0–25 are done. Both Cloudflare
-> lifecycles (Mode A preview, Mode B deploy) are green on real
-> Cloudflare. **Active queue: 26 → 26b → 26c → 27 → 24b.** The
-> 26-series phases reshape Astroflare into a pure library and the
-> CLI into an agent-driven ops surface:
+> **2026-05-03 — North Star realized.** The architectural
+> realignment is complete: Astroflare is a library at every layer
+> (public host API + framework internals). Phases 0–27 are done;
+> what remains is documentation + release process + Tier-1 polish.
+> Active queue, in priority order:
+>
+> - [`phases/phase-26d-cli-debugging-recipes.md`](./phases/phase-26d-cli-debugging-recipes.md)
+>   — five agent-debugging-recipe e2e tests against credentialed
+>   CI. Self-contained; depends on the existing Phase 26c verb set.
+> - [`phases/phase-28-docs-and-examples.md`](./phases/phase-28-docs-and-examples.md)
+>   — promote reference fixtures to `examples/`; build the docs
+>   site (overview, getting started, architecture, mode
+>   walkthroughs, CLI surface, API reference).
+> - [`phases/phase-24b-release-readiness.md`](./phases/phase-24b-release-readiness.md)
+>   — flip `private: false` on packages, version-pin cli ↔ cli-lib,
+>   24h soak, live cold-start measurement, npm publish, v0.1.0 cut.
+> - [`phases/phase-29-tier1-polish.md`](./phases/phase-29-tier1-polish.md)
+>   — Tier 1 carryovers from Phases 11–19 (CSS modules, image
+>   format conversion, content loaders, MDX components-from-config,
+>   per-token source maps, etc.). Demand-driven; not blocking
+>   v0.1.0.
+>
+> Done in the recent push:
 >
 > - [`phases/phase-26-host-driven-preview.md`](./phases/phase-26-host-driven-preview.md)
->   — Mode A library refactor (host owns SiteDO + worker)
+>   — Mode A library refactor.
 > - [`phases/phase-26b-host-driven-build.md`](./phases/phase-26b-host-driven-build.md)
->   — Mode B library refactor (host owns deploy worker; Snapshot
->   primitives with prefix-based path control)
+>   — Mode B library refactor (Snapshot primitives, prefix-based
+>   path control).
 > - [`phases/phase-26c-agent-ops-cli.md`](./phases/phase-26c-agent-ops-cli.md)
->   — `af` reshape for agent-driven ops: JSON-first output,
->   structured errors, deep introspection (workspace listing,
->   module graph, snapshot diff, HMR tail, doctor)
+>   — `af` reshape for agent ops (doctor, snapshot list/cat/diff/current,
+>   exec, logs, structured errors).
+> - **Phase 27 — dual-mode parity** (no separate plan doc; one spec
+>   at `tests/e2e/parity.spec.ts`).
+> - **P0 cleanup pass** — Storage interface fully removed (framework
+>   internals migrated to `Site` + `Cache`); stale-state cleanup
+>   (dead `tests/integration/`, probe scripts, deprecated type
+>   imports); CLAUDE.md synced.
 >
-> The previously-planned Phase 26 (dual-mode parity) renumbers to
-> Phase 27 and runs against the new architecture; see
-> [`dual-mode-validation-plan.md`](./dual-mode-validation-plan.md)
-> for the parity sketch (still accurate at the test-shape level).
+> The dual-mode-validation-plan.md sketch is still accurate at the
+> test-shape level for context; the spec it called for is shipped.
 > The sections below are the historical Tier-1 backlog from the
-> Phase 13 era — long-term carve-out reference, not the immediate
-> roadmap.
+> Phase 13 era — long-term carve-out reference, now consolidated in
+> `phase-29-tier1-polish.md`.
 
 Plan for the work after Phase 2.5b. Synthesizes carryovers from every prior
 retrospective and the brief's tier targets into a phased order that respects
