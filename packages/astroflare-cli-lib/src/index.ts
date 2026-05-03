@@ -44,12 +44,37 @@ export {
 	readPreviewState,
 	writePreviewState,
 } from "./state.js";
+export {
+	AstroflareCliError,
+	CLI_ERROR_CODES,
+	type CliErrorCode,
+	isAstroflareCliError,
+} from "./errors.js";
 export { provisionFixture } from "./commands/provision.js";
 export { teardownFixture } from "./commands/teardown.js";
-export { listFixtures } from "./commands/list.js";
-export { inspectFixture } from "./commands/inspect.js";
+export {
+	listFixtures,
+	listManaged,
+	type ManagedHost,
+} from "./commands/list.js";
+export { inspectFixture, inspectManaged, type InspectResult } from "./commands/inspect.js";
 export { statusReport, type FixtureStatus } from "./commands/status.js";
 export { findOrphanWorkers, type GcResult } from "./commands/gc.js";
+export { doctor, type DoctorReport, type DoctorCheck } from "./commands/doctor.js";
+export {
+	snapshotList,
+	snapshotCurrent,
+	snapshotCat,
+	type SnapshotInfo,
+	type SnapshotCatResult,
+} from "./commands/snapshots.js";
+export {
+	snapshotDiff,
+	type SnapshotDiffInput,
+	type SnapshotDiffResult,
+} from "./commands/snapshot-diff.js";
+export { exec, type ExecInput, type ExecResult } from "./commands/exec.js";
+export { logsCommand, type LogsInput, type LogsResult } from "./commands/logs.js";
 export {
 	provisionStack,
 	destroyStack,
@@ -66,16 +91,10 @@ export {
 	type FixtureSource,
 } from "./commands/deploy-static.js";
 export {
-	provisionPreview,
-	destroyPreview,
-	loadPreviewWorkerBundle,
-	type ProvisionPreviewInput,
-	type DestroyPreviewInput,
-	type DestroyPreviewResult,
-} from "./commands/provision-preview.js";
-export {
-	uploadFiles,
-	type UploadFilesInput,
-	type UploadFilesResult,
-	type UploadedFile,
-} from "./commands/upload-files.js";
+	provisionPreviewHost,
+	destroyPreviewHost,
+	loadPreviewHostBundle,
+	type ProvisionPreviewHostInput,
+	type DestroyPreviewHostInput,
+	type DestroyPreviewHostResult,
+} from "./commands/provision-preview-host.js";

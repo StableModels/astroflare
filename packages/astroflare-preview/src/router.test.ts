@@ -1,4 +1,4 @@
-import { MemoryStorage } from "@astroflare/test-utils";
+import { MemorySite } from "@astroflare/test-utils";
 import { describe, expect, it } from "vitest";
 import { Router, routeFromFilePath } from "./router.js";
 
@@ -57,8 +57,8 @@ describe("Router.discover + match", () => {
 	const enc = (s: string) => new TextEncoder().encode(s);
 
 	async function buildRouter(files: Record<string, string>): Promise<Router> {
-		const s = new MemoryStorage();
-		for (const [p, body] of Object.entries(files)) await s.write(p, enc(body));
+		const s = new MemorySite();
+		for (const [p, body] of Object.entries(files)) s.write(p, enc(body));
 		const r = new Router();
 		await r.discover(s);
 		return r;

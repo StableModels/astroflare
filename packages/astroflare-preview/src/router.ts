@@ -12,7 +12,7 @@
  *   - finer-grained precedence (Astro has more nuance)
  */
 
-import type { Storage } from "@astroflare/core";
+import type { Site } from "@astroflare/core";
 
 export type RouteKind = "astro" | "markdown" | "endpoint";
 
@@ -60,11 +60,11 @@ export class Router {
 	}
 
 	/** Walk the workspace and rebuild the route table. Idempotent. */
-	async discover(storage: Storage): Promise<void> {
+	async discover(site: Site): Promise<void> {
 		const found: Route[] = [];
 		const seen = new Set<string>();
 		for (const { ext } of PAGE_EXTENSIONS) {
-			for await (const filePath of storage.glob(`${PAGES_PREFIX}/**/*${ext}`)) {
+			for await (const filePath of site.glob(`${PAGES_PREFIX}/**/*${ext}`)) {
 				if (seen.has(filePath)) continue;
 				seen.add(filePath);
 				const route = routeFromFilePath(filePath);

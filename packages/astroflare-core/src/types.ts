@@ -12,45 +12,127 @@
  */
 
 // -----------------------------------------------------------------------------
-// 1. Storage — files + content-addressed cache (§5.2)
+// 1. Site — read-only project files capability (Phase 26)
 // -----------------------------------------------------------------------------
 
 /**
- * Per-tenant storage. Two disjoint keyspaces:
+ * Per-site read-only file capability. The host supplies an implementation
+ * (typically wrapping a `@cloudflare/shell` `Workspace` inside a host-owned
+ * Durable Object); the framework consumes it for compile + render.
  *
- *   - the **file** keyspace (`read`/`write`/`glob`/`stat`) holds the user's
- *     project tree as written by the agent. Paths are POSIX-style, leading "/"
- *     denotes the workspace root.
+ * Paths are POSIX-style with a leading `/` denoting the workspace root.
+ * `hash` is the SHA-256 hex of the file's bytes.
  *
- *   - the **cache** keyspace (`cacheRead`/`cacheWrite`) holds content-addressed
- *     artifacts (compiled modules, rendered HTML, deploy snapshots). Keys are
- *     opaque strings — typically the SHA-256 hex of the inputs, truncated to
- *     16 chars per §9.4. The two keyspaces never alias: `cacheWrite("foo", x)`
- *     does NOT make `read("foo")` return `x`.
+ * The interface is deliberately narrow — three methods only. Mutation is the
+ * host's concern (it owns when/how files are written; e.g. an IDE write, an
+ * AI agent message, a `git pull`). Change notifications flow into the
+ * framework via the host calling `coordinator.notifyChanged(event)` after a
+ * write, not through `Site` itself.
  *
- * Implementations must be safe for concurrent access. The framework relies on
- * `write` being atomic (a partial read of a half-written file is a bug).
+ * Replaces the prior `Storage.read` / `stat` / `glob` surface. The
+ * `Storage` cache keyspace is now a separate `Cache` interface (below);
+ * the write surface (`write` / `remove`) is host-side and not part of
+ * `Site`.
  */
-export interface Storage {
-	/** Read a file. Throws if missing. */
-	read(path: string): Promise<Uint8Array>;
-	/** Write a file atomically. Creates parent directories as needed. */
-	write(path: string, bytes: Uint8Array): Promise<void>;
-	/** Delete a file. No-op if missing. */
-	remove(path: string): Promise<void>;
-	/** Async-iterate file paths matching a glob pattern (POSIX-style globs). */
+export interface Site {
+	/** Read a file's bytes. Returns `null` if missing. */
+	readFile(path: string): Promise<Uint8Array | null>;
+	/** File metadata. Returns `null` if missing. */
+	statFile(path: string): Promise<FileStat | null>;
+	/** Async-iterate paths matching a POSIX-style glob. */
 	glob(pattern: string): AsyncIterable<string>;
-	/** Stat a file. Returns null if missing. `hash` is the content hash. */
-	stat(path: string): Promise<FileStat | null>;
-	/** Read a content-addressed artifact. Returns null on miss. */
-	cacheRead(hash: string): Promise<Uint8Array | null>;
-	/** Write a content-addressed artifact. Idempotent: same hash → same bytes. */
-	cacheWrite(hash: string, bytes: Uint8Array): Promise<void>;
 }
+
+/**
+ * What the host calls `coordinator.notifyChanged` with after a write.
+ * The framework rehashes the module graph, walks reverse edges, and
+ * publishes HMR.
+ */
+export type SiteChangeEvent =
+	| { kind: "write"; path: string; hash: string }
+	| { kind: "delete"; path: string };
 
 export interface FileStat {
 	size: number;
 	hash: string;
+}
+
+// -----------------------------------------------------------------------------
+// 1b. Cache — content-addressed compile cache (Phase 26)
+// -----------------------------------------------------------------------------
+
+/**
+ * Content-addressed compile cache. Decoupled from `Site` so the host can
+ * back files and cache with different storage (e.g. SiteDO sqlite for files,
+ * R2 for cache, or both in sqlite). Used only by Mode A (preview); Mode B's
+ * deploy artifact storage is a separate `Snapshots` concern.
+ *
+ * Keys are opaque hex strings — typically SHA-256 of the source bytes,
+ * truncated per §9.4. Implementations must be idempotent: `put(hash, x)`
+ * twice with the same `hash` is fine.
+ */
+export interface Cache {
+	get(hash: string): Promise<Uint8Array | null>;
+	put(hash: string, bytes: Uint8Array): Promise<void>;
+}
+
+// -----------------------------------------------------------------------------
+// 1d. Snapshots — versioned static deploy artifacts (Phase 26b)
+// -----------------------------------------------------------------------------
+
+/**
+ * One file inside a snapshot. The build emits a stream of these; the
+ * `SnapshotSink` writes them; `Snapshots.read` returns them.
+ *
+ * Replaces what `DeployManifestEntry` + the rendered-HTML byte stream
+ * carried in two pieces. Now they're coupled per-route — no separate
+ * manifest persisted; each entry carries enough metadata to serve.
+ */
+export interface SnapshotEntry {
+	/** Site-relative URL path the route serves (e.g. `/`, `/about`, `/blog/p1`). */
+	route: string;
+	/** Rendered bytes. */
+	bytes: Uint8Array;
+	/** MIME content-type (e.g. `text/html;charset=utf-8`). */
+	contentType: string;
+	/** SHA-256 of the bytes, hex. */
+	hash: string;
+}
+
+/**
+ * Read-only view of stored snapshots — what the serve handler talks to.
+ * Concrete implementations: `R2Snapshots` (host-cloudflare),
+ * `LocalSnapshots` (Node-side helper for tests / CLI), `MemorySnapshots`
+ * (test fakes).
+ */
+export interface Snapshots {
+	/** Read one entry from a specific snapshot. Returns `null` on miss. */
+	read(snapshotHash: string, route: string): Promise<SnapshotEntry | null>;
+	/** Hash of the current (active) snapshot, or `null` if no deploy yet. */
+	current(): Promise<string | null>;
+	/** All snapshot hashes in storage. Used for rollback UIs / GC. */
+	list(): Promise<readonly string[]>;
+}
+
+/**
+ * Write-side counterpart to `Snapshots`. The build pipeline pipes
+ * `SnapshotEntry`s through here, then commits to flip `current`.
+ */
+export interface SnapshotSink {
+	/** Write a single entry into the staging area for `snapshotHash`. */
+	put(snapshotHash: string, entry: SnapshotEntry): Promise<void>;
+	/**
+	 * Atomically promote `snapshotHash` to current. Implementations write
+	 * the equivalent of `<prefix>current` last so partial writes never
+	 * leave an inconsistent active deploy.
+	 */
+	commit(snapshotHash: string): Promise<void>;
+	/**
+	 * Best-effort cleanup of partial writes for `snapshotHash` if a build
+	 * fails midway. Implementations may no-op (R2 keeps the partial files
+	 * harmlessly until GC).
+	 */
+	abort(snapshotHash: string): Promise<void>;
 }
 
 // -----------------------------------------------------------------------------
@@ -299,9 +381,15 @@ export interface ImageMetadata {
 /**
  * The full set of host capabilities the framework needs. Constructed by the
  * host package and passed to `createApp(config, host)`.
+ *
+ * Post-Phase 26 / 26b: `site` (read) + `cache` (compile cache) are the
+ * canonical capabilities. The legacy `Storage` interface is gone.
  */
 export interface Host {
-	storage: Storage;
+	/** Read-only file capability the framework consumes. */
+	site: Site;
+	/** Content-addressed compile cache. */
+	cache: Cache;
 	executor: Executor;
 	coordinator: Coordinator;
 	transport: Transport;

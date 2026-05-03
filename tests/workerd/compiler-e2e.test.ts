@@ -26,7 +26,8 @@ import { ModuleGraph, inlineBundle } from "@astroflare/preview";
 // and breaks in workerd even with nodejs_compat).
 import {
 	MapCoordinator,
-	MemoryStorage,
+	MemoryCache,
+	MemorySite,
 	MemoryTransport,
 	StubClock,
 	StubLogger,
@@ -109,10 +110,11 @@ interface RouteInput {
  * Mirrors `createTestHost()` shape but skips InProcessExecutor (Node-only)
  * since we're spawning real isolates instead.
  */
-function makeWorkerdHost(): Host {
+function makeWorkerdHost(): Host & { site: MemorySite; cache: MemoryCache } {
 	const clock = new StubClock();
 	return {
-		storage: new MemoryStorage(),
+		site: new MemorySite(),
+		cache: new MemoryCache(),
 		coordinator: new MapCoordinator(),
 		transport: new MemoryTransport(),
 		clock,
@@ -131,7 +133,7 @@ async function renderViaWorkerd(
 	input: RouteInput,
 ): Promise<string> {
 	const host = makeWorkerdHost();
-	for (const [p, body] of Object.entries(files)) await host.storage.write(p, enc(body));
+	for (const [p, body] of Object.entries(files)) host.site.write(p, enc(body));
 
 	const graph = new ModuleGraph(host, { runtimeImport: RUNTIME_IMPORT });
 	const closure = await graph.closure(rootPath);

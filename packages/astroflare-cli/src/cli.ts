@@ -37,28 +37,31 @@
  * progress.
  */
 
-import { execSync } from "node:child_process";
+import { execSync, spawn } from "node:child_process";
 import { basename } from "node:path";
 import { parseArgs } from "node:util";
 import {
 	type CloudflareClient,
 	deployStaticBundle,
-	destroyPreview,
 	destroyStack,
+	doctor,
+	exec as execApi,
 	findOrphanWorkers,
-	inspectFixture,
-	listFixtures,
-	loadPreviewWorkerBundle,
+	inspectManaged,
+	isAstroflareCliError,
+	listManaged,
 	loadStackWorkerBundle,
+	logsCommand,
 	makeCloudflareClient,
 	provisionFixture,
-	provisionPreview,
 	provisionStack,
-	readPreviewState,
 	readStackState,
+	snapshotCat,
+	snapshotCurrent,
+	snapshotDiff,
+	snapshotList,
 	statusReport,
 	teardownFixture,
-	uploadFiles,
 } from "@astroflare/cli-lib";
 import { type DeployConfig, resolveConfig } from "./commands/deploy.js";
 import { cmdDeploy, cmdRollback, cmdStatus } from "./commands/deploy.js";
@@ -107,12 +110,16 @@ async function main(argv: readonly string[]): Promise<number> {
 			return runDestroyStack(rest);
 		case "deploy-static":
 			return runDeployStatic(rest);
-		case "provision-preview":
-			return runProvisionPreview(rest);
-		case "destroy-preview":
-			return runDestroyPreview(rest);
-		case "upload-files":
-			return runUploadFiles(rest);
+
+		// Phase 26c — agent ops verbs.
+		case "doctor":
+			return runDoctor();
+		case "snapshot":
+			return runSnapshot(rest);
+		case "exec":
+			return runExec(rest);
+		case "logs":
+			return runLogs(rest);
 
 		case "--version":
 		case "-v":
@@ -277,7 +284,9 @@ async function runDestroy(argv: readonly string[]): Promise<number> {
 async function runDestroyAll(): Promise<number> {
 	try {
 		const ctx = opsCtx();
-		const fixtures = listFixtures({ rootDir: ctx.rootDir, sha7: ctx.sha7 });
+		const fixtures = listManaged({ rootDir: ctx.rootDir, sha7: ctx.sha7 }).filter(
+			(h): h is Extract<typeof h, { kind: "fixture" }> => h.kind === "fixture",
+		);
 		if (fixtures.length === 0) {
 			console.log("no Workers to destroy");
 			return 0;
@@ -304,16 +313,21 @@ async function runDestroyAll(): Promise<number> {
 	}
 }
 
+function nameOf(host: { fixture?: string; name?: string; kind: string }): string {
+	if (host.kind === "stack") return host.name ?? "?";
+	return host.fixture ?? host.name ?? "?";
+}
+
 function runList(): number {
 	try {
 		const ctx = opsCtx();
-		const fixtures = listFixtures({ rootDir: ctx.rootDir, sha7: ctx.sha7 });
-		if (fixtures.length === 0) {
-			console.log("no Workers managed for this SHA");
+		const hosts = listManaged({ rootDir: ctx.rootDir, sha7: ctx.sha7 });
+		if (hosts.length === 0) {
+			console.log("no hosts managed for this SHA");
 			return 0;
 		}
-		for (const f of fixtures) {
-			console.log(`${f.fixture}\t${f.workerName}\t${f.url}`);
+		for (const h of hosts) {
+			console.log(`${h.kind}\t${nameOf(h)}\t${h.workerName}\t${h.url}`);
 		}
 		return 0;
 	} catch (err) {
@@ -330,9 +344,9 @@ function runInspect(argv: readonly string[]): number {
 	}
 	try {
 		const ctx = opsCtx();
-		const state = inspectFixture({ rootDir: ctx.rootDir, sha7: ctx.sha7, fixture: name });
+		const state = inspectManaged({ rootDir: ctx.rootDir, sha7: ctx.sha7, name });
 		if (!state) {
-			console.error(`no state for ${name} (run \`af provision ${name}\` first)`);
+			console.error(`no state for ${name} (run \`af provision-stack ${name}\` first)`);
 			return 1;
 		}
 		console.log(JSON.stringify(state, null, 2));
@@ -348,19 +362,20 @@ async function runHealth(): Promise<number> {
 		const ctx = opsCtx();
 		const report = await statusReport({ rootDir: ctx.rootDir, sha7: ctx.sha7 });
 		if (report.length === 0) {
-			console.log("no Workers managed for this SHA");
+			console.log("no hosts managed for this SHA");
 			return 0;
 		}
 		let exitCode = 0;
 		for (const r of report) {
+			const label = `${r.kind}\t${nameOf(r)}`;
 			if (r.error) {
-				console.log(`${r.fixture}\t-\t${r.error}`);
+				console.log(`${label}\t-\t${r.error}`);
 				exitCode = 1;
 			} else if (r.httpStatus !== 200) {
-				console.log(`${r.fixture}\t${r.httpStatus}\t${r.latencyMs}ms`);
+				console.log(`${label}\t${r.httpStatus}\t${r.latencyMs}ms`);
 				exitCode = 1;
 			} else {
-				console.log(`${r.fixture}\t${r.httpStatus}\t${r.latencyMs}ms`);
+				console.log(`${label}\t${r.httpStatus}\t${r.latencyMs}ms`);
 			}
 		}
 		return exitCode;
@@ -368,6 +383,242 @@ async function runHealth(): Promise<number> {
 		console.error(`af health: ${(err as Error).message}`);
 		return 1;
 	}
+}
+
+async function runDoctor(): Promise<number> {
+	const rootDir = process.env.AFLARE_ROOT ?? process.cwd();
+	const report = await doctor({
+		rootDir,
+		env: process.env,
+		clientFactory:
+			process.env.CLOUDFLARE_ACCOUNT_ID && process.env.CLOUDFLARE_API_TOKEN
+				? (accountId: string, apiToken: string) => makeCloudflareClient({ accountId, apiToken })
+				: undefined,
+	});
+	console.log(JSON.stringify(report, null, 2));
+	return report.ok ? 0 : 1;
+}
+
+async function runSnapshot(argv: readonly string[]): Promise<number> {
+	const [sub, ...rest] = argv;
+	if (!sub) {
+		console.error("af snapshot: missing subcommand (list / current / cat / diff)");
+		return 1;
+	}
+	switch (sub) {
+		case "list":
+			return runSnapshotList(rest);
+		case "current":
+			return runSnapshotCurrent(rest);
+		case "cat":
+			return runSnapshotCat(rest);
+		case "diff":
+			return runSnapshotDiff(rest);
+		default:
+			console.error(`af snapshot: unknown subcommand '${sub}'`);
+			return 1;
+	}
+}
+
+async function runSnapshotDiff(argv: readonly string[]): Promise<number> {
+	const [stackName, hashA, hashB, ...flags] = argv;
+	if (!stackName || !hashA || !hashB) {
+		console.error("af snapshot diff: usage: af snapshot diff <stack-name> <hashA> <hashB>");
+		return 1;
+	}
+	const prefix = parsePrefixFlag(flags);
+	try {
+		const ctx = opsCtx();
+		const stack = readStackState(ctx.rootDir, ctx.sha7, stackName);
+		if (!stack) {
+			console.error(`af snapshot diff: no stack '${stackName}' for sha=${ctx.sha7}`);
+			return 1;
+		}
+		const result = await snapshotDiff({
+			client: ctx.client,
+			bucket: stack.bucketName,
+			prefix,
+			hashA,
+			hashB,
+		});
+		console.log(JSON.stringify(result, null, 2));
+		return 0;
+	} catch (err) {
+		return reportError("af snapshot diff", err);
+	}
+}
+
+async function runExec(argv: readonly string[]): Promise<number> {
+	const { values, positionals } = parseArgs({
+		args: [...argv],
+		options: {
+			body: { type: "string" },
+			"content-type": { type: "string" },
+		},
+		allowPositionals: true,
+	});
+	const [method, path] = positionals;
+	if (!method || !path) {
+		console.error(
+			"af exec: usage: af exec <METHOD> <path> [--body @file|<string>] [--content-type <ct>]",
+		);
+		return 1;
+	}
+	const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
+	const apiToken = process.env.CLOUDFLARE_API_TOKEN;
+	if (!accountId || !apiToken) {
+		console.error("af exec: CLOUDFLARE_ACCOUNT_ID + CLOUDFLARE_API_TOKEN required");
+		return 1;
+	}
+	try {
+		const result = await execApi({
+			accountId,
+			apiToken,
+			method,
+			path,
+			body: values.body as string | undefined,
+			contentType: values["content-type"] as string | undefined,
+		});
+		console.log(JSON.stringify(result, null, 2));
+		return result.status >= 200 && result.status < 300 ? 0 : 1;
+	} catch (err) {
+		return reportError("af exec", err);
+	}
+}
+
+async function runLogs(argv: readonly string[]): Promise<number> {
+	const { values, positionals } = parseArgs({
+		args: [...argv],
+		options: {
+			tail: { type: "boolean" },
+			since: { type: "string" },
+		},
+		allowPositionals: true,
+	});
+	const [name] = positionals;
+	if (!name) {
+		console.error("af logs: usage: af logs <worker-name> [--tail] [--since <duration>]");
+		return 1;
+	}
+	const result = logsCommand({
+		workerName: name,
+		tail: Boolean(values.tail),
+		since: values.since as string | undefined,
+	});
+	console.log(JSON.stringify({ command: result.command, notes: result.notes }, null, 2));
+	// Spawn wrangler tail and stream stdout/stderr through.
+	const [bin, ...args] = result.command;
+	if (!bin) return 1;
+	return await new Promise<number>((resolve_) => {
+		const child = spawn(bin, args, { stdio: "inherit" });
+		child.on("error", (err) => {
+			console.error(`af logs: failed to spawn wrangler — ${err.message}`);
+			resolve_(1);
+		});
+		child.on("exit", (code) => resolve_(code ?? 0));
+	});
+}
+
+async function runSnapshotList(argv: readonly string[]): Promise<number> {
+	const [stackName, ...flags] = argv;
+	if (!stackName) {
+		console.error("af snapshot list: missing <stack-name>");
+		return 1;
+	}
+	const prefix = parsePrefixFlag(flags);
+	try {
+		const ctx = opsCtx();
+		const stack = readStackState(ctx.rootDir, ctx.sha7, stackName);
+		if (!stack) {
+			console.error(`af snapshot list: no stack '${stackName}' for sha=${ctx.sha7}`);
+			return 1;
+		}
+		const list = await snapshotList({
+			client: ctx.client,
+			bucket: stack.bucketName,
+			prefix,
+		});
+		console.log(JSON.stringify(list, null, 2));
+		return 0;
+	} catch (err) {
+		return reportError("af snapshot list", err);
+	}
+}
+
+async function runSnapshotCurrent(argv: readonly string[]): Promise<number> {
+	const [stackName, ...flags] = argv;
+	if (!stackName) {
+		console.error("af snapshot current: missing <stack-name>");
+		return 1;
+	}
+	const prefix = parsePrefixFlag(flags);
+	try {
+		const ctx = opsCtx();
+		const stack = readStackState(ctx.rootDir, ctx.sha7, stackName);
+		if (!stack) {
+			console.error(`af snapshot current: no stack '${stackName}' for sha=${ctx.sha7}`);
+			return 1;
+		}
+		const current = await snapshotCurrent({
+			client: ctx.client,
+			bucket: stack.bucketName,
+			prefix,
+		});
+		console.log(JSON.stringify({ current }, null, 2));
+		return 0;
+	} catch (err) {
+		return reportError("af snapshot current", err);
+	}
+}
+
+async function runSnapshotCat(argv: readonly string[]): Promise<number> {
+	const [stackName, snapshotHash, route, ...flags] = argv;
+	if (!stackName || !snapshotHash || !route) {
+		console.error("af snapshot cat: usage: af snapshot cat <stack-name> <hash> <route>");
+		return 1;
+	}
+	const prefix = parsePrefixFlag(flags);
+	try {
+		const ctx = opsCtx();
+		const stack = readStackState(ctx.rootDir, ctx.sha7, stackName);
+		if (!stack) {
+			console.error(`af snapshot cat: no stack '${stackName}' for sha=${ctx.sha7}`);
+			return 1;
+		}
+		const result = await snapshotCat({
+			client: ctx.client,
+			bucket: stack.bucketName,
+			prefix,
+			snapshotHash,
+			route,
+		});
+		// Stream bytes to stdout; structured metadata to stderr so the agent
+		// can parse the body cleanly.
+		process.stderr.write(
+			`${JSON.stringify({ contentType: result.contentType, bytes: result.bytes.byteLength })}\n`,
+		);
+		process.stdout.write(result.bytes);
+		return 0;
+	} catch (err) {
+		return reportError("af snapshot cat", err);
+	}
+}
+
+function parsePrefixFlag(flags: readonly string[]): string | undefined {
+	for (let i = 0; i < flags.length; i++) {
+		if (flags[i] === "--prefix") return flags[i + 1];
+		if (flags[i]?.startsWith("--prefix=")) return flags[i]?.slice("--prefix=".length);
+	}
+	return undefined;
+}
+
+function reportError(verb: string, err: unknown): number {
+	if (isAstroflareCliError(err)) {
+		console.error(`${verb}: ${JSON.stringify(err.toJSON())}`);
+		return 1;
+	}
+	console.error(`${verb}: ${(err as Error).message}`);
+	return 1;
 }
 
 async function runProvisionStack(argv: readonly string[]): Promise<number> {
@@ -462,97 +713,6 @@ async function runDeployStatic(argv: readonly string[]): Promise<number> {
 	}
 }
 
-async function runProvisionPreview(argv: readonly string[]): Promise<number> {
-	const [name] = argv;
-	if (!name) {
-		console.error("af provision-preview: missing <name> argument");
-		return 1;
-	}
-	try {
-		const ctx = opsCtx();
-		const bundle = loadPreviewWorkerBundle(ctx.rootDir);
-		const state = await provisionPreview({
-			rootDir: ctx.rootDir,
-			sha7: ctx.sha7,
-			name,
-			client: ctx.client,
-			previewWorkerBundle: bundle,
-		});
-		console.log(`provisioned preview ${state.workerName} → ${state.url}`);
-		console.log(`deploy token: ${state.deployToken}`);
-		return 0;
-	} catch (err) {
-		console.error(`af provision-preview: ${(err as Error).message}`);
-		return 1;
-	}
-}
-
-async function runDestroyPreview(argv: readonly string[]): Promise<number> {
-	const [name] = argv;
-	if (!name) {
-		console.error("af destroy-preview: missing <name> argument");
-		return 1;
-	}
-	try {
-		const ctx = opsCtx();
-		const r = await destroyPreview({
-			rootDir: ctx.rootDir,
-			sha7: ctx.sha7,
-			name,
-			client: ctx.client,
-		});
-		if (r.deletedWorker) {
-			console.log(`destroyed preview ${r.deletedWorker} + ${r.deletedBucket}`);
-		} else {
-			console.log(`no state for preview ${name}`);
-		}
-		return 0;
-	} catch (err) {
-		console.error(`af destroy-preview: ${(err as Error).message}`);
-		return 1;
-	}
-}
-
-async function runUploadFiles(argv: readonly string[]): Promise<number> {
-	const { values, positionals } = parseArgs({
-		args: [...argv],
-		options: {
-			preview: { type: "string" },
-		},
-		allowPositionals: true,
-	});
-	const fixtureDir = positionals[0];
-	if (!fixtureDir) {
-		console.error("af upload-files: missing <fixture-dir>");
-		return 1;
-	}
-	const previewName = values.preview as string | undefined;
-	if (!previewName) {
-		console.error("af upload-files: --preview <name> required");
-		return 1;
-	}
-	try {
-		const ctx = opsCtx();
-		const previewState = readPreviewState(ctx.rootDir, ctx.sha7, previewName);
-		if (!previewState) {
-			console.error(
-				`af upload-files: no preview '${previewName}' for sha=${ctx.sha7} — run 'af provision-preview ${previewName}' first`,
-			);
-			return 1;
-		}
-		const result = await uploadFiles({ preview: previewState, fixtureDir });
-		console.log(`uploaded ${result.uploaded.length} file(s) to ${previewState.url}`);
-		for (const f of result.uploaded) {
-			console.log(`  ${f.workspacePath}\t${f.bytes}b\t${f.hash ?? "-"}`);
-		}
-		for (const s of result.skipped) console.log(`skipped: ${s}`);
-		return 0;
-	} catch (err) {
-		console.error(`af upload-files: ${(err as Error).message}`);
-		return 1;
-	}
-}
-
 async function runGc(): Promise<number> {
 	try {
 		const ctx = opsCtx();
@@ -631,20 +791,29 @@ function printUsage(): void {
 			"                           --stack <n>  stack name (default: preview)",
 			"                           --name  <n>  route prefix (default: fixture dir basename)",
 			"",
-			"CLOUDFLARE PREVIEW (in-Worker compile + render + HMR)",
-			"  provision-preview <n>    Create a preview-worker stack with Worker Loader",
-			"  destroy-preview <n>      Destroy a preview stack + its R2 bucket",
-			"  upload-files <fixture>   Upload a fixture's source tree to a preview workspace",
-			"                           --preview <n>  preview-stack name (required)",
+			"CLOUDFLARE PREVIEW (Mode A)",
+			"  Preview is host-driven: no Astroflare CLI verbs (Phase 26).",
+			"  Hosts integrate via @astroflare/host-cloudflare's createCoordinator,",
+			"  createPreviewHandler, and acceptHmrSocket inside their own DO.",
 			"",
 			"CLOUDFLARE OPERATIONS",
 			"  provision <n>   Create a managed Worker + R2 bucket from fixture <n>",
 			"  destroy <n>     Destroy a managed Worker and its R2 bucket",
 			"  destroy-all     Destroy every Worker managed for the current SHA",
-			"  list            List Workers managed for the current SHA",
-			"  inspect <n>     Print state for a managed Worker",
+			"  list            List Workers managed for the current SHA (fixtures + stacks)",
+			"  inspect <n>     Print state for a managed Worker (fixture or stack)",
 			"  health          HEAD each managed URL; report status + latency",
 			"  gc              Find orphan workers in the account",
+			"  doctor          Environment sanity check (creds, plan, state)",
+			"",
+			"AGENT OPS / INTROSPECTION (Phase 26c)",
+			"  snapshot list <stack> [--prefix <p>]               List snapshot hashes",
+			"  snapshot current <stack> [--prefix <p>]            Active snapshot hash",
+			"  snapshot cat <stack> <hash> <route> [--prefix <p>] Read raw bytes",
+			"  snapshot diff <stack> <hashA> <hashB>              Structural diff",
+			"  exec <METHOD> <path> [--body @file] [--content-type <ct>]",
+			"                                                       Ad-hoc Cloudflare REST call",
+			"  logs <worker> [--tail] [--since <duration>]        Wrangler tail wrapper",
 			"",
 			"COMMON OPTIONS (deploy / status / rollback)",
 			"  --account-id <id>     Cloudflare account ID",

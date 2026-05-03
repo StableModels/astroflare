@@ -15,7 +15,9 @@
     "test": "vitest run --project cli-lib"
   },
   "dependencies": {
+    "@astroflare/build": "workspace:*",
     "@astroflare/compiler": "workspace:*",
+    "@astroflare/core": "workspace:*",
     "@astroflare/runtime": "workspace:*"
   },
   "devDependencies": {

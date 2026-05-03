@@ -1,0 +1,35 @@
+{
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "preview-host-ref",
+	"main": "src/worker.ts",
+	"compatibility_date": "2025-09-01",
+	"compatibility_flags": ["nodejs_compat"],
+	"durable_objects": {
+		"bindings": [
+			{
+				"name": "SITE_DO",
+				"class_name": "SiteDurableObject"
+			}
+		]
+	},
+	"migrations": [
+		{
+			"tag": "v1",
+			"new_sqlite_classes": ["SiteDurableObject"]
+		}
+	],
+	"r2_buckets": [
+		{
+			"binding": "SITE_R2",
+			"bucket_name": "preview-host-ref-files"
+		}
+	],
+	"unsafe": {
+		"bindings": [
+			{
+				"name": "LOADER",
+				"type": "worker_loader"
+			}
+		]
+	}
+}

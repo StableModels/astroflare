@@ -5,10 +5,10 @@
  *
  * Excludes `InProcessExecutor` (which uses `node:os/path/fs/url`) and
  * `createTestHost()` (which constructs one). Tests that need an in-memory
- * Storage / Coordinator / stubs but supply their own Executor (e.g. the
+ * Site/Cache/Coordinator/stubs but supply their own Executor (e.g. the
  * `WorkerdExecutor` from `@astroflare/host-cloudflare`) import from here.
  */
-export * from "./memory-storage.js";
+export * from "./memory-site.js";
 export * from "./map-coordinator.js";
 export * from "./memory-image-service.js";
 export * from "./stubs.js";

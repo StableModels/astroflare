@@ -9,11 +9,12 @@ import type { Host } from "@astroflare/core";
 import { InProcessExecutor } from "./inproc-executor.js";
 import { MapCoordinator } from "./map-coordinator.js";
 import { MemoryImageService } from "./memory-image-service.js";
-import { MemoryStorage } from "./memory-storage.js";
+import { MemoryCache, MemorySite } from "./memory-site.js";
 import { MemoryTransport, StubClock, StubLogger } from "./stubs.js";
 
 export interface TestHost extends Host {
-	storage: MemoryStorage;
+	site: MemorySite;
+	cache: MemoryCache;
 	executor: InProcessExecutor;
 	coordinator: MapCoordinator;
 	transport: MemoryTransport;
@@ -26,14 +27,16 @@ export interface TestHost extends Host {
 export function createTestHost(): TestHost {
 	const clock = new StubClock();
 	const logger = new StubLogger(clock);
-	const storage = new MemoryStorage();
+	const site = new MemorySite();
+	const cache = new MemoryCache();
 	const coordinator = new MapCoordinator();
 	const transport = new MemoryTransport();
 	const executor = new InProcessExecutor();
 	const imageService = new MemoryImageService();
 
 	return {
-		storage,
+		site,
+		cache,
 		executor,
 		coordinator,
 		transport,

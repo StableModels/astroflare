@@ -15,44 +15,42 @@
  * Worker bindings.
  */
 
-import type { EnvService, FsService, FsStat, LogService, Storage } from "@astroflare/core";
-
+import type { EnvService, FsService, FsStat, LogService } from "@astroflare/core";
 import { sha256Hex } from "@astroflare/core";
+import type { MemorySite } from "./memory-site.js";
 
 export class InMemoryFsService implements FsService {
-	#storage: Storage;
+	#site: MemorySite;
 	#onWrite?: (path: string, hash: string) => Promise<void> | void;
 	#onRemove?: (path: string) => Promise<void> | void;
 
 	constructor(opts: {
-		storage: Storage;
+		site: MemorySite;
 		onWrite?: (path: string, hash: string) => Promise<void> | void;
 		onRemove?: (path: string) => Promise<void> | void;
 	}) {
-		this.#storage = opts.storage;
+		this.#site = opts.site;
 		this.#onWrite = opts.onWrite;
 		this.#onRemove = opts.onRemove;
 	}
 
 	async write(path: string, bytes: Uint8Array): Promise<void> {
-		await this.#storage.write(path, bytes);
+		this.#site.write(path, bytes);
 		const hash = await sha256Hex(bytes);
 		await this.#onWrite?.(path, hash);
 	}
 
 	async read(path: string): Promise<Uint8Array | null> {
-		const stat = await this.#storage.stat(path);
-		if (!stat) return null;
-		return await this.#storage.read(path);
+		return this.#site.readFile(path);
 	}
 
 	async remove(path: string): Promise<void> {
-		await this.#storage.remove(path);
+		this.#site.remove(path);
 		await this.#onRemove?.(path);
 	}
 
 	async stat(path: string): Promise<FsStat | null> {
-		const s = await this.#storage.stat(path);
+		const s = await this.#site.statFile(path);
 		if (!s) return null;
 		return { size: s.size, hash: s.hash };
 	}

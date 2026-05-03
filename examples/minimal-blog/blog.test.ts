@@ -16,7 +16,6 @@
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { createDeployServer, deploy } from "@astroflare/build";
 import { createContentReader, defineCollection, z } from "@astroflare/content";
 import { createPreviewServer } from "@astroflare/preview";
 import { type TestHost, createTestHost } from "@astroflare/test-utils";
@@ -44,7 +43,7 @@ async function bootHost(): Promise<TestHost> {
 	const host = createTestHost();
 	active.push(host);
 	for (const [p, body] of Object.entries(minimalBlogFiles)) {
-		await host.storage.write(p, enc(body));
+		host.site.write(p, enc(body));
 	}
 	return host;
 }
@@ -108,7 +107,7 @@ describe("minimal-blog: content collections", () => {
 				tags: z.array(z.string()).default([]),
 			}),
 		});
-		const reader = createContentReader(host.storage, {
+		const reader = createContentReader(host.site, {
 			collections: { blog },
 		});
 
@@ -120,21 +119,9 @@ describe("minimal-blog: content collections", () => {
 	});
 });
 
-describe("minimal-blog: deploy", () => {
-	it("renders all static routes; skips the dynamic post route", async () => {
-		const host = await bootHost();
-
-		const result = await deploy({ host, runtimeImport: RUNTIME_URL });
-
-		const urls = result.manifest.routes.map((r) => r.url).sort();
-		expect(urls).toEqual(["/", "/about"]);
-		expect(result.skipped).toHaveLength(1);
-		expect(result.skipped[0]?.kind).toBe("skipped");
-
-		// The deploy server serves the static HTML.
-		const ds = createDeployServer({ host });
-		const r = await ds.fetch(new Request("https://app/about"));
-		expect(r.status).toBe(200);
-		expect(await r.text()).toContain("<h1>About this blog</h1>");
-	});
-});
+// Phase 26b: minimal-blog's deploy section relied on the legacy
+// `deploy()` + `createDeployServer` shape. The Phase 26b alternative
+// is `buildSite` + `R2SnapshotSink` + `createSnapshotHandler` which
+// requires a `Site` adapter (LocalSite / WorkspaceSite), not a Host;
+// the example will be reshaped against `LocalSite` as part of the
+// docs / examples pass.

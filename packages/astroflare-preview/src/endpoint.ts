@@ -58,7 +58,10 @@ export interface RunEndpointOptions {
  * `Executor.runCached` flow the page render path uses.
  */
 export async function runEndpoint(opts: RunEndpointOptions): Promise<Response> {
-	const sourceBytes = await opts.host.storage.read(opts.filePath);
+	const sourceBytes = await opts.host.site.readFile(opts.filePath);
+	if (!sourceBytes) {
+		return new Response(`endpoint source not found: ${opts.filePath}`, { status: 404 });
+	}
 	let source = dec.decode(sourceBytes);
 	// `.ts` endpoints get TS syntax stripped before bundling. Plain `.js`
 	// passes through unchanged.

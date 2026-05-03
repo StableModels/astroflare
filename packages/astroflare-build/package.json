@@ -10,13 +10,9 @@
       "types": "./src/index.ts",
       "default": "./src/index.ts"
     },
-    "./deploy-server": {
-      "types": "./src/deploy-server.ts",
-      "default": "./src/deploy-server.ts"
-    },
-    "./artifact": {
-      "types": "./src/artifact.ts",
-      "default": "./src/artifact.ts"
+    "./node": {
+      "types": "./src/node.ts",
+      "default": "./src/node.ts"
     }
   },
   "scripts": {

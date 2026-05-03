@@ -25,7 +25,7 @@
  *     `slug` in frontmatter, or via filename; we always use filename).
  */
 
-import { type Storage, contentId } from "@astroflare/core";
+import { type Site, contentId } from "@astroflare/core";
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
 
@@ -83,10 +83,10 @@ export interface CollectionRegistry {
 }
 
 /**
- * Build a content-collection reader bound to a `Storage` and a registry.
+ * Build a content-collection reader bound to a `Site` and a registry.
  * Returns the public `getCollection`/`getEntry` API.
  */
-export function createContentReader(storage: Storage, registry: CollectionRegistry) {
+export function createContentReader(site: Site, registry: CollectionRegistry) {
 	async function getCollection<TData = Record<string, unknown>>(
 		name: string,
 	): Promise<CollectionEntry<TData>[]> {
@@ -96,8 +96,8 @@ export function createContentReader(storage: Storage, registry: CollectionRegist
 		}
 		const out: CollectionEntry<TData>[] = [];
 		for (const ext of ENTRY_EXTENSIONS) {
-			for await (const filePath of storage.glob(`${COLLECTIONS_PREFIX}/${name}/**/*${ext}`)) {
-				const entry = await loadEntry<TData>(storage, name, filePath, def);
+			for await (const filePath of site.glob(`${COLLECTIONS_PREFIX}/${name}/**/*${ext}`)) {
+				const entry = await loadEntry<TData>(site, name, filePath, def);
 				out.push(entry);
 			}
 		}
@@ -115,8 +115,8 @@ export function createContentReader(storage: Storage, registry: CollectionRegist
 		}
 		for (const ext of ENTRY_EXTENSIONS) {
 			const filePath = `${COLLECTIONS_PREFIX}/${name}/${slug}${ext}`;
-			const stat = await storage.stat(filePath);
-			if (stat) return loadEntry<TData>(storage, name, filePath, def);
+			const stat = await site.statFile(filePath);
+			if (stat) return loadEntry<TData>(site, name, filePath, def);
 		}
 		return null;
 	}
@@ -125,12 +125,15 @@ export function createContentReader(storage: Storage, registry: CollectionRegist
 }
 
 async function loadEntry<TData>(
-	storage: Storage,
+	site: Site,
 	collectionName: string,
 	filePath: string,
 	def: DefinedCollection,
 ): Promise<CollectionEntry<TData>> {
-	const bytes = await storage.read(filePath);
+	const bytes = await site.readFile(filePath);
+	if (!bytes) {
+		throw new Error(`content collection "${collectionName}": missing entry ${filePath}`);
+	}
 	const source = dec.decode(bytes);
 	const digest = await contentId(bytes);
 
