@@ -79,6 +79,13 @@ Transport in `@astroflare/host-cloudflare`, `minimal-blog` fixture.
 - DB integrations
 - Sessions
 
+### G — End-to-end validation (Phase 20 capstone)
+- Fixtures copied from `withastro/astro/examples` (license-attributed)
+- `aflare-e2e` CLI: provision / orchestrate / introspect / observe / teardown
+- Vitest runner driving each fixture through real Cloudflare
+- CI workflow with the Cloudflare API token from secrets
+- Acceptance §11.* validated on the edge, not just inside Miniflare
+
 ## Proposed next phases
 
 Ordered by dependency + brief priority (close Tier 0/1 first, then host, then
@@ -200,6 +207,94 @@ namespace `.astro` imports). Source maps if not already in by Phase 13.
 This phase is mostly grindy quality work that's been deferred across
 prior phases. Worth its own focused pass to draw a clean line.
 
+### Phase 20 — End-to-end tests against live Cloudflare
+
+The capstone phase. Every prior phase is verified locally — unit
+tests, Miniflare integration, workerd pool. Phase 20 closes the
+loop by exercising the framework against *real* Cloudflare:
+provisioning Workers, Durable Objects, KV, and R2 against the live
+edge, deploying a curated set of Astro fixture sites, and asserting
+that what runs in production matches what we tested locally.
+
+**Fixtures.** Copy a curated set of examples from
+[`withastro/astro/examples`](https://github.com/withastro/astro/tree/main/examples)
+into `tests/e2e/fixtures/`. Each fixture preserves Astro's MIT
+license attribution and gains an `e2e.spec.ts`. Initial set, picked
+to span the supported feature surface: `minimal` (smallest deploy),
+`basics` (routes / layouts / scoped CSS), `blog` (content
+collections + RSS + sitemap), `portfolio` (`<Image>` + Cloudflare
+Images), `non-html-pages` (endpoints), `middleware`, `ssr`,
+`framework-react` (gates Phase 16), `with-mdx` (gates Phase 14),
+and `hackernews` (a larger real-world site combining features).
+Each deploys to its own Worker (`aflare-e2e-<fixture>-<sha7>`) on a
+`*.workers.dev` subdomain so runs are self-contained and need no
+DNS provisioning.
+
+**CLI: `aflare-e2e` (`tools/aflare-e2e/`).** A Node CLI in
+TypeScript wrapping the Cloudflare REST API + `wrangler`. Five
+command groups mirror the verbs the user called out — provision,
+orchestrate, introspect, observe, teardown:
+
+```
+PROVISION
+  provision <fixture>     Create Worker, KV, R2, DOs for one fixture
+  provision-all           Provision every fixture in tests/e2e/fixtures/
+
+ORCHESTRATE
+  build <fixture>         Local Astroflare build (writes to dist/)
+  deploy <fixture>        Upload bundle, bind KV/R2/DOs
+  preview <fixture>       Local wrangler dev session
+  run <fixture> [pattern] Vitest e2e against the deployed instance
+  run-all                 Full cycle: provision → deploy → test → teardown
+
+INTROSPECT
+  inspect <fixture>       Resources (Worker, KV, R2, DOs) with IDs + timestamps
+  list                    All provisioned fixtures in this account
+  status                  Health check across every provisioned fixture
+
+OBSERVE
+  logs <fixture> [--tail] Worker logs (wrangler tail)
+  metrics <fixture>       Req rate, error rate, P50/P95/P99 latency
+  trace <fixture> [-N]    Workers Trace events for the last N requests
+
+TEARDOWN
+  teardown <fixture>      Destroy resources for one fixture (idempotent)
+  teardown-all            Destroy every aflare-e2e-* resource
+  gc                      Sweep orphans left by a crashed run
+```
+
+Resource IDs persist in `tests/e2e/.state/` (gitignored) so
+subsequent commands find what `provision` created without
+round-tripping the API. Names are deterministic
+(`aflare-e2e-<fixture>-<sha7>`) so concurrent CI runs on different
+SHAs don't collide.
+
+**Test runner: `tests/e2e/`.** A separate vitest project — the
+workerd pool is in-process; this one needs real network. Each
+`e2e.spec.ts` receives the deployed URL plus resource handles and
+asserts: SSR pages render byte-equivalent to local preview output,
+static assets serve with correct cache headers, `<Image>` URLs
+return the right format, endpoints serve their declared
+content-type, hydrated islands boot client-side and respond to
+events, and Worker latency stays inside acceptance §11.2/3
+budgets. The runner reads `CLOUDFLARE_API_TOKEN` from `.dev.vars`
+(loaded by direnv via `.envrc`). Required token scopes: Workers
+Scripts edit, KV edit, R2 edit, DO classes edit. The 1Password
+reference in `scripts/setup` extends to include this token
+alongside the git-crypt key.
+
+**CI.** A separate `.github/workflows/e2e.yml` runs on push to
+`main` and on a nightly schedule (catches upstream Cloudflare
+regressions). `CLOUDFLARE_API_TOKEN` lives in repository secrets;
+the workflow runs `aflare-e2e run-all`. Teardown runs in a
+`finally` step so failed runs never leak resources.
+
+**Defer:** Custom-domain provisioning (DNS automation is its own
+project; `*.workers.dev` is sufficient for tests). Load testing /
+synthetic traffic (Phase 20 is correctness, not stress).
+Multi-region geographic assertions (a single workers.dev URL hits
+the nearest edge — global routing tests are a separate concern).
+
 ## Cross-cutting work (rides along)
 
 These improvements are small enough to ride along with whichever phase
@@ -236,7 +331,12 @@ real users.
 - **End of Phase 16:** first interactive site (React island in an
   otherwise-static page) works end-to-end.
 - **End of Phase 19:** every acceptance criterion (§11.1–6) measurable
-  in CI with explicit gates.
+  in CI with explicit gates (locally — Miniflare + workerd pool).
+- **End of Phase 20:** every acceptance criterion validated against
+  *real* Cloudflare. The `aflare-e2e` CLI provisions, deploys, tests,
+  observes, and tears down each fixture against the live edge; CI runs
+  it on push to `main` plus nightly. The framework can be claimed
+  *production-validated*, not just *Miniflare-validated*.
 
 ## Order rationale (one paragraph)
 
@@ -252,6 +352,11 @@ deferred until real demand surfaces. Phase 15 (host) is the moment
 we can deploy to production. Phase 16 adds interactivity via
 React-only — Vue / Svelte / Solid / Lit are an opinionated cut.
 Phases 17–18 are Tier 2 polish + i18n. Phase 19 closes the quality
-loop. The dependency chain forces Phase 15 before any "ship to
-Cloudflare" claim and Phase 16 before any "real interactive site"
-claim — everything else is sequencing on user value.
+loop on local tests. Phase 20 is the capstone: a custom
+`aflare-e2e` CLI drives fixtures from `withastro/astro`'s public
+examples through real Cloudflare infrastructure — the difference
+between "passes in Miniflare" and "deploys cleanly to the edge".
+The dependency chain forces Phase 15 before any "ship to
+Cloudflare" claim, Phase 16 before any "real interactive site"
+claim, and Phase 20 before any "production-validated" claim —
+everything else is sequencing on user value.
