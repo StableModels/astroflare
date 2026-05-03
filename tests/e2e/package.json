@@ -1,0 +1,10 @@
+{
+  "name": "@astroflare/tests-e2e",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@astroflare/cli": "workspace:*",
+    "@astroflare/cli-lib": "workspace:*"
+  }
+}

@@ -1,0 +1,31 @@
+{
+  "name": "@astroflare/test-utils",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./in-memory": {
+      "types": "./src/in-memory.ts",
+      "default": "./src/in-memory.ts"
+    },
+    "./fixtures": {
+      "types": "./src/fixtures/index.ts",
+      "default": "./src/fixtures/index.ts"
+    }
+  },
+  "scripts": {
+    "test": "vitest run --project test-utils"
+  },
+  "dependencies": {
+    "@astroflare/core": "workspace:*"
+  },
+  "devDependencies": {
+    "vitest": "^2.1.8"
+  }
+}

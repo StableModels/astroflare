@@ -1,0 +1,8 @@
+# Used by vitest-pool-workers to boot the test worker.
+# This is NOT used for production deploys — the brief explicitly forbids
+# Wrangler-driven deploys (§10). Production deploys flow through the
+# Project Worker's /deploy RPC and produce content-addressed artifacts.
+name = "astroflare-host-cloudflare-tests"
+main = "src/index.ts"
+compatibility_date = "2024-12-01"
+compatibility_flags = ["nodejs_compat"]

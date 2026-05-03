@@ -1,0 +1,19 @@
+{
+  "name": "@astroflare-examples/minimal-blog",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "vitest run --project minimal-blog"
+  },
+  "dependencies": {
+    "@astroflare/build": "workspace:*",
+    "@astroflare/content": "workspace:*",
+    "@astroflare/core": "workspace:*",
+    "@astroflare/preview": "workspace:*"
+  },
+  "devDependencies": {
+    "@astroflare/test-utils": "workspace:*",
+    "vitest": "^2.1.8"
+  }
+}

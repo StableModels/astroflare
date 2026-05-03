@@ -1,0 +1,35 @@
+{
+  "name": "@astroflare/build",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./deploy-server": {
+      "types": "./src/deploy-server.ts",
+      "default": "./src/deploy-server.ts"
+    },
+    "./artifact": {
+      "types": "./src/artifact.ts",
+      "default": "./src/artifact.ts"
+    }
+  },
+  "scripts": {
+    "test": "vitest run --project build"
+  },
+  "dependencies": {
+    "@astroflare/core": "workspace:*",
+    "@astroflare/compiler": "workspace:*",
+    "@astroflare/preview": "workspace:*",
+    "@astroflare/runtime": "workspace:*"
+  },
+  "devDependencies": {
+    "@astroflare/test-utils": "workspace:*",
+    "vitest": "^2.1.8"
+  }
+}

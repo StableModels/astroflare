@@ -1,0 +1,62 @@
+name: e2e
+
+# End-to-end tests against real Cloudflare.
+#
+# Triggers:
+#   - push to main: every merge gets validated against the edge
+#   - schedule (nightly): catches Cloudflare-side regressions even on
+#     a quiet repo
+#   - workflow_dispatch: manual on-demand runs
+#
+# The vitest e2e project's globalSetup provisions every fixture
+# under `tests/e2e/fixtures/` (creates Worker + R2 bucket, enables
+# the workers.dev subdomain), exports each URL as an env var, and
+# the corresponding globalTeardown destroys everything when the run
+# finishes (success or failure). So this workflow is just `vitest
+# run --project e2e` — the test suite owns its own orchestration.
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    # 06:42 UTC daily — off-peak, low overlap with merges.
+    - cron: "42 6 * * *"
+  workflow_dispatch:
+
+concurrency:
+  # Coalesce repeated pushes to main; the e2e budget is per-account, not
+  # per-PR. A second push to main while one's in flight cancels the first.
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  e2e:
+    name: e2e against live Cloudflare
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      CLOUDFLARE_ACCOUNT_ID: 4ef06593037ec81daf64e272ab950efb
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10.28.2
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".nvmrc"
+          cache: "pnpm"
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: typecheck
+        run: pnpm typecheck
+
+      - name: e2e tests (provision + run + teardown)
+        # Worker names embed AFLARE_SHA verbatim; truncate GITHUB_SHA
+        # to its short form (Cloudflare caps script names at 64 chars).
+        run: |
+          export AFLARE_SHA="${GITHUB_SHA:0:7}"
+          pnpm exec vitest run --project e2e

@@ -1,0 +1,56 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# CI mirrors the four test layers in §8 of the brief:
+#   Layer A: framework packages, plain Node            -> `vitest run --project core,...`
+#   Layer B: @astroflare/host-cloudflare under workerd -> `vitest run --project host-cloudflare`
+#   Layer C: end-to-end assembly in Miniflare           -> `vitest run --project integration`
+#   Layer D: differential vs Astro                      -> lives inside compiler's node pool
+#
+# All four pools run from `pnpm test` because vitest.workspace.ts ties them together.
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ci:
+    name: lint + typecheck + test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10.28.2
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: ".nvmrc"
+          cache: "pnpm"
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: lint
+        run: pnpm lint
+
+      - name: typecheck
+        run: pnpm typecheck
+
+      # `CLOUDFLARE_ACCOUNT_ID` is non-secret; we expose it so any test
+      # that opportunistically reaches for `process.env.CLOUDFLARE_ACCOUNT_ID`
+      # has it. We deliberately do NOT expose `CLOUDFLARE_API_TOKEN` —
+      # the e2e project's globalSetup checks for both env vars and
+      # self-skips when the token is absent, so PR-level CI doesn't
+      # spend live Cloudflare resources. The `e2e.yml` workflow
+      # provides the token on push-to-main + nightly.
+      - name: test
+        env:
+          CLOUDFLARE_ACCOUNT_ID: 4ef06593037ec81daf64e272ab950efb
+        run: pnpm test

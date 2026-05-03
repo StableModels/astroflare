@@ -1,0 +1,27 @@
+node_modules
+dist
+.turbo
+.tsbuildinfo
+*.tsbuildinfo
+coverage
+.DS_Store
+.vitest-cache
+.wrangler
+.miniflare
+.idea
+.vscode
+*.log
+
+# Defence-in-depth: a decoded copy of the git-crypt symmetric key must
+# never land in a commit. The real key lives in 1Password (base64) and
+# is loaded into `.git/git-crypt/keys/default` (untracked) by
+# `scripts/setup`.
+*.gitcrypt-key
+gitcrypt.key
+gitcrypt.key.bin
+
+# Phase 20 — per-fixture state files written by `aflare-e2e provision`.
+# Resource IDs are deterministic per <sha7>, so concurrent runs on
+# different SHAs don't collide; the local file just lets `teardown` /
+# `list` skip a round-trip to the Cloudflare API.
+tests/e2e/.state/
