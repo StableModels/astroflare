@@ -21,4 +21,7 @@ export * from "./accept-hmr-socket.js";
 export * from "./sql-cache.js";
 export * from "./runtime-bundled-executor.js";
 
+// Phase 26b — host-driven build/serve: snapshot adapters.
+export * from "./r2-snapshots.js";
+
 export const HOST_CLOUDFLARE_VERSION = "0.0.0";

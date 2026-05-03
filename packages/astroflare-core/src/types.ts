@@ -77,6 +77,65 @@ export interface Cache {
 }
 
 // -----------------------------------------------------------------------------
+// 1d. Snapshots — versioned static deploy artifacts (Phase 26b)
+// -----------------------------------------------------------------------------
+
+/**
+ * One file inside a snapshot. The build emits a stream of these; the
+ * `SnapshotSink` writes them; `Snapshots.read` returns them.
+ *
+ * Replaces what `DeployManifestEntry` + the rendered-HTML byte stream
+ * carried in two pieces. Now they're coupled per-route — no separate
+ * manifest persisted; each entry carries enough metadata to serve.
+ */
+export interface SnapshotEntry {
+	/** Site-relative URL path the route serves (e.g. `/`, `/about`, `/blog/p1`). */
+	route: string;
+	/** Rendered bytes. */
+	bytes: Uint8Array;
+	/** MIME content-type (e.g. `text/html;charset=utf-8`). */
+	contentType: string;
+	/** SHA-256 of the bytes, hex. */
+	hash: string;
+}
+
+/**
+ * Read-only view of stored snapshots — what the serve handler talks to.
+ * Concrete implementations: `R2Snapshots` (host-cloudflare),
+ * `LocalSnapshots` (Node-side helper for tests / CLI), `MemorySnapshots`
+ * (test fakes).
+ */
+export interface Snapshots {
+	/** Read one entry from a specific snapshot. Returns `null` on miss. */
+	read(snapshotHash: string, route: string): Promise<SnapshotEntry | null>;
+	/** Hash of the current (active) snapshot, or `null` if no deploy yet. */
+	current(): Promise<string | null>;
+	/** All snapshot hashes in storage. Used for rollback UIs / GC. */
+	list(): Promise<readonly string[]>;
+}
+
+/**
+ * Write-side counterpart to `Snapshots`. The build pipeline pipes
+ * `SnapshotEntry`s through here, then commits to flip `current`.
+ */
+export interface SnapshotSink {
+	/** Write a single entry into the staging area for `snapshotHash`. */
+	put(snapshotHash: string, entry: SnapshotEntry): Promise<void>;
+	/**
+	 * Atomically promote `snapshotHash` to current. Implementations write
+	 * the equivalent of `<prefix>current` last so partial writes never
+	 * leave an inconsistent active deploy.
+	 */
+	commit(snapshotHash: string): Promise<void>;
+	/**
+	 * Best-effort cleanup of partial writes for `snapshotHash` if a build
+	 * fails midway. Implementations may no-op (R2 keeps the partial files
+	 * harmlessly until GC).
+	 */
+	abort(snapshotHash: string): Promise<void>;
+}
+
+// -----------------------------------------------------------------------------
 // 1c. Storage — DEPRECATED (Phase 26)
 // -----------------------------------------------------------------------------
 

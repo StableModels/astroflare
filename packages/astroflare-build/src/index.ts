@@ -45,6 +45,13 @@ export * from "./render-fanout.js";
 export * from "./artifact.js";
 export { createDeployServer, type DeployServer } from "./deploy-server.js";
 
+// Phase 26b — host-driven build/serve: the new shape.
+export {
+	createSnapshotHandler,
+	type CreateSnapshotHandlerOptions,
+	type SnapshotHandler,
+} from "./snapshot-handler.js";
+
 export interface DeployOptions {
 	host: Host;
 	runtimeImport: string;

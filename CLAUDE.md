@@ -69,10 +69,15 @@ Cloudflare's isolate primitives. Two lifecycles:
   Loader binding). Reference fixture:
   [`tests/e2e/fixtures/preview-host-ref/`](tests/e2e/fixtures/preview-host-ref/).
 - **Mode B — Production deploy.** Compile + render runs locally
-  (Node), HTML lands in R2 under `files/site/<hash>/`,
-  `stack-worker.ts` (18 KiB) atomically serves it. *Pending Phase
-  26b refactor* — under the new shape this becomes
-  `createSnapshotHandler` + `R2Snapshots` (host-owned worker).
+  (Node), output lands in R2 as a versioned, atomically-flippable
+  *snapshot*. New shape (Phase 26b, additive): host owns its own
+  worker that instantiates `R2Snapshots({ bucket, prefix? })` and
+  mounts `createSnapshotHandler({ snapshots })`. The `prefix`
+  parameter supports multi-env (dev/staging/prod buckets) +
+  multi-site (`sites/<id>/`) partitioning. Reference fixture:
+  [`tests/e2e/fixtures/deploy-host-ref/`](tests/e2e/fixtures/deploy-host-ref/).
+  Legacy `stack-worker.ts` + `R2Storage` + `createDeployServer`
+  still in tree until the e2e harness is rewired.
 
 Founding spec: [`docs/cloudflare-validation-plan.md`](docs/cloudflare-validation-plan.md).
 Dual-mode plan: [`docs/dual-mode-validation-plan.md`](docs/dual-mode-validation-plan.md).
