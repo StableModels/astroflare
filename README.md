@@ -16,10 +16,10 @@ Astroflare runs an Astro-shaped project (`src/pages/`, `.astro`/`.md`/`.mdx`,
 
 ## Status
 
-Phases 0–12 shipped, plus Phase 2.5b which closed the original Phase 2.5
+Phases 0–13 shipped, plus Phase 2.5b which closed the original Phase 2.5
 deferral list (Miniflare v4 unblock + real `WorkerdExecutor` + real
 Hibernatable WS Transport + workerd-native compiler e2e + latency + soak).
-**465 tests across 5 test pools.**
+**482 tests across 5 test pools.**
 
 The framework runs end-to-end:
 
@@ -38,6 +38,11 @@ The framework runs end-to-end:
   per-component-scoped rules via `data-aflare-h`; `<style is:global>`
   passes through. Plus compile-time `import.meta.env.<KEY>`
   substitution from `astroflare.config.ts#env`.
+- **Asset pipeline** — `import logo from "./logo.png"` resolves at
+  compile time via `ImageService`; runtime `<Image>` /
+  `<Picture>` components render `<img>` / `<picture>` with the
+  right hashed URLs and dimension attributes. Preview server
+  serves assets at `/_aflare/asset/<path>`.
 - **Content collections** — `defineCollection` + Zod schemas + `getCollection` +
   `getEntry`, walking `src/content/<name>/`.
 - **Deploy pipeline** — planner (with `getStaticPaths` expansion),

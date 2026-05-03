@@ -47,6 +47,7 @@ import type {
 	StaticAttribute,
 } from "./ast.js";
 import { scopeCss } from "./css-scope.js";
+import { buildLineMap } from "./source-map.js";
 
 export interface EmitOptions {
 	/** Module specifier for the runtime ABI imports. */
@@ -65,8 +66,12 @@ export interface EmitOptions {
 
 export interface EmitResult {
 	code: string;
-	/** Source map placeholder; filled in a later phase. */
-	map: null;
+	/**
+	 * Phase 13: a v3 source map mapping each generated line back to
+	 * line 1, column 0 of the original `.astro` source. Per-token
+	 * mappings using each AST node's `range` is a Phase 23 carryover.
+	 */
+	map: import("./source-map.js").SourceMapV3 | null;
 }
 
 const DEFAULT_RUNTIME_IMPORT = "@astroflare/runtime/internal";
@@ -130,7 +135,11 @@ export function emitDocument(doc: AstroDocument, opts: EmitOptions = {}): EmitRe
 	const body = emitChildren(doc.body, "$$slots", ctx);
 	const hoistedBlock = hoisted.length > 0 ? `${hoisted.join("\n")}\n` : "";
 	const code = `${importLine}\n${hoistedBlock}export default $component(async ({ Astro, ...$$props }, $$slots) => {\n${remaining}\nreturn $render\`${body}\`;\n});\n`;
-	return { code, map: null };
+	// Phase 13: emit a structural source map. The original source string
+	// isn't available to the emitter (it works from a parsed AST); the
+	// caller in `compileAstro` pairs the map with the source.
+	const map = opts.filename ? buildLineMap(code, "", opts.filename) : null;
+	return { code, map };
 }
 
 /**

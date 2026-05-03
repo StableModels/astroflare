@@ -8,6 +8,7 @@
 import type { Host } from "@astroflare/core";
 import { InProcessExecutor } from "./inproc-executor.js";
 import { MapCoordinator } from "./map-coordinator.js";
+import { MemoryImageService } from "./memory-image-service.js";
 import { MemoryStorage } from "./memory-storage.js";
 import { MemoryTransport, StubClock, StubLogger } from "./stubs.js";
 
@@ -18,6 +19,7 @@ export interface TestHost extends Host {
 	transport: MemoryTransport;
 	clock: StubClock;
 	logger: StubLogger;
+	imageService: MemoryImageService;
 	dispose(): Promise<void>;
 }
 
@@ -28,6 +30,7 @@ export function createTestHost(): TestHost {
 	const coordinator = new MapCoordinator();
 	const transport = new MemoryTransport();
 	const executor = new InProcessExecutor();
+	const imageService = new MemoryImageService();
 
 	return {
 		storage,
@@ -36,6 +39,7 @@ export function createTestHost(): TestHost {
 		transport,
 		clock,
 		logger,
+		imageService,
 		async dispose() {
 			await executor.dispose();
 		},

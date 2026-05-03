@@ -15,5 +15,6 @@ export * from "./internal.js";
 export * from "./render.js";
 export * from "./hmr-client.js";
 export { CookieJar } from "./cookies.js";
+export { Image, Picture } from "./components.js";
 
 export const RUNTIME_VERSION = "0.0.0";

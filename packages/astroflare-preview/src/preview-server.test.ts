@@ -605,6 +605,54 @@ describe("preview server: middleware", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Asset pipeline (Phase 13)
+// ---------------------------------------------------------------------------
+
+describe("preview server: asset pipeline", () => {
+	it("renders an image src from a substituted import", async () => {
+		const { host, server } = await fixture({
+			"/src/pages/index.astro": [
+				"---",
+				'import logo from "../assets/logo.png";',
+				"---",
+				"<img src={logo.src} alt={`logo ${logo.width}x${logo.height}`} />",
+			].join("\n"),
+			"/src/assets/logo.png": "PNG-BYTES",
+		});
+		host.imageService.set("/src/assets/logo.png", {
+			src: "/_aflare/asset/src/assets/logo.png",
+			width: 200,
+			height: 100,
+			format: "png",
+		});
+		const r = await server.fetch(new Request("https://app/"));
+		expect(r.status).toBe(200);
+		const body = stripHmr(await r.text());
+		expect(body).toContain('src="/_aflare/asset/src/assets/logo.png"');
+		expect(body).toContain('alt="logo 200x100"');
+	});
+
+	it("/_aflare/asset/<path> serves stored bytes with image content-type", async () => {
+		const { host, server } = await fixture({
+			"/src/pages/index.astro": "<p>x</p>",
+			"/src/assets/logo.png": "PNG-BYTES",
+		});
+		const r = await server.fetch(new Request("https://app/_aflare/asset/src/assets/logo.png"));
+		expect(r.status).toBe(200);
+		expect(r.headers.get("content-type")).toBe("image/png");
+		expect(await r.text()).toBe("PNG-BYTES");
+		// Also touch host so the linter doesn't flag the unused binding.
+		expect(await host.storage.stat("/src/assets/logo.png")).not.toBeNull();
+	});
+
+	it("returns 404 for an asset URL whose file doesn't exist", async () => {
+		const { server } = await fixture({});
+		const r = await server.fetch(new Request("https://app/_aflare/asset/missing.png"));
+		expect(r.status).toBe(404);
+	});
+});
+
+// ---------------------------------------------------------------------------
 // Errors
 // ---------------------------------------------------------------------------
 

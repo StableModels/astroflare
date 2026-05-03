@@ -18,5 +18,6 @@ next phase's planner.
 - [`phase-02_5b-host-implementation.md`](./phase-02_5b-host-implementation.md) — Phase 2.5 deferral list closed: real `WorkerdExecutor`, Hibernatable WS Transport, workerd compiler-e2e, latency + soak.
 - [`phase-10-tier0-closeout.md`](./phase-10-tier0-closeout.md) — `getStaticPaths` + `Astro.cookies` / `locals` / `slots` / redirect propagation + file-removal `prune` HMR. 427 tests.
 - [`phase-11-typescript.md`](./phase-11-typescript.md) — esbuild-wasm-backed TS strip in compiler; `.ts` endpoints + `.ts` middleware; regex-literal disambiguation in expression parser. 445 tests.
-- [`phase-12-css-and-env.md`](./phase-12-css-and-env.md) — scoped + global `<style>` blocks via per-component data-aflare-h hash; raw-text parsing for `<style>` / `<script>`; `import.meta.env` compile-time substitution via esbuild `define`. **465 tests.**
+- [`phase-12-css-and-env.md`](./phase-12-css-and-env.md) — scoped + global `<style>` blocks via per-component data-aflare-h hash; raw-text parsing for `<style>` / `<script>`; `import.meta.env` compile-time substitution via esbuild `define`. 465 tests.
+- [`phase-13-asset-pipeline.md`](./phase-13-asset-pipeline.md) — `ImageService` interface + `MemoryImageService` stub; compile-time image import substitution; runtime `<Image>` / `<Picture>` components; preview-server `/_aflare/asset/<path>` route; v3 source-map placeholder from .astro compiler. **482 tests.**
 - (later phases land here as they complete)

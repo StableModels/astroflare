@@ -15,6 +15,7 @@ import { transformTS } from "../ts.js";
 import type { AstroDocument, AstroError } from "./ast.js";
 import { type EmitOptions, type EmitResult, emitDocument } from "./emitter.js";
 import { parseAstro } from "./parser.js";
+import { buildLineMap } from "./source-map.js";
 
 export interface CompileOptions extends EmitOptions {
 	/**
@@ -51,8 +52,12 @@ export async function compileAstro(
 	// 8 chars of content-addressed hash over the filename — Astro-style.
 	const scopeHash = opts.scopeHash ?? (await contentId(opts.filename ?? source)).slice(0, 8);
 	const emitted = emitDocument(doc, { ...opts, scopeHash });
+	// The emitter doesn't see the original source, so attach it here so
+	// devtools can show the right `.astro` content.
+	const map =
+		opts.filename && emitted.map ? buildLineMap(emitted.code, source, opts.filename) : emitted.map;
 	if (opts.skipTsTransform) {
-		return { ...emitted, doc, errors };
+		return { ...emitted, map, doc, errors };
 	}
 	let code = emitted.code;
 	try {
@@ -68,7 +73,7 @@ export async function compileAstro(
 			// strip pass — module sources are JS-only in that environment by
 			// convention, and the inline bundler tolerates the un-stripped
 			// emitter output.
-			return { ...emitted, code, doc, errors };
+			return { ...emitted, code, map, doc, errors };
 		}
 		// Genuine syntax / type error in user code: record and fall back to
 		// the pre-transform code so callers can still display something.
@@ -77,7 +82,7 @@ export async function compileAstro(
 			start: { line: 1, column: 1, offset: 0 },
 		});
 	}
-	return { ...emitted, code, doc, errors };
+	return { ...emitted, code, map, doc, errors };
 }
 
 /**

@@ -250,6 +250,49 @@ export interface Logger {
 }
 
 // -----------------------------------------------------------------------------
+// 6. ImageService — image asset metadata + URL resolution (Phase 13)
+// -----------------------------------------------------------------------------
+
+/**
+ * Asset pipeline capability. Resolves image imports at compile time —
+ * `import logo from "./logo.png"` becomes a literal `ImageMetadata` the
+ * `<Image>` runtime component renders into HTML.
+ *
+ * Production: backed by Cloudflare Images binding (Phase 15). Tests:
+ * `MemoryImageService` with hand-supplied metadata.
+ *
+ * The framework calls into ImageService at compile time only. The runtime
+ * `<Image>` component never reaches into the host — it consumes the
+ * metadata literal the compiler emitted. This keeps the §11.5 boundary
+ * intact: framework code never imports `cloudflare:`.
+ */
+export interface ImageService {
+	/**
+	 * Look up metadata for an image at the given workspace path. The path
+	 * is the resolved import target (e.g. `/src/assets/logo.png`).
+	 * Implementations parse PNG/JPEG/etc. headers to read width/height.
+	 */
+	getMetadata(path: string): Promise<ImageMetadata>;
+}
+
+/**
+ * The minimum metadata `<Image>` and `<Picture>` need at render time.
+ * `src` is a content-addressed URL the framework's deploy server / preview
+ * server will recognise; `width` / `height` populate the `<img>` attrs to
+ * prevent layout shift.
+ */
+export interface ImageMetadata {
+	/** Hashed URL the runtime emits as `<img src="…">`. */
+	src: string;
+	/** Pixel width of the source image, if known. */
+	width?: number;
+	/** Pixel height of the source image, if known. */
+	height?: number;
+	/** Image format hint — `"png" | "jpg" | "webp" | "gif" | "svg" | …`. */
+	format?: string;
+}
+
+// -----------------------------------------------------------------------------
 // Host bundle + AstroflareApp
 // -----------------------------------------------------------------------------
 
@@ -264,6 +307,12 @@ export interface Host {
 	transport: Transport;
 	clock: Clock;
 	logger: Logger;
+	/**
+	 * Optional asset pipeline (Phase 13). When absent, image imports
+	 * fall back to a degraded path (the import is left in the bundle
+	 * and the runtime `<Image>` component renders the bare path).
+	 */
+	imageService?: ImageService;
 }
 
 /**

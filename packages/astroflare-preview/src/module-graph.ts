@@ -37,6 +37,7 @@
 import { COMPILER_VERSION, compileAstro, compileMarkdown } from "@astroflare/compiler";
 import {
 	type Host,
+	type ImageMetadata,
 	type ModuleNode,
 	contentId,
 	contentIdWithConfig,
@@ -46,6 +47,7 @@ import {
 import { extractImports } from "./url-rewrite.js";
 
 const ASTRO_EXT = ".astro";
+const IMAGE_EXTENSIONS = /\.(?:png|jpe?g|webp|gif|avif|svg|ico)$/i;
 const dec = new TextDecoder();
 const enc = new TextEncoder();
 
@@ -140,14 +142,19 @@ export class ModuleGraph {
 
 	/** Dispatch source to the right compiler based on file extension. */
 	async #compileSource(path: string, source: string): Promise<string> {
+		// Resolve image imports up-front: `import logo from "./logo.png"` is
+		// replaced with a `const logo = {…ImageMetadata…};` literal sourced
+		// from the host's `ImageService`. Runs before TS-strip so esbuild
+		// sees a normal const declaration rather than an unresolved import.
+		const preprocessed = await this.#substituteImageImports(path, source);
 		if (path.endsWith(".md")) {
-			const result = await compileMarkdown(source, {
+			const result = await compileMarkdown(preprocessed, {
 				runtimeImport: this.#opts.runtimeImport,
 				filename: path,
 			});
 			return result.code;
 		}
-		const result = await compileAstro(source, {
+		const result = await compileAstro(preprocessed, {
 			runtimeImport: this.#opts.runtimeImport,
 			filename: path,
 			env: this.#opts.env,
@@ -159,6 +166,55 @@ export class ModuleGraph {
 			);
 		}
 		return result.code;
+	}
+
+	/**
+	 * Find every `import NAME from "./path.png"`-shaped statement in the
+	 * source and replace it with a const declaration whose value is the
+	 * `ImageMetadata` literal returned by `host.imageService`.
+	 *
+	 * No-op when no image service is configured — the unresolved import
+	 * survives to the bundler, which strips it (and the `<Image src=...>`
+	 * call site sees `undefined`). Acceptable degraded mode for tests
+	 * that don't exercise images.
+	 */
+	async #substituteImageImports(importerPath: string, source: string): Promise<string> {
+		const service = this.#host.imageService;
+		if (!service) return source;
+		const matches: Array<{ start: number; end: number; replacement: string }> = [];
+		const re = /^[ \t]*import[ \t]+([A-Za-z_$][\w$]*)[ \t]+from[ \t]+["']([^"']+)["'];?[ \t]*$/gm;
+		let m: RegExpExecArray | null;
+		// biome-ignore lint/suspicious/noAssignInExpressions: idiomatic regex loop
+		while ((m = re.exec(source)) !== null) {
+			const spec = m[2] as string;
+			if (!IMAGE_EXTENSIONS.test(spec)) continue;
+			const varName = m[1] as string;
+			const resolved = joinPath(dirname(importerPath), spec);
+			let metadata: ImageMetadata;
+			try {
+				metadata = await service.getMetadata(resolved);
+			} catch (err) {
+				this.#host.logger.event("module-graph.image-import.unresolved", {
+					importer: importerPath,
+					spec,
+					message: (err as Error).message,
+				});
+				continue;
+			}
+			matches.push({
+				start: m.index,
+				end: m.index + m[0].length,
+				replacement: `const ${varName} = ${JSON.stringify(metadata)};`,
+			});
+		}
+		if (matches.length === 0) return source;
+		// Apply right-to-left so earlier offsets stay valid.
+		let out = source;
+		for (let i = matches.length - 1; i >= 0; i--) {
+			const e = matches[i] as (typeof matches)[number];
+			out = out.slice(0, e.start) + e.replacement + out.slice(e.end);
+		}
+		return out;
 	}
 
 	/**

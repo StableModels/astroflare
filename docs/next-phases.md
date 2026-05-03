@@ -7,17 +7,18 @@ MVP = Tier 0 + Tier 1).
 
 ## Where we are
 
-**Done:** Phases 0–12 plus 2.5b. Framework runs end-to-end. Live preview
+**Done:** Phases 0–13 plus 2.5b. Framework runs end-to-end. Live preview
 with HMR (additions + removals), multi-file `.astro` composition,
 markdown + content collections, server endpoints + middleware
 (both `.js` and `.ts`), TypeScript-authoring throughout, scoped +
-global CSS, `import.meta.env` substitution, static deploy with
+global CSS, `import.meta.env` substitution, asset pipeline +
+`<Image>` / `<Picture>` runtime components, static deploy with
 atomic flip including dynamic routes via `getStaticPaths`, full
 Tier 0 `Astro.*` surface (`cookies`, `locals`, `slots`, `redirect`
 propagation), real Worker Loader-backed Executor and Hibernatable WS
 Transport in `@astroflare/host-cloudflare`, `minimal-blog` fixture.
 
-**465 tests / 40 files / 5 pools all green.** Framework boundary holds.
+**482 tests / 43 files / 5 pools all green.** Framework boundary holds.
 
 ## Outstanding work, categorized
 
@@ -117,20 +118,16 @@ esbuild `define`.
 helpers (`getSecret(name)` etc.) — moves to Phase 15 (host
 `EnvService`).
 
-### Phase 13 — Asset pipeline + image transforms
+### Phase 13 — Asset pipeline + image transforms ✓
 
-`ImageService` host capability (interface in core, implementation in
-host-cloudflare delegating to Cloudflare Images binding for transforms).
-`<Image>` / `<Picture>` runtime components that emit `<img>` / `<picture>`
-with the right hashed URLs. Compiler-side `import img from "./photo.png"`
-returns `{ src, width, height, format }` (no actual image processing in
-the compiler — metadata only).
-
-Source maps emitted by the .astro compiler land alongside (data is on
-every AST `Range`; wiring is mechanical).
+**Done.** Retro: [`docs/phases/phase-13-asset-pipeline.md`](./phases/phase-13-asset-pipeline.md).
+17 new tests; 482 total. `ImageService` interface +
+`MemoryImageService` stub; compile-time image import substitution;
+runtime `<Image>` / `<Picture>` components; preview-server
+`/_aflare/asset/<path>` route; v3 source-map placeholder.
 
 **Defer:** Image format conversion (AVIF/WebP), DPR variants, blurred
-placeholders.
+placeholders, per-token source maps.
 
 ### Phase 14 — MDX + Shiki + plugin chain
 
@@ -214,8 +211,7 @@ naturally touches them:
 - **Modal HMR overlay** — fits inside Phase 16 (when we touch the HMR
   client for hydration anyway)
 - ~~**`graphRemove → prune`** — fits inside Phase 10~~ ✓ Phase 10
-- **Source maps** — fits inside Phase 13 (asset pipeline touches the
-  compiler's emit path)
+- ~~**Source maps** — fits inside Phase 13~~ ✓ Phase 13 (structural placeholder; per-token in Phase 23)
 - **`is:raw` proper handling** — fits inside Phase 14 (MDX touches the
   compiler)
 - ~~**Regex literal disambiguation** — fits inside Phase 11~~ ✓ Phase 11

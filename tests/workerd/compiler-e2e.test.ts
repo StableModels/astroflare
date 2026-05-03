@@ -35,6 +35,8 @@ import { describe, expect, it } from "vitest";
 
 /* eslint-disable @typescript-eslint/ban-ts-comment */
 // @ts-expect-error — Vite ?raw default-exports string; type not carried.
+import RUNTIME_COMPONENTS_SRC from "../../packages/astroflare-runtime/dist/components.js?raw";
+// @ts-expect-error
 import RUNTIME_COOKIES_SRC from "../../packages/astroflare-runtime/dist/cookies.js?raw";
 // @ts-expect-error
 import RUNTIME_HMR_SRC from "../../packages/astroflare-runtime/dist/hmr-client.js?raw";
@@ -54,6 +56,7 @@ const RUNTIME_BUNDLE_MODULES: Record<string, string> = {
 	"runtime/render.js": RUNTIME_RENDER_SRC as string,
 	"runtime/hmr-client.js": RUNTIME_HMR_SRC as string,
 	"runtime/cookies.js": RUNTIME_COOKIES_SRC as string,
+	"runtime/components.js": RUNTIME_COMPONENTS_SRC as string,
 };
 
 const RUNTIME_IMPORT = "./runtime/index.js";

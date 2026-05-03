@@ -10,4 +10,5 @@
  */
 export * from "./memory-storage.js";
 export * from "./map-coordinator.js";
+export * from "./memory-image-service.js";
 export * from "./stubs.js";

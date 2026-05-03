@@ -84,7 +84,19 @@ const DEFAULT_RUNTIME_IMPORT = "@astroflare/runtime";
 const DEFAULT_WORKSPACE_ID = "default";
 const WRAPPER_NAME = "main.js";
 const HMR_PATH = "/_aflare/hmr";
+const ASSET_PREFIX = "/_aflare/asset/";
 const PAGES_PREFIX = "/src/pages/";
+
+const IMAGE_CONTENT_TYPES: Record<string, string> = {
+	png: "image/png",
+	jpg: "image/jpeg",
+	jpeg: "image/jpeg",
+	gif: "image/gif",
+	webp: "image/webp",
+	avif: "image/avif",
+	svg: "image/svg+xml",
+	ico: "image/vnd.microsoft.icon",
+};
 
 export function createPreviewServer(opts: PreviewServerOptions): PreviewServer {
 	const router = new Router();
@@ -178,6 +190,12 @@ export function createPreviewServer(opts: PreviewServerOptions): PreviewServer {
 				// HMR upgrade
 				if (url.pathname === HMR_PATH) {
 					return opts.host.transport.acceptHmrSocket(req, { workspaceId });
+				}
+
+				// Asset URLs (Phase 13). Compiler-resolved image imports
+				// produce `src: "/_aflare/asset/<workspace-path>"` URLs.
+				if (url.pathname.startsWith(ASSET_PREFIX)) {
+					return await serveAsset(opts.host, url.pathname.slice(ASSET_PREFIX.length));
 				}
 
 				const match = router.match(url.pathname);
@@ -327,6 +345,39 @@ function buildResponseFromResult(result: {
 	for (const [k, v] of Object.entries(result.headers)) headers.set(k, v);
 	for (const c of result.cookies) headers.append("set-cookie", c);
 	return new Response(result.body, { status: result.status, headers });
+}
+
+/**
+ * Serve a compiler-resolved asset (Phase 13). The URL after
+ * `/_aflare/asset/` is the workspace-absolute path with the leading
+ * slash stripped — e.g. `src/assets/logo.png`. Reads the file from
+ * `host.storage` and returns it with the right content-type.
+ */
+async function serveAsset(host: Host, encodedPath: string): Promise<Response> {
+	const path = `/${decodeURIComponent(encodedPath)}`;
+	const stat = await host.storage.stat(path);
+	if (!stat) {
+		return new Response("Not found", {
+			status: 404,
+			headers: { "content-type": "text/plain;charset=utf-8" },
+		});
+	}
+	const bytes = await host.storage.read(path);
+	const ext = path.split(".").pop()?.toLowerCase() ?? "";
+	const contentType = IMAGE_CONTENT_TYPES[ext] ?? "application/octet-stream";
+	// Copy into a fresh ArrayBuffer to satisfy `BodyInit` (the `Uint8Array`
+	// returned from `Storage.read` is generic over `ArrayBufferLike`, which
+	// includes `SharedArrayBuffer`).
+	const copy = new Uint8Array(bytes.byteLength);
+	copy.set(bytes);
+	return new Response(copy.buffer, {
+		status: 200,
+		headers: {
+			"content-type": contentType,
+			// Content-addressed: agressive cache is fine.
+			"cache-control": "public, max-age=31536000, immutable",
+		},
+	});
 }
 
 // Re-exports kept so downstream packages have a single import surface.
