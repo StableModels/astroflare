@@ -1,10 +1,10 @@
 /**
  * Module graph + per-module compile cache.
  *
- * Sits on top of `Coordinator.graph*` (Phase 1) and `Storage.cacheRead/Write`
- * (the cache subspace from §5.2). The Coordinator owns the in-memory graph
- * shape (nodes, reverse edges, invalidation walk); this layer adds the
- * framework-side compile semantics:
+ * Sits on top of `Coordinator.graph*` (Phase 1) and `Cache.get/put`
+ * (the host-supplied compile cache from §5.2). The Coordinator owns the
+ * in-memory graph shape (nodes, reverse edges, invalidation walk); this
+ * layer adds the framework-side compile semantics:
  *
  *   - `compile(path)` — read source, content-hash, look up the compile cache
  *     keyed by `contentIdWithConfig(source, transformConfig)`. On miss,
@@ -17,8 +17,8 @@
  *     `Executor.runCached`).
  *
  * Two cache layers (per §5.3 "Content addressing everywhere"):
- *   - **per-module compile cache** in `Storage.cacheWrite/cacheRead` — keyed
- *     by `contentIdWithConfig(source, {compiler, runtimeImport})`. Survives
+ *   - **per-module compile cache** in `Cache.put/get` — keyed by
+ *     `contentIdWithConfig(source, {compiler, runtimeImport})`. Survives
  *     Coordinator restarts (the brief calls this out specifically).
  *   - **per-bundle execution cache** via `Executor.runCached` — keyed by
  *     the aggregate of every module's compile key (so a dep change
@@ -56,7 +56,7 @@ export interface ModuleInfo {
 	path: string;
 	/** Content hash of the raw source bytes. */
 	sourceHash: string;
-	/** Cache key used by Storage's compile cache (source + transform config). */
+	/** Cache key used by the host-supplied compile cache (source + transform config). */
 	compileKey: string;
 	/** Compiled ESM. */
 	compiled: string;

@@ -171,7 +171,7 @@ describe("ModuleGraph.closure", () => {
 });
 
 describe("ModuleGraph cache persistence (§7.4 brief)", () => {
-	it("survives a Coordinator graph wipe — second compile served from Storage.cacheRead", async () => {
+	it("survives a Coordinator graph wipe — second compile served from Cache.get", async () => {
 		const { host, graph } = makeFixture({
 			"/src/pages/index.astro": '---\nimport L from "../components/L.astro";\n---\n<L/>',
 			"/src/components/L.astro": "<p>x</p>",

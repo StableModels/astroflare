@@ -1,5 +1,21 @@
 # Cloudflare-validation plan — Phases 21–24
 
+> **Superseded (2026-05-03).** This founding spec drove Phases
+> 21–24 (Cloudflare e2e validation), but the architecture it
+> describes — `host-cloudflare`'s "project worker entrypoint",
+> R2 storage adapter, DO Coordinator, the `Storage` interface —
+> was refactored across the framework / host boundary in Phase
+> 26+. Hosts now own the worker entrypoint and the DO; Astroflare
+> ships factories (`createCoordinator`, `createPreviewHandler`,
+> `createSnapshotHandler`) and adapters (`WorkspaceSite`,
+> `R2Snapshots`, `SqlCache`). See CLAUDE.md and
+> [`phases/phase-26-host-driven-preview.md`](./phases/phase-26-host-driven-preview.md)
+> for the live picture. This file is preserved as historical
+> context: the test categories it lists (compiler-on-Cloudflare,
+> runtime-on-Cloudflare, deploy ceremony, HMR roundtrip, hydration,
+> Worker Loader executor) all shipped — they just live in the
+> Layer D e2e suite under `tests/e2e/`.
+
 Pre-release acceptance: prove that Astroflare runs as expected on
 real Cloudflare, end-to-end, before we ship.
 

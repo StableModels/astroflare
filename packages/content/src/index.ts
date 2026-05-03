@@ -6,7 +6,7 @@
  *   - `getCollection(name)` — read all entries (slug, data, body)
  *   - `getEntry(name, slug)` — single entry
  *
- * Storage layout is Astro's: each collection is a directory under
+ * On-disk layout is Astro's: each collection is a directory under
  * `/src/content/<name>/`, each `.md` file is one entry. The file's
  * frontmatter is parsed as YAML and validated against the collection's Zod
  * schema; the body is exposed as the entry's `body` field for downstream

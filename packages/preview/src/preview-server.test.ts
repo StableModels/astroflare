@@ -1,10 +1,11 @@
 /**
  * Phase 3 end-to-end test (Layer A).
  *
- * Substrate: in-memory `Storage`/`Coordinator`/stubs from Phase 1, plus
- * `InProcessExecutor` (Node tmp dir + dynamic `import()`). The compiler's
- * runtime import is set to a `file://` URL pointing at the runtime's
- * compiled `dist/index.js` — same pattern as the Phase 2 e2e tests.
+ * Substrate: in-memory `Site`/`Cache`/`Coordinator`/stubs from Phase 1,
+ * plus `InProcessExecutor` (Node tmp dir + dynamic `import()`). The
+ * compiler's runtime import is set to a `file://` URL pointing at the
+ * runtime's compiled `dist/index.js` — same pattern as the Phase 2 e2e
+ * tests.
  *
  * The pre-test `tsc -b` step (root `package.json#test`) builds the runtime
  * before this file runs, so the dist artifact exists.
