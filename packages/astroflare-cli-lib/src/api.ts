@@ -102,6 +102,24 @@ export interface CloudflareClient {
 	 * `deleteR2Bucket` doesn't 409 on a non-empty bucket.
 	 */
 	emptyR2Bucket(bucket: string): Promise<void>;
+	/**
+	 * GET an object from an R2 bucket via REST. Returns `null` when
+	 * the object is absent. Used by `af snapshot cat` / `af snapshot
+	 * current` (Phase 26c).
+	 */
+	getR2Object(input: {
+		bucket: string;
+		key: string;
+	}): Promise<{ text: string; contentType: string | null } | null>;
+	/**
+	 * LIST objects in an R2 bucket. Returns an array of `{ key }`
+	 * (matches what `emptyR2Bucket` already iterates). Used by
+	 * `af snapshot list` to enumerate snapshot hashes.
+	 */
+	listR2Objects(input: {
+		bucket: string;
+		prefix?: string;
+	}): Promise<readonly { key: string }[]>;
 }
 
 const DEFAULT_BASE = "https://api.cloudflare.com/client/v4";
@@ -224,6 +242,56 @@ export function makeCloudflareClient(opts: CloudflareClientOptions): CloudflareC
 				const text = await res.text();
 				throw new Error(`R2 PUT ${key}: ${res.status}: ${text}`);
 			}
+		},
+		async getR2Object({ bucket, key }) {
+			const url = `${baseUrl}/accounts/${opts.accountId}/r2/buckets/${encodeURIComponent(
+				bucket,
+			)}/objects/${encodeURI(key)}`;
+			const res = await fetchImpl(url, { method: "GET", headers: headers() });
+			if (res.status === 404) return null;
+			if (!res.ok) {
+				const text = await res.text();
+				throw new Error(`R2 GET ${key}: ${res.status}: ${text}`);
+			}
+			const text = await res.text();
+			return {
+				text,
+				contentType: res.headers.get("content-type"),
+			};
+		},
+		async listR2Objects({ bucket, prefix }) {
+			const out: { key: string }[] = [];
+			// Paginate via cursor; the dashboard API accepts `?prefix=` and
+			// `?cursor=` and returns `result_info.cursor` until exhausted.
+			let cursor: string | undefined;
+			const MAX_PAGES = 100;
+			for (let i = 0; i < MAX_PAGES; i++) {
+				const params = new URLSearchParams();
+				if (prefix) params.set("prefix", prefix);
+				if (cursor) params.set("cursor", cursor);
+				const qs = params.toString();
+				const url = `${baseUrl}/accounts/${opts.accountId}/r2/buckets/${encodeURIComponent(
+					bucket,
+				)}/objects${qs ? `?${qs}` : ""}`;
+				const res = await fetchImpl(url, { method: "GET", headers: headers() });
+				if (!res.ok) {
+					const text = await res.text();
+					throw new Error(`R2 LIST ${bucket}: ${res.status}: ${text}`);
+				}
+				const json = (await res.json()) as {
+					success?: boolean;
+					errors?: unknown;
+					result?: { key: string }[] | null;
+					result_info?: { cursor?: string };
+				};
+				if (json.success === false) {
+					throw new Error(`R2 LIST ${bucket}: success=false: ${JSON.stringify(json.errors)}`);
+				}
+				for (const obj of json.result ?? []) out.push({ key: obj.key });
+				if (!json.result_info?.cursor) break;
+				cursor = json.result_info.cursor;
+			}
+			return out;
 		},
 		async emptyR2Bucket(bucket) {
 			// Loop until a list call returns zero objects. The Cloudflare

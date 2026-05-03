@@ -44,14 +44,19 @@ import {
 	type CloudflareClient,
 	deployStaticBundle,
 	destroyStack,
+	doctor,
 	findOrphanWorkers,
-	inspectFixture,
-	listFixtures,
+	inspectManaged,
+	isAstroflareCliError,
+	listManaged,
 	loadStackWorkerBundle,
 	makeCloudflareClient,
 	provisionFixture,
 	provisionStack,
 	readStackState,
+	snapshotCat,
+	snapshotCurrent,
+	snapshotList,
 	statusReport,
 	teardownFixture,
 } from "@astroflare/cli-lib";
@@ -102,6 +107,12 @@ async function main(argv: readonly string[]): Promise<number> {
 			return runDestroyStack(rest);
 		case "deploy-static":
 			return runDeployStatic(rest);
+
+		// Phase 26c — agent ops verbs.
+		case "doctor":
+			return runDoctor();
+		case "snapshot":
+			return runSnapshot(rest);
 
 		case "--version":
 		case "-v":
@@ -266,7 +277,9 @@ async function runDestroy(argv: readonly string[]): Promise<number> {
 async function runDestroyAll(): Promise<number> {
 	try {
 		const ctx = opsCtx();
-		const fixtures = listFixtures({ rootDir: ctx.rootDir, sha7: ctx.sha7 });
+		const fixtures = listManaged({ rootDir: ctx.rootDir, sha7: ctx.sha7 }).filter(
+			(h): h is Extract<typeof h, { kind: "fixture" }> => h.kind === "fixture",
+		);
 		if (fixtures.length === 0) {
 			console.log("no Workers to destroy");
 			return 0;
@@ -293,16 +306,21 @@ async function runDestroyAll(): Promise<number> {
 	}
 }
 
+function nameOf(host: { fixture?: string; name?: string; kind: string }): string {
+	if (host.kind === "stack") return host.name ?? "?";
+	return host.fixture ?? host.name ?? "?";
+}
+
 function runList(): number {
 	try {
 		const ctx = opsCtx();
-		const fixtures = listFixtures({ rootDir: ctx.rootDir, sha7: ctx.sha7 });
-		if (fixtures.length === 0) {
-			console.log("no Workers managed for this SHA");
+		const hosts = listManaged({ rootDir: ctx.rootDir, sha7: ctx.sha7 });
+		if (hosts.length === 0) {
+			console.log("no hosts managed for this SHA");
 			return 0;
 		}
-		for (const f of fixtures) {
-			console.log(`${f.fixture}\t${f.workerName}\t${f.url}`);
+		for (const h of hosts) {
+			console.log(`${h.kind}\t${nameOf(h)}\t${h.workerName}\t${h.url}`);
 		}
 		return 0;
 	} catch (err) {
@@ -319,9 +337,9 @@ function runInspect(argv: readonly string[]): number {
 	}
 	try {
 		const ctx = opsCtx();
-		const state = inspectFixture({ rootDir: ctx.rootDir, sha7: ctx.sha7, fixture: name });
+		const state = inspectManaged({ rootDir: ctx.rootDir, sha7: ctx.sha7, name });
 		if (!state) {
-			console.error(`no state for ${name} (run \`af provision ${name}\` first)`);
+			console.error(`no state for ${name} (run \`af provision-stack ${name}\` first)`);
 			return 1;
 		}
 		console.log(JSON.stringify(state, null, 2));
@@ -337,19 +355,20 @@ async function runHealth(): Promise<number> {
 		const ctx = opsCtx();
 		const report = await statusReport({ rootDir: ctx.rootDir, sha7: ctx.sha7 });
 		if (report.length === 0) {
-			console.log("no Workers managed for this SHA");
+			console.log("no hosts managed for this SHA");
 			return 0;
 		}
 		let exitCode = 0;
 		for (const r of report) {
+			const label = `${r.kind}\t${nameOf(r)}`;
 			if (r.error) {
-				console.log(`${r.fixture}\t-\t${r.error}`);
+				console.log(`${label}\t-\t${r.error}`);
 				exitCode = 1;
 			} else if (r.httpStatus !== 200) {
-				console.log(`${r.fixture}\t${r.httpStatus}\t${r.latencyMs}ms`);
+				console.log(`${label}\t${r.httpStatus}\t${r.latencyMs}ms`);
 				exitCode = 1;
 			} else {
-				console.log(`${r.fixture}\t${r.httpStatus}\t${r.latencyMs}ms`);
+				console.log(`${label}\t${r.httpStatus}\t${r.latencyMs}ms`);
 			}
 		}
 		return exitCode;
@@ -357,6 +376,141 @@ async function runHealth(): Promise<number> {
 		console.error(`af health: ${(err as Error).message}`);
 		return 1;
 	}
+}
+
+async function runDoctor(): Promise<number> {
+	const rootDir = process.env.AFLARE_ROOT ?? process.cwd();
+	const report = await doctor({
+		rootDir,
+		env: process.env,
+		clientFactory:
+			process.env.CLOUDFLARE_ACCOUNT_ID && process.env.CLOUDFLARE_API_TOKEN
+				? (accountId: string, apiToken: string) => makeCloudflareClient({ accountId, apiToken })
+				: undefined,
+	});
+	console.log(JSON.stringify(report, null, 2));
+	return report.ok ? 0 : 1;
+}
+
+async function runSnapshot(argv: readonly string[]): Promise<number> {
+	const [sub, ...rest] = argv;
+	if (!sub) {
+		console.error("af snapshot: missing subcommand (list / current / cat)");
+		return 1;
+	}
+	switch (sub) {
+		case "list":
+			return runSnapshotList(rest);
+		case "current":
+			return runSnapshotCurrent(rest);
+		case "cat":
+			return runSnapshotCat(rest);
+		default:
+			console.error(`af snapshot: unknown subcommand '${sub}'`);
+			return 1;
+	}
+}
+
+async function runSnapshotList(argv: readonly string[]): Promise<number> {
+	const [stackName, ...flags] = argv;
+	if (!stackName) {
+		console.error("af snapshot list: missing <stack-name>");
+		return 1;
+	}
+	const prefix = parsePrefixFlag(flags);
+	try {
+		const ctx = opsCtx();
+		const stack = readStackState(ctx.rootDir, ctx.sha7, stackName);
+		if (!stack) {
+			console.error(`af snapshot list: no stack '${stackName}' for sha=${ctx.sha7}`);
+			return 1;
+		}
+		const list = await snapshotList({
+			client: ctx.client,
+			bucket: stack.bucketName,
+			prefix,
+		});
+		console.log(JSON.stringify(list, null, 2));
+		return 0;
+	} catch (err) {
+		return reportError("af snapshot list", err);
+	}
+}
+
+async function runSnapshotCurrent(argv: readonly string[]): Promise<number> {
+	const [stackName, ...flags] = argv;
+	if (!stackName) {
+		console.error("af snapshot current: missing <stack-name>");
+		return 1;
+	}
+	const prefix = parsePrefixFlag(flags);
+	try {
+		const ctx = opsCtx();
+		const stack = readStackState(ctx.rootDir, ctx.sha7, stackName);
+		if (!stack) {
+			console.error(`af snapshot current: no stack '${stackName}' for sha=${ctx.sha7}`);
+			return 1;
+		}
+		const current = await snapshotCurrent({
+			client: ctx.client,
+			bucket: stack.bucketName,
+			prefix,
+		});
+		console.log(JSON.stringify({ current }, null, 2));
+		return 0;
+	} catch (err) {
+		return reportError("af snapshot current", err);
+	}
+}
+
+async function runSnapshotCat(argv: readonly string[]): Promise<number> {
+	const [stackName, snapshotHash, route, ...flags] = argv;
+	if (!stackName || !snapshotHash || !route) {
+		console.error("af snapshot cat: usage: af snapshot cat <stack-name> <hash> <route>");
+		return 1;
+	}
+	const prefix = parsePrefixFlag(flags);
+	try {
+		const ctx = opsCtx();
+		const stack = readStackState(ctx.rootDir, ctx.sha7, stackName);
+		if (!stack) {
+			console.error(`af snapshot cat: no stack '${stackName}' for sha=${ctx.sha7}`);
+			return 1;
+		}
+		const result = await snapshotCat({
+			client: ctx.client,
+			bucket: stack.bucketName,
+			prefix,
+			snapshotHash,
+			route,
+		});
+		// Stream bytes to stdout; structured metadata to stderr so the agent
+		// can parse the body cleanly.
+		process.stderr.write(
+			`${JSON.stringify({ contentType: result.contentType, bytes: result.bytes.byteLength })}\n`,
+		);
+		process.stdout.write(result.bytes);
+		return 0;
+	} catch (err) {
+		return reportError("af snapshot cat", err);
+	}
+}
+
+function parsePrefixFlag(flags: readonly string[]): string | undefined {
+	for (let i = 0; i < flags.length; i++) {
+		if (flags[i] === "--prefix") return flags[i + 1];
+		if (flags[i]?.startsWith("--prefix=")) return flags[i]?.slice("--prefix=".length);
+	}
+	return undefined;
+}
+
+function reportError(verb: string, err: unknown): number {
+	if (isAstroflareCliError(err)) {
+		console.error(`${verb}: ${JSON.stringify(err.toJSON())}`);
+		return 1;
+	}
+	console.error(`${verb}: ${(err as Error).message}`);
+	return 1;
 }
 
 async function runProvisionStack(argv: readonly string[]): Promise<number> {
@@ -538,10 +692,16 @@ function printUsage(): void {
 			"  provision <n>   Create a managed Worker + R2 bucket from fixture <n>",
 			"  destroy <n>     Destroy a managed Worker and its R2 bucket",
 			"  destroy-all     Destroy every Worker managed for the current SHA",
-			"  list            List Workers managed for the current SHA",
-			"  inspect <n>     Print state for a managed Worker",
+			"  list            List Workers managed for the current SHA (fixtures + stacks)",
+			"  inspect <n>     Print state for a managed Worker (fixture or stack)",
 			"  health          HEAD each managed URL; report status + latency",
 			"  gc              Find orphan workers in the account",
+			"  doctor          Environment sanity check (creds, plan, state)",
+			"",
+			"AGENT OPS / INTROSPECTION (Phase 26c)",
+			"  snapshot list <stack> [--prefix <p>]              List snapshot hashes",
+			"  snapshot current <stack> [--prefix <p>]           Active snapshot hash",
+			"  snapshot cat <stack> <hash> <route> [--prefix <p>] Read raw bytes",
 			"",
 			"COMMON OPTIONS (deploy / status / rollback)",
 			"  --account-id <id>     Cloudflare account ID",

@@ -120,7 +120,12 @@ Stack worker bundle: `node scripts/build-stack-worker.mjs` →
 | `provision-stack <n>` / `destroy-stack <n>` | Mode B stack: worker + R2 + DOs + DEPLOY_TOKEN. |
 | `deploy-static <fixture-dir> --stack <n>` | Compile + render fixture locally, ship HTML to R2, flip `/site/current`. |
 | `init / deploy / status / rollback` | Project lifecycle (Mode B end-user surface). |
-| `list / inspect / health / gc / destroy / destroy-all` | Account-wide ops. |
+| `list / inspect / health` | See *all* managed hosts (legacy fixtures + stacks) — Phase 26c. |
+| `gc / destroy / destroy-all` | Account-wide cleanup. |
+| `doctor` | Environment sanity check (creds, plan, state) — JSON report (Phase 26c). |
+| `snapshot list <stack> [--prefix <p>]` | Enumerate snapshot hashes; marks the active one (Phase 26c). |
+| `snapshot current <stack> [--prefix <p>]` | Active snapshot hash (Phase 26c). |
+| `snapshot cat <stack> <hash> <route>` | Read raw bytes of one snapshot entry (Phase 26c). |
 
 Mode A has no `af` verbs — preview is host-driven (Phase 26). Hosts
 integrate via `@astroflare/host-cloudflare` (`createCoordinator`,
