@@ -11,3 +11,11 @@ coverage
 .idea
 .vscode
 *.log
+
+# Defence-in-depth: a decoded copy of the git-crypt symmetric key must
+# never land in a commit. The real key lives in 1Password (base64) and
+# is loaded into `.git/git-crypt/keys/default` (untracked) by
+# `scripts/setup`.
+*.gitcrypt-key
+gitcrypt.key
+gitcrypt.key.bin

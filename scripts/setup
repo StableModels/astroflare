@@ -1,0 +1,87 @@
+#!/usr/bin/env bash
+#
+# scripts/setup — fetch the git-crypt symmetric key from 1Password
+# and unlock encrypted files (`.dev.vars`) on a fresh checkout.
+#
+# The base64-encoded key lives in 1Password as a Secure Note titled
+# "Git Crypt Key, Astroflare" in the StableModels vault (Flywheel
+# Equity team). The note body (`notesPlain`) holds the base64 string.
+#
+# `op://` references reject `,` and `%`, so the title can't appear
+# literally — the default reference below uses the item's UUID
+# instead, which 1Password treats as canonical and which `op` accepts.
+#
+# Default reference:
+#
+#     op://StableModels/3htalbtxhsnqbyim5ib6g67jcu/notesPlain
+#
+# Override by setting AFLARE_GITCRYPT_OP_REF before running, e.g. if
+# you mirrored the key into your personal vault:
+#
+#     AFLARE_GITCRYPT_OP_REF="op://Personal/astroflare-gitcrypt/key" \
+#         ./scripts/setup
+#
+# `OP_ACCOUNT` selects the 1Password account when you're signed into
+# more than one. The Flywheel Equity team account holds StableModels;
+# set `OP_ACCOUNT` to your Flywheel email or user ID, e.g.
+#
+#     export OP_ACCOUNT=ryan@flywheeleq.com
+#
+# Prereqs: `git-crypt` and the 1Password CLI (`op`) installed and
+# `op` signed in (`op signin` or via the desktop app integration).
+
+set -euo pipefail
+
+OP_REF="${AFLARE_GITCRYPT_OP_REF:-op://StableModels/3htalbtxhsnqbyim5ib6g67jcu/notesPlain}"
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+
+cd "$REPO_ROOT"
+
+# Already unlocked? `git-crypt status` returns 0 only when every
+# encrypted entry is decrypted.
+if git-crypt status .dev.vars 2>/dev/null | grep -q "^    not encrypted"; then
+    echo "git-crypt: .dev.vars is already decrypted — nothing to do."
+    exit 0
+fi
+
+# Sanity-check toolchain.
+command -v git-crypt >/dev/null 2>&1 || {
+    echo "error: git-crypt not found in PATH. Install it first:" >&2
+    echo "  brew install git-crypt" >&2
+    exit 1
+}
+command -v op >/dev/null 2>&1 || {
+    echo "error: 1Password CLI ('op') not found in PATH. Install it first:" >&2
+    echo "  brew install --cask 1password-cli" >&2
+    exit 1
+}
+
+# Fetch the base64 key. Pass `--account` if `OP_ACCOUNT` is set so
+# `op` picks the right team when the user is signed into multiple.
+# `op read` exits non-zero on auth / reference errors and `set -e`
+# propagates that.
+echo "Reading git-crypt key from $OP_REF…"
+if [ -n "${OP_ACCOUNT:-}" ]; then
+    B64="$(op read --account "$OP_ACCOUNT" "$OP_REF")"
+else
+    B64="$(op read "$OP_REF")"
+fi
+if [ -z "$B64" ]; then
+    echo "error: 1Password returned an empty value for $OP_REF" >&2
+    exit 1
+fi
+
+# Decode to a temp file, unlock, then wipe. The temp file lives in
+# /tmp (outside the repo) so a wayward commit can't include it; we
+# also clean up eagerly via trap.
+TMP="$(mktemp -t aflare-gitcrypt.XXXXXX)"
+trap 'rm -f "$TMP"' EXIT
+
+# `base64 --decode` works on BOTH BSD/macOS and GNU coreutils. The
+# `--ignore-garbage` flag silently dropped legitimate input on macOS;
+# 1Password returns clean base64 so we don't need it.
+printf '%s' "$B64" | base64 --decode > "$TMP"
+
+git-crypt unlock "$TMP"
+
+echo "git-crypt: unlocked. .dev.vars and any other filtered files are now readable."
