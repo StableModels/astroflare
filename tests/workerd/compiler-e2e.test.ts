@@ -38,6 +38,8 @@ import { describe, expect, it } from "vitest";
 import RUNTIME_COMPONENTS_SRC from "../../packages/astroflare-runtime/dist/components.js?raw";
 // @ts-expect-error
 import RUNTIME_COOKIES_SRC from "../../packages/astroflare-runtime/dist/cookies.js?raw";
+// @ts-expect-error — Phase 15a: runtime/index.js re-exports env.js.
+import RUNTIME_ENV_SRC from "../../packages/astroflare-runtime/dist/env.js?raw";
 // @ts-expect-error
 import RUNTIME_HMR_SRC from "../../packages/astroflare-runtime/dist/hmr-client.js?raw";
 // Vite's `?raw` plugin works inside vitest-pool-workers. The relative
@@ -61,6 +63,7 @@ const RUNTIME_BUNDLE_MODULES: Record<string, string> = {
 	"runtime/cookies.js": RUNTIME_COOKIES_SRC as string,
 	"runtime/components.js": RUNTIME_COMPONENTS_SRC as string,
 	"runtime/jsx-runtime.js": RUNTIME_JSX_RUNTIME_SRC as string,
+	"runtime/env.js": RUNTIME_ENV_SRC as string,
 };
 
 const RUNTIME_IMPORT = "./runtime/index.js";

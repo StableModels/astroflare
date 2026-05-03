@@ -22,5 +22,9 @@ export { Image, Picture } from "./components.js";
 // `_jsx` / `_jsxs` / `_Fragment` against these shared bundle-scope names
 // (see `mdx/index.ts`).
 export { jsx, jsxs, jsxDEV, Fragment } from "./jsx-runtime.js";
+// Phase 15a: `getSecret(name)` + `withEnvContext(env, fn)` for runtime
+// access to bound Worker secrets. Distinct from Phase 12's compile-time
+// `import.meta.env` substitution (which inlines values at compile time).
+export { getSecret, getEnvContext, withEnvContext, type EnvContext } from "./env.js";
 
 export const RUNTIME_VERSION = "0.0.0";

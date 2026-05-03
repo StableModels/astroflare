@@ -71,6 +71,19 @@ importers:
         specifier: ^2.1.8
         version: 2.1.8(@types/node@22.19.17)(happy-dom@15.11.7)
 
+  packages/astroflare-cli:
+    dependencies:
+      '@astroflare/core':
+        specifier: workspace:*
+        version: link:../astroflare-core
+    devDependencies:
+      '@types/node':
+        specifier: ^22.10.0
+        version: 22.19.17
+      vitest:
+        specifier: ^2.1.8
+        version: 2.1.8(@types/node@22.19.17)(happy-dom@15.11.7)
+
   packages/astroflare-compiler:
     dependencies:
       '@astroflare/core':

@@ -19,6 +19,9 @@
 import RUNTIME_COMPONENTS_SRC from "../../packages/astroflare-runtime/dist/components.js?raw";
 // @ts-expect-error
 import RUNTIME_COOKIES_SRC from "../../packages/astroflare-runtime/dist/cookies.js?raw";
+// @ts-expect-error — Phase 15a: runtime/index.js re-exports env.js, so it
+// has to be present in the module map.
+import RUNTIME_ENV_SRC from "../../packages/astroflare-runtime/dist/env.js?raw";
 // @ts-expect-error
 import RUNTIME_HMR_SRC from "../../packages/astroflare-runtime/dist/hmr-client.js?raw";
 // @ts-expect-error — index.js re-exports from internal/render/jsx-runtime; all
@@ -40,6 +43,7 @@ setProjectWorkerRuntime({
 	"runtime/cookies.js": RUNTIME_COOKIES_SRC as string,
 	"runtime/components.js": RUNTIME_COMPONENTS_SRC as string,
 	"runtime/jsx-runtime.js": RUNTIME_JSX_RUNTIME_SRC as string,
+	"runtime/env.js": RUNTIME_ENV_SRC as string,
 });
 
 export {

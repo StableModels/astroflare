@@ -172,37 +172,49 @@ export class CoordinatorDurableObject extends DurableObject {
  * server's HMR forwarder + the route invalidator. Both run inside the
  * same Worker invocation, so local pubsub is sufficient.
  */
+/**
+ * Factory that returns a fresh DO stub each call. Needed because workerd
+ * invalidates stubs when watched code changes (test cold-starts hit this
+ * routinely); retrying with the same stub re-throws the same error,
+ * whereas the next `namespace.get(id)` returns a stub backed by the
+ * freshly-loaded worker module.
+ */
+export type CoordinatorStubFactory = () => DurableObjectStub<CoordinatorDurableObject>;
+
 export class DurableObjectCoordinator implements Coordinator {
-	readonly #stub: DurableObjectStub<CoordinatorDurableObject>;
+	readonly #stubFactory: CoordinatorStubFactory;
 	readonly #subs = new Map<string, Set<(m: HmrMessage) => void>>();
 
-	constructor(stub: DurableObjectStub<CoordinatorDurableObject>) {
-		this.#stub = stub;
+	constructor(stub: DurableObjectStub<CoordinatorDurableObject> | CoordinatorStubFactory) {
+		// Accept either a captured stub (the convenient form for tests) or
+		// a factory (the production form, so retries get a fresh stub).
+		this.#stubFactory = typeof stub === "function" ? (stub as CoordinatorStubFactory) : () => stub;
 	}
 
 	async graphGet(path: string): Promise<ModuleNode | null> {
-		return this.#stub.graphGet(path);
+		return retryOnInvalidation(() => this.#stubFactory().graphGet(path));
 	}
 
 	async graphPut(node: ModuleNode): Promise<void> {
-		return this.#stub.graphPut(node);
+		return retryOnInvalidation(() => this.#stubFactory().graphPut(node));
 	}
 
 	async graphRemove(path: string): Promise<void> {
-		return this.#stub.graphRemove(path);
+		return retryOnInvalidation(() => this.#stubFactory().graphRemove(path));
 	}
 
 	async onFileChanged(path: string, hash: string): Promise<void> {
-		// Update the node's hash (insert if missing). One round-trip for
-		// the read, one for the write — could be a dedicated DO RPC if
-		// this becomes hot, but on the change path it's not the bottleneck.
-		const existing = await this.#stub.graphGet(path);
+		const existing = await retryOnInvalidation(() => this.#stubFactory().graphGet(path));
 		if (existing) {
-			await this.#stub.graphPut({ ...existing, hash });
+			await retryOnInvalidation(() => this.#stubFactory().graphPut({ ...existing, hash }));
 		} else {
-			await this.#stub.graphPut({ path, hash, imports: [], importedBy: [] });
+			await retryOnInvalidation(() =>
+				this.#stubFactory().graphPut({ path, hash, imports: [], importedBy: [] }),
+			);
 		}
-		const importers = await this.#stub.transitiveImporters(path);
+		const importers = await retryOnInvalidation(() =>
+			this.#stubFactory().transitiveImporters(path),
+		);
 		const updates: HmrUpdate[] = [path, ...importers].map((p) => ({
 			path: p,
 			hash: p === path ? hash : "",
@@ -212,9 +224,10 @@ export class DurableObjectCoordinator implements Coordinator {
 	}
 
 	async onFileRemoved(path: string): Promise<void> {
-		// Snapshot the reverse closure BEFORE the node disappears.
-		const importers = await this.#stub.transitiveImporters(path);
-		await this.#stub.graphRemove(path);
+		const importers = await retryOnInvalidation(() =>
+			this.#stubFactory().transitiveImporters(path),
+		);
+		await retryOnInvalidation(() => this.#stubFactory().graphRemove(path));
 		await this.publish("hmr", { type: "prune", paths: [path, ...importers] });
 	}
 
@@ -245,4 +258,32 @@ export class DurableObjectCoordinator implements Coordinator {
 			},
 		};
 	}
+}
+
+/**
+ * Workerd may invalidate a Durable Object mid-flight when watched code
+ * changes — common during dev / test cold-starts. The thrown error
+ * explicitly says "Please retry the DurableObjectStub#fetch() call."
+ * `transport.ts` honours that contract for HMR fan-out; this helper
+ * does the same for graph RPCs.
+ */
+async function retryOnInvalidation<R>(op: () => Promise<R>): Promise<R> {
+	const maxAttempts = 5;
+	let lastErr: unknown;
+	for (let attempt = 0; attempt < maxAttempts; attempt++) {
+		try {
+			return await op();
+		} catch (err) {
+			lastErr = err;
+			if (!isInvalidatedDoError(err)) throw err;
+		}
+	}
+	throw lastErr;
+}
+
+function isInvalidatedDoError(err: unknown): boolean {
+	if (err instanceof Error) {
+		return /invalidating this Durable Object|broken\.inputGateBroken/i.test(err.message);
+	}
+	return false;
 }

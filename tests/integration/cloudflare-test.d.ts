@@ -16,5 +16,6 @@ declare module "cloudflare:test" {
 		COORDINATOR_DO: DurableObjectNamespace<CoordinatorDurableObject>;
 		HMR_DO: DurableObjectNamespace<HmrDurableObject>;
 		LOADER: WorkerLoader;
+		DEPLOY_TOKEN: string;
 	}
 }

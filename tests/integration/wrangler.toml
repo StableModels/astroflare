@@ -26,3 +26,8 @@ class_name = "HmrDurableObject"
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["CoordinatorDurableObject", "HmrDurableObject"]
+
+# Deploy authorization. Tests pin a known token; production hosts
+# set this as a Worker secret via `wrangler secret put DEPLOY_TOKEN`.
+[vars]
+DEPLOY_TOKEN = "test-deploy-token"

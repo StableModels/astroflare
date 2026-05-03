@@ -36,6 +36,8 @@ import { describe, expect, it } from "vitest";
 
 // @ts-expect-error
 import RUNTIME_HMR_SRC from "../../packages/astroflare-runtime/dist/hmr-client.js?raw";
+// @ts-expect-error — Phase 15a: runtime/index.js re-exports env.js.
+import RUNTIME_ENV_SRC from "../../packages/astroflare-runtime/dist/env.js?raw";
 /* eslint-disable @typescript-eslint/ban-ts-comment */
 // @ts-expect-error
 import RUNTIME_INDEX_SRC from "../../packages/astroflare-runtime/dist/index.js?raw";
@@ -53,6 +55,7 @@ const RUNTIME_BUNDLE_MODULES: Record<string, string> = {
 	"runtime/render.js": RUNTIME_RENDER_SRC as string,
 	"runtime/hmr-client.js": RUNTIME_HMR_SRC as string,
 	"runtime/jsx-runtime.js": RUNTIME_JSX_RUNTIME_SRC as string,
+	"runtime/env.js": RUNTIME_ENV_SRC as string,
 };
 
 const enc = (s: string) => new TextEncoder().encode(s);

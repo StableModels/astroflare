@@ -166,7 +166,8 @@ export function outputPathFor(filePath: string, params: Record<string, string> =
 		throw new Error(`outputPathFor: not a page path: ${filePath}`);
 	}
 	let rel = filePath.slice(PAGES.length);
-	for (const ext of [".astro", ".md"]) {
+	// `.mdx` checked before `.md` so the longer suffix wins.
+	for (const ext of [".astro", ".mdx", ".md"]) {
 		if (rel.endsWith(ext)) {
 			rel = rel.slice(0, -ext.length);
 			break;

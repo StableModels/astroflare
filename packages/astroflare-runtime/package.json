@@ -25,6 +25,10 @@
     "./jsx-dev-runtime": {
       "types": "./src/jsx-runtime.ts",
       "default": "./src/jsx-runtime.ts"
+    },
+    "./env": {
+      "types": "./src/env.ts",
+      "default": "./src/env.ts"
     }
   },
   "scripts": {

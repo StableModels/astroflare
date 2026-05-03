@@ -166,13 +166,27 @@ cache invalidation, cross-module named imports, asset serving,
 DO persistence, and reverse-edge bookkeeping — all against real
 R2 + DOs + Worker Loader under Miniflare.
 
-**Phase 15a (separate, deferred):** the deploy pipeline. Bundle
-DW + esbuild-wasm + Workflow-orchestrated parallel render fan-out;
-Cap'n Web RPC services (`FsService` / `LogService` / `ImageService` /
-`EnvService`); `ImageService` production wiring against the
-Cloudflare Images binding; `EnvService` runtime helpers
-(`getSecret(name)` etc.). Phase 15 ships the runtime; 15a ships
-the deploy automation.
+### Phase 15a — Deploy pipeline ✓
+
+**Done.** Retro: [`docs/phases/phase-15a-deploy-pipeline.md`](./phases/phase-15a-deploy-pipeline.md).
+24 new tests; 574 total. Hybrid project-worker (deploy artifact
+serving first, live SSR fallback); `POST /_aflare/deploy` endpoint
+runs the render ceremony server-side with bearer auth;
+`@astroflare/cli` ships `aflare deploy` / `status` / `rollback`
+commands using only Node stdlib (R2 uploads via Cloudflare REST
+API + content-hash skip). `getSecret` runtime helper for parent-
+worker scope; `WorkerdExecutor` now sets `nodejs_compat` on
+spawned isolates; `DurableObjectCoordinator` retries on stub
+invalidation via stub-factory pattern.
+
+**Phase 15b (still deferred):** Workflow-orchestrated parallel
+render fan-out; Cap'n Web RPC services (`FsService` /
+`LogService` / `ImageService` / `EnvService`); `ImageService`
+production wiring against the Cloudflare Images binding; cross-
+isolate `getSecret` (threading env through the task context);
+`aflare init` scaffolding and `aflare deploy --watch`. None of
+these block the next-phase plan; they ride along when demand
+surfaces.
 
 ### Phase 16 — Hydration runtime + React integration
 

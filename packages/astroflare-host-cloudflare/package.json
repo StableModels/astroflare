@@ -20,9 +20,9 @@
   },
   "dependencies": {
     "@astroflare/core": "workspace:*",
-    "@astroflare/runtime": "workspace:*",
+    "@astroflare/build": "workspace:*",
     "@astroflare/preview": "workspace:*",
-    "@astroflare/build": "workspace:*"
+    "@astroflare/runtime": "workspace:*"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.10.0",

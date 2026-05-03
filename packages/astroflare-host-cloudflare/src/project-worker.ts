@@ -43,6 +43,7 @@
  * "no class named X is exported by the script" at deploy time.
  */
 
+import { createDeployServer, deploy, readCurrent } from "@astroflare/build";
 import type {
 	AstroflareConfig,
 	Executor,
@@ -50,6 +51,7 @@ import type {
 	TaskBundle,
 } from "@astroflare/core";
 import { createPreviewServer } from "@astroflare/preview";
+import { type EnvContext, withEnvContext } from "@astroflare/runtime/env";
 import { CoordinatorDurableObject, DurableObjectCoordinator } from "./coordinator-do.js";
 import { WorkerdExecutor } from "./executor.js";
 import { R2Storage } from "./r2-storage.js";
@@ -72,6 +74,14 @@ export interface ProjectWorkerEnv {
 	HMR_DO: DurableObjectNamespace<HmrDurableObject>;
 	/** Worker Loader binding, used by `WorkerdExecutor`. */
 	LOADER: WorkerLoader;
+	/**
+	 * Bearer token authorising calls to `/_aflare/deploy` (Phase 15a).
+	 * If unset, the deploy endpoint is disabled — deploys then have to
+	 * land in R2 by some other means (e.g. wrangler r2 object put). The
+	 * CLI sets this in `.dev.vars`; production hosts set it as a
+	 * Worker secret.
+	 */
+	DEPLOY_TOKEN?: string;
 }
 
 export interface ProjectWorkerOptions {
@@ -109,7 +119,11 @@ const DEFAULT_RUNTIME_IMPORT = "./runtime/index.js";
  */
 export function createHost(env: ProjectWorkerEnv, opts: ProjectWorkerOptions = {}): Host {
 	const workspaceId = opts.workspaceId ?? DEFAULT_WORKSPACE;
-	const coordinatorStub = env.COORDINATOR_DO.get(env.COORDINATOR_DO.idFromName(workspaceId));
+	// Stub factory rather than a captured stub — the DurableObjectCoordinator
+	// retries on workerd's "invalidating this Durable Object" error, which
+	// requires a fresh stub on each retry.
+	const coordinatorStubFactory = () =>
+		env.COORDINATOR_DO.get(env.COORDINATOR_DO.idFromName(workspaceId));
 	const logger = makeLogger();
 	// `nodejs_compat` is required so the framework runtime (which uses
 	// `node:async_hooks` for per-request context) resolves inside the
@@ -126,7 +140,7 @@ export function createHost(env: ProjectWorkerEnv, opts: ProjectWorkerOptions = {
 		: baseExecutor;
 	return {
 		storage: new R2Storage({ bucket: env.FILES }),
-		coordinator: new DurableObjectCoordinator(coordinatorStub),
+		coordinator: new DurableObjectCoordinator(coordinatorStubFactory),
 		transport: new HibernatingHmrTransport(env.HMR_DO),
 		executor,
 		clock: { now: () => Date.now() },
@@ -138,27 +152,150 @@ export function createHost(env: ProjectWorkerEnv, opts: ProjectWorkerOptions = {
  * Build the project worker's fetch handler with explicit runtime
  * modules. Tests + production deploys use this rather than the bare
  * default export so they can plug in the framework runtime at the
- * right time (Vite's `?raw` for tests; Phase 15a's deploy bundler for
+ * right time (Vite's `?raw` for tests; the deploy CLI's bundling for
  * production).
+ *
+ * Request routing:
+ *
+ *   1. `/_aflare/deploy` (POST) / `/_aflare/deploy/status` (GET) —
+ *      deploy control endpoints (Phase 15a). Auth via
+ *      `Authorization: Bearer <env.DEPLOY_TOKEN>`.
+ *   2. If `/site/current` exists, try the deploy server first. A
+ *      non-404 response is returned directly; 404 falls through to
+ *      live SSR for routes the deploy didn't pre-render (e.g. dynamic
+ *      routes without `getStaticPaths`).
+ *   3. Live SSR via the preview server.
  */
 export function createFetchHandler(
 	defaults: ProjectWorkerOptions = {},
 ): (req: Request, env: ProjectWorkerEnv, ctx: ExecutionContext) => Promise<Response> {
 	const runtimeImport = defaults.runtimeImport ?? DEFAULT_RUNTIME_IMPORT;
 	return async (req: Request, env: ProjectWorkerEnv, _ctx: ExecutionContext) => {
-		const host = createHost(env, defaults);
-		const server = createPreviewServer({
-			config: defaults.config ?? {},
-			host,
-			runtimeImport,
-			workspaceId: defaults.workspaceId,
-		});
-		try {
-			return await server.fetch(req);
-		} finally {
-			server.dispose();
-		}
+		// Bind every string-shaped env value as the per-request EnvContext
+		// so middleware / endpoints / SSR-frontmatter (in the parent
+		// worker) can call `getSecret(name)` and read it back. Non-string
+		// bindings (R2, DOs, Worker Loader) stay accessible only via the
+		// `env` parameter — they have no use for `getSecret`.
+		return withEnvContext(stringEnv(env), () => handleRequest(req, env, defaults, runtimeImport));
 	};
+}
+
+async function handleRequest(
+	req: Request,
+	env: ProjectWorkerEnv,
+	defaults: ProjectWorkerOptions,
+	runtimeImport: string,
+): Promise<Response> {
+	const host = createHost(env, defaults);
+	const url = new URL(req.url);
+
+	// Deploy control endpoints — short-circuit before any storage reads
+	// for non-deploy requests.
+	if (url.pathname === "/_aflare/deploy" && req.method === "POST") {
+		return handleDeploy(req, env, host, runtimeImport);
+	}
+	if (url.pathname === "/_aflare/deploy/status") {
+		return handleStatus(host);
+	}
+
+	// Hybrid serve: try the deploy server first if there's an active
+	// deploy; fall back to live SSR for anything not pre-rendered.
+	const currentDeploy = await readCurrent(host.storage);
+	if (currentDeploy) {
+		const deployServer = createDeployServer({ host });
+		const deployResponse = await deployServer.fetch(req);
+		if (deployResponse.status !== 404) {
+			return deployResponse;
+		}
+	}
+
+	const server = createPreviewServer({
+		config: defaults.config ?? {},
+		host,
+		runtimeImport,
+		workspaceId: defaults.workspaceId,
+	});
+	try {
+		return await server.fetch(req);
+	} finally {
+		server.dispose();
+	}
+}
+
+/**
+ * Filter `env` down to its string-valued bindings — exactly the surface
+ * `getSecret(name)` exposes. Worker secrets bind as strings; bindings
+ * for R2, KV, DOs, Worker Loader are objects, which `getSecret` would
+ * have no useful way to return anyway.
+ */
+function stringEnv(env: ProjectWorkerEnv): EnvContext {
+	const out: Record<string, string> = {};
+	for (const [k, v] of Object.entries(env)) {
+		if (typeof v === "string") out[k] = v;
+	}
+	return out;
+}
+
+/**
+ * `POST /_aflare/deploy` — runs `deploy()` server-side using the live
+ * R2-backed Host. Auth via `Authorization: Bearer <env.DEPLOY_TOKEN>`.
+ *
+ * The deploy ceremony reads sources from R2 (same bucket the project
+ * worker serves from), pre-renders every static + getStaticPaths route
+ * via the Worker Loader executor, writes rendered HTML under
+ * `/site/<deployHash>/`, then atomically flips `/site/current` to the
+ * new hash. Subsequent requests serve the rendered HTML before
+ * falling back to live SSR for dynamic routes.
+ */
+async function handleDeploy(
+	req: Request,
+	env: ProjectWorkerEnv,
+	host: Host,
+	runtimeImport: string,
+): Promise<Response> {
+	const auth = req.headers.get("authorization");
+	const expected = env.DEPLOY_TOKEN ? `Bearer ${env.DEPLOY_TOKEN}` : null;
+	if (!expected || auth !== expected) {
+		return jsonResponse({ error: "unauthorized" }, 401);
+	}
+
+	try {
+		const result = await deploy({ host, runtimeImport });
+		return jsonResponse(
+			{
+				deployHash: result.deployHash,
+				routeCount: result.rendered.length,
+				skippedCount: result.skipped.length,
+				durationMs: result.durationMs,
+			},
+			200,
+		);
+	} catch (err) {
+		host.logger.event("deploy.failed", {
+			message: (err as Error).message,
+		});
+		return jsonResponse(
+			{ error: (err as Error).message ?? "deploy failed" },
+			500,
+		);
+	}
+}
+
+/**
+ * `GET /_aflare/deploy/status` — returns the active deploy hash (or
+ * `null` if no deploy has run yet). Unauthenticated; the response
+ * contains no secrets.
+ */
+async function handleStatus(host: Host): Promise<Response> {
+	const deployHash = await readCurrent(host.storage);
+	return jsonResponse({ deployHash, active: deployHash !== null }, 200);
+}
+
+function jsonResponse(body: unknown, status: number): Response {
+	return new Response(JSON.stringify(body), {
+		status,
+		headers: { "content-type": "application/json;charset=utf-8" },
+	});
 }
 
 /**

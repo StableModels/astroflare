@@ -33,6 +33,9 @@ export default defineWorkersProject({
 						HMR_DO: { className: "HmrDurableObject" },
 					},
 					r2Buckets: ["FILES"],
+					// vars in wrangler.toml don't propagate to vitest-pool-workers'
+					// Miniflare config; bind explicitly here.
+					bindings: { DEPLOY_TOKEN: "test-deploy-token" },
 				},
 			},
 		},
