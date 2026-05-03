@@ -19,6 +19,7 @@
  * `Response` without calling `next()`.
  */
 
+import { transformTS } from "@astroflare/compiler/ts";
 import type { Host } from "@astroflare/core";
 
 export interface MiddlewareContext {
@@ -43,11 +44,7 @@ export interface MiddlewareModule {
 }
 
 const dec = new TextDecoder();
-const MIDDLEWARE_PATH_CANDIDATES = [
-	"/src/middleware.js",
-	// `.ts` would go here once type-stripping lands. The host's deploy-time
-	// build can pre-strip `.ts` to `.js`; in preview today we only see `.js`.
-];
+const MIDDLEWARE_PATH_CANDIDATES = ["/src/middleware.js", "/src/middleware.ts"];
 
 /**
  * Look up and load the user's middleware module. Returns `null` if no
@@ -59,7 +56,14 @@ export async function loadMiddleware(host: Host, cacheId: string): Promise<Middl
 		const stat = await host.storage.stat(path);
 		if (!stat) continue;
 		const sourceBytes = await host.storage.read(path);
-		const source = dec.decode(sourceBytes);
+		let source = dec.decode(sourceBytes);
+		if (path.endsWith(".ts")) {
+			try {
+				source = await transformTS(source, { filename: path });
+			} catch {
+				// Fallback: ship the source as-is. See `endpoint.ts` for context.
+			}
+		}
 
 		const taskBundle = {
 			mainModule: "main.js",
@@ -121,6 +125,30 @@ function rewriteExports(source: string): string {
 	out = out.replace(/^[ \t]*export[ \t]+(const|let|var)[ \t]+(\w+)/gm, (_, kw, name) => {
 		names.push(name);
 		return `${kw} ${name}`;
+	});
+	// esbuild's TS-strip pass emits `export { ... };` blocks; flatten them
+	// into the same `names` collection.
+	out = out.replace(/^[ \t]*export[ \t]*\{([^}]*)\}[ \t]*;?[ \t]*$/gm, (_, list) => {
+		const lines: string[] = [];
+		for (const part of (list as string).split(",")) {
+			const trimmed = part.trim();
+			if (!trimmed) continue;
+			const asMatch = /^([A-Za-z_$][\w$]*)\s+as\s+([A-Za-z_$][\w$]*)$/.exec(trimmed);
+			if (asMatch) {
+				const src = asMatch[1] as string;
+				const dst = asMatch[2] as string;
+				if (dst === "default") {
+					lines.push(`__default = ${src};`);
+				} else {
+					names.push(dst);
+					lines.push(`var ${dst} = ${src};`);
+				}
+				continue;
+			}
+			const bareMatch = /^([A-Za-z_$][\w$]*)$/.exec(trimmed);
+			if (bareMatch) names.push(bareMatch[1] as string);
+		}
+		return lines.join("\n");
 	});
 	for (const name of names) {
 		out += `\n__module.exports.${name} = ${name};`;

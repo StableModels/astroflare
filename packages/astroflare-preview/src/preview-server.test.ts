@@ -500,6 +500,25 @@ describe("preview server: server endpoints", () => {
 		const r = await server.fetch(new Request("https://app/api/42"));
 		expect(await r.text()).toBe("id=42");
 	});
+
+	it("dispatches to a .ts endpoint with type annotations stripped (Phase 11)", async () => {
+		const { host, server } = await fixture({
+			"/src/pages/api/typed.ts": [
+				"interface Reply { msg: string }",
+				"export const GET = async ({ params }: { params: Record<string, string> }): Promise<Response> => {",
+				"  const reply: Reply = { msg: 'hi from ts' };",
+				"  return new Response(JSON.stringify(reply), { headers: { 'content-type': 'application/json' } });",
+				"};",
+			].join("\n"),
+		});
+		const r = await server.fetch(new Request("https://app/api/typed"));
+		if (r.status !== 200) {
+			const errs = host.logger.byName("preview.error");
+			throw new Error(`endpoint returned ${r.status}: ${JSON.stringify(errs)}`);
+		}
+		expect(r.headers.get("content-type")).toMatch(/application\/json/);
+		expect(await r.text()).toBe('{"msg":"hi from ts"}');
+	});
 });
 
 describe("preview server: middleware", () => {
@@ -532,6 +551,24 @@ describe("preview server: middleware", () => {
 		});
 		const r = await server.fetch(new Request("https://app/api/x"));
 		expect(await r.text()).toBe("[mw]inner");
+	});
+
+	it("loads a .ts middleware file (Phase 11)", async () => {
+		const { server } = await fixture({
+			"/src/middleware.ts": [
+				"interface Ctx { request: Request; locals: Record<string, unknown> }",
+				"export const onRequest = async (ctx: Ctx, next: () => Promise<Response>): Promise<Response> => {",
+				"  const r = await next();",
+				"  const h = new Headers(r.headers);",
+				"  h.set('x-from-ts', 'yes');",
+				"  return new Response(r.body, { status: r.status, headers: h });",
+				"};",
+			].join("\n"),
+			"/src/pages/index.astro": "<p>x</p>",
+		});
+		const r = await server.fetch(new Request("https://app/"));
+		expect(r.status).toBe(200);
+		expect(r.headers.get("x-from-ts")).toBe("yes");
 	});
 
 	it("middleware sets Astro.locals; the page reads them", async () => {

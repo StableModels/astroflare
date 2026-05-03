@@ -39,7 +39,7 @@ afterAll(async () => {
 });
 
 async function render(astroSrc: string, props: unknown = {}, slots = {}): Promise<string> {
-	const { code, errors } = compileAstro(astroSrc, { runtimeImport: RUNTIME_URL });
+	const { code, errors } = await compileAstro(astroSrc, { runtimeImport: RUNTIME_URL });
 	if (errors.length > 0) {
 		throw new Error(`compile errors: ${JSON.stringify(errors, null, 2)}`);
 	}
@@ -47,11 +47,15 @@ async function render(astroSrc: string, props: unknown = {}, slots = {}): Promis
 		{
 			mainModule: "main.js",
 			modules: {
-				"main.js": `${code}\nexport const __invoke = async (input) => {
+				// `_inner.js` holds the compiled component; `main.js` is a thin
+				// wrapper that imports it and invokes it with the test inputs.
+				// Keeping them separate avoids a duplicate `export default`
+				// when esbuild's TS-strip pass normalises the compiled module.
+				"main.js": `export default async (input) => {
 					const { props, slots } = input;
 					const Component = (await import("./_inner.js")).default;
 					return await Component({ Astro: { props }, ...props }, slots);
-				};\nexport default __invoke;`,
+				};`,
 				"_inner.js": code,
 			},
 		},
@@ -116,9 +120,30 @@ describe("e2e: source .astro → compiled module → HTML", () => {
 
 	it("propagates source position errors but still parses partial output", async () => {
 		const src = "<p>oops {unclosed</p>";
-		const { errors } = compileAstro(src);
+		const { errors } = await compileAstro(src);
 		expect(errors).toHaveLength(1);
 		expect(errors[0]?.start.line).toBe(1);
+	});
+
+	it("strips TypeScript syntax from frontmatter", async () => {
+		const src =
+			"---\n" +
+			"interface Props { name: string; age: number }\n" +
+			"const { name, age } = Astro.props as Props;\n" +
+			"---\n" +
+			"<p>{name}/{age}</p>";
+		expect(await render(src, { name: "Alice", age: 30 })).toBe("<p>Alice/30</p>");
+	});
+
+	it("supports type annotations on frontmatter consts", async () => {
+		const src =
+			"---\nconst items: readonly string[] = ['a', 'b', 'c'];\n---\n<p>{items.join(',')}</p>";
+		expect(await render(src)).toBe("<p>a,b,c</p>");
+	});
+
+	it("strips `as` casts inside expressions", async () => {
+		const src = "---\nconst raw = Astro.props.raw;\n---\n<p>{(raw as string).toUpperCase()}</p>";
+		expect(await render(src, { raw: "hi" })).toBe("<p>HI</p>");
 	});
 });
 

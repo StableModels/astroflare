@@ -118,14 +118,20 @@ export function emitDocument(doc: AstroDocument, opts: EmitOptions = {}): EmitRe
 }
 
 /**
- * Extract top-level `export ...` declarations from frontmatter source so they
- * land at module scope rather than inside the component arrow.
+ * Extract top-level `import` and `export` declarations from frontmatter
+ * source so they land at module scope rather than inside the component
+ * arrow.
  *
  * Recognised forms (parity with Astro):
+ *   - `import X from "spec";` and every other top-level `import` shape
  *   - `export async function NAME(...) { … }`
  *   - `export function NAME(...) { … }`
  *   - `export class NAME { … }`
  *   - `export (const|let|var) NAME = …;`     // semicolon-terminated
+ *
+ * Imports must hoist because (a) `import` is a syntax error inside an
+ * arrow body and (b) the TS-strip pass (esbuild-wasm) parses the
+ * pre-bundler output. Exports hoist for the same reason.
  *
  * Other top-level `export`s (re-exports, `export type`, default exports)
  * are left in place — the emitter does not own a real JS parser.
@@ -148,13 +154,10 @@ export function hoistTopLevelExports(source: string): {
 		const lineEnd = nl < 0 ? source.length : nl;
 		const line = source.slice(lineStart, lineEnd);
 		const trimmed = line.trimStart();
-		const exportMatch = matchExportDeclaration(trimmed);
-		if (exportMatch) {
-			// Find the end of the statement (depth-0 `;` for const/let/var,
-			// matching `}` for function/class). Start scanning from after the
-			// `export ` keyword in the original source.
+		const match = matchHoistableDeclaration(trimmed);
+		if (match) {
 			const stmtStart = lineStart + (line.length - trimmed.length);
-			const stmtEnd = findStatementEnd(source, stmtStart, exportMatch.kind);
+			const stmtEnd = findStatementEnd(source, stmtStart, match.kind);
 			if (stmtEnd > stmtStart) {
 				hoisted.push(source.slice(stmtStart, stmtEnd));
 				i = stmtEnd;
@@ -175,15 +178,18 @@ export function hoistTopLevelExports(source: string): {
 }
 
 interface ExportMatch {
-	kind: "fn" | "class" | "decl";
+	kind: "fn" | "class" | "decl" | "import";
 }
 
+const IMPORT_RE =
+	/^import\b[ \t\r\n]*(?:type[ \t]+)?(?:[\w$*,{}\s]+[ \t]+from[ \t]+)?["'][^"']+["']/;
 const EXPORT_FN_RE =
 	/^export[ \t]+(?:async[ \t]+)?function[ \t]+(?:\*[ \t]*)?[A-Za-z_$][\w$]*[ \t]*\(/;
 const EXPORT_CLASS_RE = /^export[ \t]+class[ \t]+[A-Za-z_$][\w$]*\b/;
 const EXPORT_DECL_RE = /^export[ \t]+(?:const|let|var)[ \t]+[A-Za-z_$][\w$]*/;
 
-function matchExportDeclaration(line: string): ExportMatch | null {
+function matchHoistableDeclaration(line: string): ExportMatch | null {
+	if (IMPORT_RE.test(line)) return { kind: "import" };
 	if (EXPORT_FN_RE.test(line)) return { kind: "fn" };
 	if (EXPORT_CLASS_RE.test(line)) return { kind: "class" };
 	if (EXPORT_DECL_RE.test(line)) return { kind: "decl" };
@@ -245,7 +251,7 @@ function findStatementEnd(source: string, start: number, kind: ExportMatch["kind
 			}
 		} else if (
 			ch === ";" &&
-			kind === "decl" &&
+			(kind === "decl" || kind === "import") &&
 			braceDepth === 0 &&
 			parenDepth === 0 &&
 			bracketDepth === 0
@@ -253,12 +259,13 @@ function findStatementEnd(source: string, start: number, kind: ExportMatch["kind
 			return i + 1;
 		} else if (
 			ch === "\n" &&
-			kind === "decl" &&
+			(kind === "decl" || kind === "import") &&
 			braceDepth === 0 &&
 			parenDepth === 0 &&
 			bracketDepth === 0
 		) {
-			// Auto-semicolon: `export const x = expr` followed by newline (no `;`).
+			// Auto-semicolon: `import x from "y"` followed by newline (no `;`),
+			// or the same shape for const/let/var.
 			return i;
 		}
 		i++;

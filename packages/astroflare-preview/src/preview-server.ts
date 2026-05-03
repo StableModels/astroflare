@@ -101,16 +101,17 @@ export function createPreviewServer(opts: PreviewServerOptions): PreviewServer {
 
 	async function ensureMiddleware(): Promise<MiddlewareFn | null> {
 		if (middleware !== undefined) return middleware;
-		// Cache id covers source content; if /src/middleware.js changes, the
-		// route-invalidation subscriber clears `middleware` so we reload.
-		const stat = await opts.host.storage.stat("/src/middleware.js");
-		if (!stat) {
-			middleware = null;
-			return null;
+		// Look for `.js` first, then `.ts`. Cache id covers source content;
+		// the HMR subscriber clears `middleware` if either file changes.
+		for (const path of ["/src/middleware.js", "/src/middleware.ts"]) {
+			const stat = await opts.host.storage.stat(path);
+			if (!stat) continue;
+			const fn = await loadMiddleware(opts.host, `middleware:${stat.hash}`);
+			middleware = fn;
+			return middleware;
 		}
-		const fn = await loadMiddleware(opts.host, `middleware:${stat.hash}`);
-		middleware = fn;
-		return middleware;
+		middleware = null;
+		return null;
 	}
 
 	async function ensureRoutes(): Promise<void> {
@@ -154,11 +155,12 @@ export function createPreviewServer(opts: PreviewServerOptions): PreviewServer {
 			}
 		});
 		// Reset cached middleware when the user's middleware file changes
-		// or is removed.
+		// or is removed (either `.js` or `.ts`).
 		middlewareInvalidationSub = opts.host.coordinator.subscribe("hmr", (msg: HmrMessage) => {
+			const isMiddleware = (p: string) => p === "/src/middleware.js" || p === "/src/middleware.ts";
 			const triggered =
-				(msg.type === "update" && msg.trigger === "/src/middleware.js") ||
-				(msg.type === "prune" && msg.paths.includes("/src/middleware.js"));
+				(msg.type === "update" && msg.trigger !== undefined && isMiddleware(msg.trigger)) ||
+				(msg.type === "prune" && msg.paths.some(isMiddleware));
 			if (triggered) {
 				middleware = undefined;
 				opts.host.logger.event("preview.middleware.invalidated", {});

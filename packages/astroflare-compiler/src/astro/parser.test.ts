@@ -76,6 +76,38 @@ describe("parser — text and expressions", () => {
 		expect(r.errors[0]?.message).toMatch(/Unclosed expression/);
 		expect(r.errors[0]?.start.line).toBe(1);
 	});
+
+	// Regex literal disambiguation (Phase 11). Without it, a `}` inside a
+	// regex character class would close the expression early.
+	it("treats /[}]/ as a regex, not a division of `[}]`", () => {
+		const r = parse("{'abc'.match(/[}]/)}");
+		expectNoErrors(r);
+		expect((r.doc.body[0] as { expression: string }).expression).toBe("'abc'.match(/[}]/)");
+	});
+
+	it("recognises a regex after `return` keyword", () => {
+		const r = parse("{(() => { return /^[a-z]+$/.test('x') })()}");
+		expectNoErrors(r);
+	});
+
+	it("treats `/` after a value-like token as division", () => {
+		// `a/b` is division, not a regex. The `}` after `b` ends the expr.
+		const r = parse("{a/b}");
+		expectNoErrors(r);
+		expect((r.doc.body[0] as { expression: string }).expression).toBe("a/b");
+	});
+
+	it("recognises a regex with flags", () => {
+		const r = parse("{x.match(/foo/gi)}");
+		expectNoErrors(r);
+		expect((r.doc.body[0] as { expression: string }).expression).toBe("x.match(/foo/gi)");
+	});
+
+	it("regex containing escaped slash doesn't terminate early", () => {
+		const r = parse("{x.match(/a\\/b/)}");
+		expectNoErrors(r);
+		expect((r.doc.body[0] as { expression: string }).expression).toBe("x.match(/a\\/b/)");
+	});
 });
 
 describe("parser — HTML elements", () => {

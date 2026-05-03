@@ -42,9 +42,13 @@ describe("routeFromFilePath", () => {
 		expect(r?.kind).toBe("markdown");
 	});
 
+	it("recognises .ts as an endpoint route (Phase 11)", () => {
+		const r = routeFromFilePath("/src/pages/api.ts");
+		expect(r?.kind).toBe("endpoint");
+	});
+
 	it("ignores extensions that aren't yet supported", () => {
-		// `.ts` endpoints are Phase 8, `.mdx` is deferred.
-		expect(routeFromFilePath("/src/pages/api.ts")).toBeNull();
+		// `.mdx` is deferred to Phase 14.
 		expect(routeFromFilePath("/src/pages/post.mdx")).toBeNull();
 	});
 });

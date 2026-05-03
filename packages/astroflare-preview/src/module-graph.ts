@@ -140,7 +140,7 @@ export class ModuleGraph {
 			});
 			return result.code;
 		}
-		const result = compileAstro(source, {
+		const result = await compileAstro(source, {
 			runtimeImport: this.#opts.runtimeImport,
 			filename: path,
 		});

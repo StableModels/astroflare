@@ -76,6 +76,9 @@ importers:
       '@astroflare/core':
         specifier: workspace:*
         version: link:../astroflare-core
+      esbuild-wasm:
+        specifier: ^0.28.0
+        version: 0.28.0
       rehype-stringify:
         specifier: ^10.0.0
         version: 10.0.1
@@ -1565,6 +1568,11 @@ packages:
   es-module-lexer@1.7.0:
     resolution: {integrity: sha512-jEQoCwk8hyb2AZziIOLhDqpm5+2ww5uIE6lkO/6jcOCusfk6LhMHpXXfBLXTZ7Ydyt0j4VoUQv6uGNYbdW+kBA==}
 
+  esbuild-wasm@0.28.0:
+    resolution: {integrity: sha512-5TRVKExcEmeMkccIZMzUq+Az6X2RoMAJyfl6SMMO1dMVhmvt0I2mx7gAb6zYi42n4d1ETcatFXazGKzA+aW7fg==}
+    engines: {node: '>=18'}
+    hasBin: true
+
   esbuild@0.21.5:
     resolution: {integrity: sha512-mg3OPMV4hXywwpoDxu3Qda5xCKQi+vCTZq8S9J/EpkhB2HzKXq4SNFZE3+NK93JYxc8VMSep+lOUSC/RVKaBqw==}
     engines: {node: '>=12'}
@@ -3009,6 +3017,8 @@ snapshots:
   error-stack-parser-es@1.0.5: {}
 
   es-module-lexer@1.7.0: {}
+
+  esbuild-wasm@0.28.0: {}
 
   esbuild@0.21.5:
     optionalDependencies:

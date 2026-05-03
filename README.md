@@ -16,10 +16,10 @@ Astroflare runs an Astro-shaped project (`src/pages/`, `.astro`/`.md`/`.mdx`,
 
 ## Status
 
-Phases 0–10 shipped, plus Phase 2.5b which closed the original Phase 2.5
+Phases 0–11 shipped, plus Phase 2.5b which closed the original Phase 2.5
 deferral list (Miniflare v4 unblock + real `WorkerdExecutor` + real
 Hibernatable WS Transport + workerd-native compiler e2e + latency + soak).
-**424 tests across 5 test pools.**
+**445 tests across 5 test pools.**
 
 The framework runs end-to-end:
 
@@ -31,6 +31,9 @@ The framework runs end-to-end:
   site/redirect/cookies/locals/slots`, plus `getStaticPaths()` for
   dynamic routes (`Astro.self` deferred). Component-returned `Response`
   short-circuits to a real HTTP response.
+- **TypeScript throughout** — `.astro` frontmatter, `.ts` endpoints,
+  `.ts` middleware. esbuild-wasm strips type syntax at compile time;
+  same module runs in Node and (Phase 15+) in workerd.
 - **Content collections** — `defineCollection` + Zod schemas + `getCollection` +
   `getEntry`, walking `src/content/<name>/`.
 - **Deploy pipeline** — planner (with `getStaticPaths` expansion),

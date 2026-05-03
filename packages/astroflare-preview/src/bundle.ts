@@ -69,7 +69,7 @@ const ANY_IMPORT_LINE_RE =
 const ASTRO_DEFAULT_IMPORT_RE =
 	/^[ \t]*import[ \t]+(\w+)[ \t]+from[ \t]+["']([^"']+\.astro)["'];?[ \t]*\r?\n?/gm;
 
-/** Match `export default <expr>;` at line start. */
+/** Match `export default <expr>;` at line start (markdown compiler output). */
 const EXPORT_DEFAULT_RE = /^[ \t]*export[ \t]+default[ \t]+/m;
 
 /**
@@ -79,9 +79,27 @@ const EXPORT_DEFAULT_RE = /^[ \t]*export[ \t]+default[ \t]+/m;
  *
  * Captures: 1=keyword (`function`/`class`/`const`/`let`/`var`), 2=name.
  * For functions we also accept an optional `async` qualifier.
+ *
+ * Note: esbuild's TS-strip pass rewrites `export const X = …` into a bare
+ * declaration plus an `export { X }` block; in that case `EXPORT_LIST_RE`
+ * below picks them up. This regex still matches the markdown compiler's
+ * direct emission shape.
  */
 const EXPORT_NAMED_RE =
 	/^[ \t]*export[ \t]+(?:async[ \t]+)?(function|class|const|let|var)[ \t]+([A-Za-z_$][\w$]*)/gm;
+
+/**
+ * Match esbuild's normalised export block:
+ *
+ *   export {
+ *     stdin_default as default,
+ *     getStaticPaths
+ *   };
+ *
+ * Captures the brace contents (group 1) so the bundler can route each
+ * binding to either `__default` or a named-export slot.
+ */
+const EXPORT_LIST_RE = /^[ \t]*export[ \t]*\{([^}]*)\}[ \t]*;?[ \t]*$/gm;
 
 /**
  * Names exposed by route modules in addition to `default`. Bundles unwrap
@@ -163,6 +181,9 @@ function renderModuleBody(mod: ModuleInfo, idxByPath: Map<string, number>): Rend
 	body = body.replace(ANY_IMPORT_LINE_RE, "");
 
 	// 3. Rewrite `export default <expr>` to assign to __default.
+	//    Markdown compiler still emits this shape directly; esbuild's
+	//    TS-strip pass produces the `export { X as default }` form which
+	//    the EXPORT_LIST_RE pass below handles.
 	body = body.replace(EXPORT_DEFAULT_RE, "  __default = ");
 
 	// 4. Strip `export ` from named declarations and remember their names so
@@ -177,6 +198,38 @@ function renderModuleBody(mod: ModuleInfo, idxByPath: Map<string, number>): Rend
 		}
 		void kw;
 		return replacement;
+	});
+
+	// 5. Handle esbuild's normalised `export { X as default, Y };` block —
+	//    route each entry to the IIFE's return slots.
+	body = body.replace(EXPORT_LIST_RE, (_, list) => {
+		const lines: string[] = [];
+		for (const part of list.split(",")) {
+			const trimmed = part.trim();
+			if (!trimmed) continue;
+			const asMatch = /^([A-Za-z_$][\w$]*)\s+as\s+([A-Za-z_$][\w$]*)$/.exec(trimmed);
+			if (asMatch) {
+				const src = asMatch[1] as string;
+				const dst = asMatch[2] as string;
+				if (dst === "default") {
+					lines.push(`  __default = ${src};`);
+				} else if ((NAMED_EXPORTS_OF_INTEREST as readonly string[]).includes(dst)) {
+					namedExports.push(dst);
+					lines.push(`  const ${dst} = ${src};`);
+				}
+				// Other re-exports are dropped (invisible to importers).
+				continue;
+			}
+			// Bare `{ name }` — re-export of the same identifier.
+			const bareMatch = /^([A-Za-z_$][\w$]*)$/.exec(trimmed);
+			if (bareMatch) {
+				const name = bareMatch[1] as string;
+				if ((NAMED_EXPORTS_OF_INTEREST as readonly string[]).includes(name)) {
+					namedExports.push(name);
+				}
+			}
+		}
+		return lines.join("\n");
 	});
 
 	// 5. Indent for readability inside the IIFE; preserve blank lines.

@@ -42,11 +42,10 @@ const PAGES_PREFIX = "/src/pages";
 const PAGE_EXTENSIONS: ReadonlyArray<{ ext: string; kind: RouteKind }> = [
 	{ ext: ".astro", kind: "astro" },
 	{ ext: ".md", kind: "markdown" },
-	// Phase 8: server endpoints. JS-only until type-stripping lands;
-	// `.ts` endpoints work in production via the host's pre-build TS→JS
-	// pass, but in dev preview today they fail at module load. (See
-	// Phase 6 retro for the type-stripping carryover.)
+	// Server endpoints. Phase 11 adds `.ts` alongside `.js`; the endpoint
+	// loader runs `.ts` source through esbuild-wasm before bundling.
 	{ ext: ".js", kind: "endpoint" },
+	{ ext: ".ts", kind: "endpoint" },
 ];
 
 export class Router {

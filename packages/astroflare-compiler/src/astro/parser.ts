@@ -86,6 +86,36 @@ function isWhitespace(c: number): boolean {
 	return c === 0x20 || c === 0x09 || c === CC_NL || c === CC_CR || c === 0x0c;
 }
 
+function isWordChar(c: number): boolean {
+	// JS identifier-ish: ASCII letters, digits, `_`, `$`. Good-enough for
+	// the regex-vs-division heuristic; full Unicode identifiers don't show
+	// up in the contexts that bite.
+	return (
+		(c >= 0x30 && c <= 0x39) || // 0-9
+		(c >= 0x41 && c <= 0x5a) || // A-Z
+		(c >= 0x61 && c <= 0x7a) || // a-z
+		c === 0x5f /* _ */ ||
+		c === CC_DOLLAR
+	);
+}
+
+const REGEX_PRECEDING_KEYWORDS = new Set([
+	"return",
+	"typeof",
+	"in",
+	"of",
+	"instanceof",
+	"new",
+	"delete",
+	"throw",
+	"void",
+	"yield",
+	"await",
+	"do",
+	"else",
+	"case",
+]);
+
 function isAttrNameChar(c: number): boolean {
 	// HTML attribute names: anything except whitespace, =, /, >, ", ', <, controls.
 	// Astro additionally allows `:` (for directives) and `-` (for data-*) and `.`.
@@ -322,6 +352,8 @@ class Parser {
 						i = this.skipLineComment(i);
 					} else if (this.source.charCodeAt(i + 1) === CC_STAR) {
 						i = this.skipBlockComment(i);
+					} else if (this.isRegexStart(i, openPos)) {
+						i = this.skipRegexLiteral(i);
 					} else {
 						i++;
 					}
@@ -381,6 +413,119 @@ class Parser {
 			i++;
 		}
 		return i;
+	}
+
+	/**
+	 * Heuristic: is the `/` at `pos` the start of a regex literal (not
+	 * division)? We're inside an expression that began at `openPos`. JS
+	 * uses the preceding context to decide:
+	 *   - At the very start of the expression, `/` is regex.
+	 *   - After an operator or punctuation that can't be followed by a
+	 *     value (`=`, `(`, `,`, `[`, `{`, `;`, `:`, `!`, `&`, `|`, `?`,
+	 *     `+`, `-`, `*`, `%`, `<`, `>`, `^`, `~`, `/`, `\n`), `/` is regex.
+	 *   - After certain keywords (`return`, `typeof`, `in`, `of`,
+	 *     `instanceof`, `new`, `delete`, `throw`, `void`, `yield`, `await`),
+	 *     `/` is regex.
+	 *   - Otherwise it's division.
+	 *
+	 * Imperfect (a real JS tokenizer is required for full correctness),
+	 * but covers the cases that bite in practice — most notably regexes
+	 * containing `}` like `/[}]/` which would otherwise truncate the
+	 * expression body.
+	 */
+	private isRegexStart(slashPos: number, openPos: number): boolean {
+		// Walk back skipping whitespace and comments.
+		let j = slashPos - 1;
+		while (j > openPos) {
+			const c = this.source.charCodeAt(j);
+			if (isWhitespace(c)) {
+				j--;
+				continue;
+			}
+			break;
+		}
+		// At the very start of the expression body? Definitely regex.
+		if (j <= openPos) return true;
+		const c = this.source.charCodeAt(j);
+		// Punctuation / operator chars that allow a regex to follow.
+		switch (c) {
+			case CC_EQ:
+			case CC_LPAREN:
+			case CC_LBRACK:
+			case CC_LBRACE:
+			case 0x2c: // ,
+			case 0x3b: // ;
+			case 0x3a: // :
+			case CC_BANG:
+			case 0x26: // &
+			case 0x7c: // |
+			case 0x3f: // ?
+			case 0x2b: // +
+			case CC_DASH:
+			case CC_STAR:
+			case 0x25: // %
+			case 0x3c: // <
+			case 0x3e: // >
+			case 0x5e: // ^
+			case 0x7e: // ~
+			case CC_SLASH:
+				return true;
+		}
+		// Identifier/keyword preceding? Walk back to the start.
+		if (isWordChar(c)) {
+			let k = j;
+			while (k > openPos && isWordChar(this.source.charCodeAt(k - 1))) k--;
+			const word = this.source.slice(k, j + 1);
+			return REGEX_PRECEDING_KEYWORDS.has(word);
+		}
+		// Anything else (`)`, `]`, digit, identifier handled above): division.
+		return false;
+	}
+
+	/**
+	 * Walk forward from a `/` known to start a regex literal. Handles
+	 * `[...]` character classes (where `/` is a literal slash) and
+	 * backslash escapes. Returns the index just past the closing `/` and
+	 * any flag chars (`gimsuy`).
+	 */
+	private skipRegexLiteral(start: number): number {
+		let i = start + 1;
+		let inCharClass = false;
+		while (i < this.source.length) {
+			const c = this.source.charCodeAt(i);
+			if (c === CC_BACKSLASH) {
+				i += 2;
+				continue;
+			}
+			if (c === 0x5b /* [ */) {
+				inCharClass = true;
+				i++;
+				continue;
+			}
+			if (c === 0x5d /* ] */ && inCharClass) {
+				inCharClass = false;
+				i++;
+				continue;
+			}
+			if (c === CC_SLASH && !inCharClass) {
+				i++;
+				// Consume flag chars.
+				while (i < this.source.length) {
+					const f = this.source.charCodeAt(i);
+					if (f >= 0x61 /* a */ && f <= 0x7a /* z */) {
+						i++;
+					} else break;
+				}
+				return i;
+			}
+			if (c === CC_NL) {
+				// Unterminated regex — bail out, treat the `/` as division
+				// from the original position (caller picked up only one char).
+				return start + 1;
+			}
+			i++;
+		}
+		return start + 1;
 	}
 
 	private skipBlockComment(start: number): number {

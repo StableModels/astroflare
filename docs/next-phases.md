@@ -7,15 +7,16 @@ MVP = Tier 0 + Tier 1).
 
 ## Where we are
 
-**Done:** Phases 0–10 plus 2.5b. Framework runs end-to-end. Live preview
+**Done:** Phases 0–11 plus 2.5b. Framework runs end-to-end. Live preview
 with HMR (additions + removals), multi-file `.astro` composition,
-markdown + content collections, server endpoints + middleware, static
+markdown + content collections, server endpoints + middleware
+(both `.js` and `.ts`), TypeScript-authoring throughout, static
 deploy with atomic flip including dynamic routes via `getStaticPaths`,
 full Tier 0 `Astro.*` surface (`cookies`, `locals`, `slots`, `redirect`
 propagation), real Worker Loader-backed Executor and Hibernatable WS
 Transport in `@astroflare/host-cloudflare`, `minimal-blog` fixture.
 
-**424 tests / 38 files / 5 pools all green.** Framework boundary holds.
+**445 tests / 39 files / 5 pools all green.** Framework boundary holds.
 
 ## Outstanding work, categorized
 
@@ -27,7 +28,7 @@ Transport in `@astroflare/host-cloudflare`, `minimal-blog` fixture.
 - `Astro.self` (recursive components — niche, deferred)
 
 ### B — Tier 1 finishers
-- TS support throughout (frontmatter + endpoints) via esbuild-wasm in a Compile DW
+- ~~TS support throughout (frontmatter + endpoints)~~ ✓ Phase 11
 - Scoped CSS (`<style>` block + selector hash + element attribution)
 - Global CSS + CSS modules
 - `import.meta.env` substitution + `astro:env` schema
@@ -92,16 +93,13 @@ cross-cutting `graphRemove` → `prune` HMR wiring.
 
 **Defer:** `Astro.self` (recursive components — niche).
 
-### Phase 11 — TS support
+### Phase 11 — TS support ✓
 
-esbuild-wasm in `@astroflare/compiler/src/ts.ts` (a tiny module that
-loads esbuild-wasm once and exports `transformTS(source) → string`).
-Compiler routes `.astro` frontmatter through it when the user's frontmatter
-contains type annotations; `.ts` endpoints likewise. Layer A tests in
-Node use `esbuild` (native) for speed; Layer B test wires the WASM
-build.
-
-Also widens routing to recognize `.ts` endpoints in `pages/`.
+**Done.** Retro: [`docs/phases/phase-11-typescript.md`](./phases/phase-11-typescript.md).
+18 new tests; 445 total. esbuild-wasm-backed TS strip in
+`@astroflare/compiler/ts`; `.astro` frontmatter, `.ts` endpoints,
+and `.ts` middleware all flow through it. Cross-cutting
+regex-literal disambiguation in the parser landed alongside.
 
 **Defer:** TS-aware error reporting (line numbers from TS source survive
 via source maps — Phase 13).
@@ -222,8 +220,7 @@ naturally touches them:
   compiler's emit path)
 - **`is:raw` proper handling** — fits inside Phase 14 (MDX touches the
   compiler)
-- **Regex literal disambiguation** — fits inside Phase 11 (TS support
-  exercises edge cases in expression parsing)
+- ~~**Regex literal disambiguation** — fits inside Phase 11~~ ✓ Phase 11
 - **Coverage thresholds** — fits inside Phase 23 (quality pass)
 - **Workflow-driven parallel render fan-out** — fits inside Phase 15
   (host implementation)

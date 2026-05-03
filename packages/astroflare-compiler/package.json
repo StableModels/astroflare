@@ -9,6 +9,10 @@
     ".": {
       "types": "./src/index.ts",
       "default": "./src/index.ts"
+    },
+    "./ts": {
+      "types": "./src/ts.ts",
+      "default": "./src/ts.ts"
     }
   },
   "scripts": {
@@ -16,6 +20,7 @@
   },
   "dependencies": {
     "@astroflare/core": "workspace:*",
+    "esbuild-wasm": "^0.28.0",
     "rehype-stringify": "^10.0.0",
     "remark-parse": "^11.0.0",
     "remark-rehype": "^11.1.0",

@@ -16,5 +16,6 @@ next phase's planner.
 - [`phase-08-middleware-endpoints.md`](./phase-08-middleware-endpoints.md) — `src/middleware.js` + `.js` server endpoints with method dispatch.
 - [`phase-09-hardening.md`](./phase-09-hardening.md) — `examples/minimal-blog` fixture, dev error overlay, hardening sweep.
 - [`phase-02_5b-host-implementation.md`](./phase-02_5b-host-implementation.md) — Phase 2.5 deferral list closed: real `WorkerdExecutor`, Hibernatable WS Transport, workerd compiler-e2e, latency + soak.
-- [`phase-10-tier0-closeout.md`](./phase-10-tier0-closeout.md) — `getStaticPaths` + `Astro.cookies` / `locals` / `slots` / redirect propagation + file-removal `prune` HMR. **424 tests.**
+- [`phase-10-tier0-closeout.md`](./phase-10-tier0-closeout.md) — `getStaticPaths` + `Astro.cookies` / `locals` / `slots` / redirect propagation + file-removal `prune` HMR. 427 tests.
+- [`phase-11-typescript.md`](./phase-11-typescript.md) — esbuild-wasm-backed TS strip in compiler; `.ts` endpoints + `.ts` middleware; regex-literal disambiguation in expression parser. **445 tests.**
 - (later phases land here as they complete)

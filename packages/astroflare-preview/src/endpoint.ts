@@ -20,6 +20,7 @@
  * `default`; returns `405 Method Not Allowed` if neither matches.
  */
 
+import { transformTS } from "@astroflare/compiler/ts";
 import type { Host, TaskBundle } from "@astroflare/core";
 
 const dec = new TextDecoder();
@@ -52,7 +53,18 @@ export interface RunEndpointOptions {
  */
 export async function runEndpoint(opts: RunEndpointOptions): Promise<Response> {
 	const sourceBytes = await opts.host.storage.read(opts.filePath);
-	const source = dec.decode(sourceBytes);
+	let source = dec.decode(sourceBytes);
+	// `.ts` endpoints get TS syntax stripped before bundling. Plain `.js`
+	// passes through unchanged.
+	if (opts.filePath.endsWith(".ts")) {
+		try {
+			source = await transformTS(source, { filename: opts.filePath });
+		} catch {
+			// On TS init failure (e.g. workerd without WASM), fall back to
+			// the original source. JS-only `.ts` files load fine; type
+			// annotations would surface as a runtime error.
+		}
+	}
 
 	const taskBundle: TaskBundle = {
 		mainModule: "main.js",
@@ -130,6 +142,32 @@ function rewriteExports(source: string): string {
 	out = out.replace(/^[ \t]*export[ \t]+(const|let|var)[ \t]+(\w+)/gm, (_, kw, name) => {
 		names.push(name);
 		return `${kw} ${name}`;
+	});
+
+	// `export { Foo, Bar as default, Baz };` — esbuild's TS-strip emits
+	// this shape for `.ts` modules. Each entry maps to either a name to
+	// re-export (bare) or `__default` (`X as default`).
+	out = out.replace(/^[ \t]*export[ \t]*\{([^}]*)\}[ \t]*;?[ \t]*$/gm, (_, list) => {
+		const lines: string[] = [];
+		for (const part of list.split(",")) {
+			const trimmed = part.trim();
+			if (!trimmed) continue;
+			const asMatch = /^([A-Za-z_$][\w$]*)\s+as\s+([A-Za-z_$][\w$]*)$/.exec(trimmed);
+			if (asMatch) {
+				const src = asMatch[1] as string;
+				const dst = asMatch[2] as string;
+				if (dst === "default") {
+					lines.push(`__default = ${src};`);
+				} else {
+					names.push(dst);
+					lines.push(`var ${dst} = ${src};`);
+				}
+				continue;
+			}
+			const bareMatch = /^([A-Za-z_$][\w$]*)$/.exec(trimmed);
+			if (bareMatch) names.push(bareMatch[1] as string);
+		}
+		return lines.join("\n");
 	});
 
 	for (const name of names) {
