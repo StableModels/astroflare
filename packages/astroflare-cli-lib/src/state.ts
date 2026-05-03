@@ -50,3 +50,41 @@ export function deleteFixtureState(rootDir: string, sha7: string, fixture: strin
 	const path = fixtureStatePath(rootDir, sha7, fixture);
 	if (existsSync(path)) rmSync(path);
 }
+
+/**
+ * Stack state — a project-worker stack with its own R2 bucket, DOs,
+ * and DEPLOY_TOKEN. Distinct file extension so stacks and fixture
+ * Workers can co-exist in the same `<sha7>/` directory without
+ * collisions.
+ */
+export interface StackState {
+	kind: "stack";
+	name: string;
+	sha7: string;
+	workerName: string;
+	bucketName: string;
+	url: string;
+	deployToken: string;
+	provisionedAt: string;
+}
+
+export function stackStatePath(rootDir: string, sha7: string, name: string): string {
+	return `${rootDir}/tests/e2e/.state/${sha7}/${name}.stack.json`;
+}
+
+export function readStackState(rootDir: string, sha7: string, name: string): StackState | null {
+	const path = stackStatePath(rootDir, sha7, name);
+	if (!existsSync(path)) return null;
+	return JSON.parse(readFileSync(path, "utf8")) as StackState;
+}
+
+export function writeStackState(rootDir: string, state: StackState): void {
+	const path = stackStatePath(rootDir, state.sha7, state.name);
+	mkdirSync(dirname(path), { recursive: true });
+	writeFileSync(path, JSON.stringify(state, null, 2));
+}
+
+export function deleteStackState(rootDir: string, sha7: string, name: string): void {
+	const path = stackStatePath(rootDir, sha7, name);
+	if (existsSync(path)) rmSync(path);
+}

@@ -23,8 +23,11 @@ import { execSync } from "node:child_process";
 import { readdirSync, statSync } from "node:fs";
 import {
 	type FixtureState,
+	destroyStack,
+	loadStackWorkerBundle,
 	makeCloudflareClient,
 	provisionFixture,
+	provisionStack,
 	teardownFixture,
 } from "@astroflare/cli-lib";
 import { loadFixtureBundle } from "@astroflare/cli/commands/fixtures";
@@ -78,10 +81,25 @@ export default async function setup(): Promise<() => Promise<void>> {
 		accountId: ctx.accountId,
 		apiToken: ctx.apiToken,
 	});
+	// One project-worker stack per e2e run. Phase 22 will deploy
+	// fixtures into this stack via `af deploy`; Phase 21's smoke spec
+	// just verifies the bare stack is up.
+	console.log(`[e2e setup] provisioning stack for sha=${ctx.sha7}`);
+	const stackState = await provisionStack({
+		rootDir: ctx.rootDir,
+		sha7: ctx.sha7,
+		name: "e2e",
+		client,
+		stackWorkerBundle: loadStackWorkerBundle(ctx.rootDir),
+	});
+	process.env.AFLARE_STACK_URL = stackState.url;
+	process.env.AFLARE_STACK_DEPLOY_TOKEN = stackState.deployToken;
+	console.log(`[e2e setup]   stack → ${stackState.url}`);
+
 	const fixtures = discoverFixtures(ctx.rootDir);
 	const provisioned: FixtureState[] = [];
 
-	console.log(`[e2e setup] provisioning ${fixtures.length} fixture(s) for sha=${ctx.sha7}`);
+	console.log(`[e2e setup] provisioning ${fixtures.length} fixture(s)`);
 	for (const fixture of fixtures) {
 		const bundle = await loadFixtureBundle(fixture, ctx.rootDir);
 		const state = await provisionFixture({
@@ -99,13 +117,13 @@ export default async function setup(): Promise<() => Promise<void>> {
 	// workers.dev DNS settles within a couple of seconds — wait once
 	// for everyone before any spec issues a fetch.
 	const settleMs = Number(process.env.AFLARE_SETTLE_MS ?? 8000);
-	if (provisioned.length > 0 && settleMs > 0) {
+	if (settleMs > 0) {
 		console.log(`[e2e setup] waiting ${settleMs}ms for workers.dev DNS`);
 		await new Promise((resolve) => setTimeout(resolve, settleMs));
 	}
 
 	return async function teardown() {
-		console.log(`[e2e teardown] destroying ${provisioned.length} fixture(s)`);
+		console.log(`[e2e teardown] destroying ${provisioned.length} fixture(s) + 1 stack`);
 		for (const state of provisioned) {
 			try {
 				await teardownFixture({
@@ -120,6 +138,17 @@ export default async function setup(): Promise<() => Promise<void>> {
 					`[e2e teardown]   FAILED to destroy ${state.workerName}: ${(err as Error).message}`,
 				);
 			}
+		}
+		try {
+			await destroyStack({
+				rootDir: ctx.rootDir,
+				sha7: stackState.sha7,
+				name: stackState.name,
+				client,
+			});
+			console.log(`[e2e teardown]   destroyed stack ${stackState.workerName}`);
+		} catch (err) {
+			console.error(`[e2e teardown]   FAILED to destroy stack: ${(err as Error).message}`);
 		}
 	};
 }

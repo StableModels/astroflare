@@ -41,11 +41,14 @@ import { execSync } from "node:child_process";
 import { parseArgs } from "node:util";
 import {
 	type CloudflareClient,
+	destroyStack,
 	findOrphanWorkers,
 	inspectFixture,
 	listFixtures,
+	loadStackWorkerBundle,
 	makeCloudflareClient,
 	provisionFixture,
+	provisionStack,
 	statusReport,
 	teardownFixture,
 } from "@astroflare/cli-lib";
@@ -90,6 +93,10 @@ async function main(argv: readonly string[]): Promise<number> {
 			return runHealth();
 		case "gc":
 			return runGc();
+		case "provision-stack":
+			return runProvisionStack(rest);
+		case "destroy-stack":
+			return runDestroyStack(rest);
 
 		case "--version":
 		case "-v":
@@ -347,6 +354,57 @@ async function runHealth(): Promise<number> {
 	}
 }
 
+async function runProvisionStack(argv: readonly string[]): Promise<number> {
+	const [name] = argv;
+	if (!name) {
+		console.error("af provision-stack: missing <name> argument");
+		return 1;
+	}
+	try {
+		const ctx = opsCtx();
+		const bundle = loadStackWorkerBundle(ctx.rootDir);
+		const state = await provisionStack({
+			rootDir: ctx.rootDir,
+			sha7: ctx.sha7,
+			name,
+			client: ctx.client,
+			stackWorkerBundle: bundle,
+		});
+		console.log(`provisioned stack ${state.workerName} → ${state.url}`);
+		console.log(`deploy token: ${state.deployToken}`);
+		return 0;
+	} catch (err) {
+		console.error(`af provision-stack: ${(err as Error).message}`);
+		return 1;
+	}
+}
+
+async function runDestroyStack(argv: readonly string[]): Promise<number> {
+	const [name] = argv;
+	if (!name) {
+		console.error("af destroy-stack: missing <name> argument");
+		return 1;
+	}
+	try {
+		const ctx = opsCtx();
+		const r = await destroyStack({
+			rootDir: ctx.rootDir,
+			sha7: ctx.sha7,
+			name,
+			client: ctx.client,
+		});
+		if (r.deletedWorker) {
+			console.log(`destroyed stack ${r.deletedWorker} + ${r.deletedBucket}`);
+		} else {
+			console.log(`no state for stack ${name}`);
+		}
+		return 0;
+	} catch (err) {
+		console.error(`af destroy-stack: ${(err as Error).message}`);
+		return 1;
+	}
+}
+
 async function runGc(): Promise<number> {
 	try {
 		const ctx = opsCtx();
@@ -417,6 +475,10 @@ function printUsage(): void {
 			"  deploy [dir]    Upload project files to R2 and run the deploy ceremony",
 			"  status          Show the active deploy hash",
 			"  rollback <hash> Flip /site/current to a previous deploy",
+			"",
+			"CLOUDFLARE STACK (project worker + R2 + DOs)",
+			"  provision-stack <n>  Create an Astroflare project-worker stack",
+			"  destroy-stack <n>    Destroy a stack + its R2 bucket",
 			"",
 			"CLOUDFLARE OPERATIONS",
 			"  provision <n>   Create a managed Worker + R2 bucket from fixture <n>",

@@ -31,9 +31,37 @@ export interface CloudflareClientOptions {
 	baseUrl?: string;
 }
 
+/** Binding shapes Cloudflare's REST API accepts for `metadata.bindings`. */
+export type WorkerBinding =
+	| { type: "r2_bucket"; name: string; bucket_name: string }
+	| { type: "durable_object_namespace"; name: string; class_name: string }
+	| { type: "secret_text"; name: string; text: string }
+	| { type: "plain_text"; name: string; text: string };
+
+export interface UploadWorkerWithBindingsInput {
+	name: string;
+	body: string | ArrayBuffer;
+	bindings: readonly WorkerBinding[];
+	/**
+	 * First-deploy DO migrations. `null` means no migration block sent.
+	 * Free-plan accounts need `new_sqlite_classes`; paid plans accept
+	 * either `new_classes` (legacy DurableObjectStorage) or
+	 * `new_sqlite_classes` (the modern shape — what the framework's
+	 * sqlite-backed Coordinator + Hibernating WS DOs assume anyway).
+	 * Default to sqlite.
+	 */
+	migrations?: { new_classes?: readonly string[]; new_sqlite_classes?: readonly string[] } | null;
+}
+
 export interface CloudflareClient {
 	/** PUT a Worker script. `body` is the bundle (text or arraybuffer). */
 	uploadWorker(name: string, body: string | ArrayBuffer): Promise<void>;
+	/**
+	 * Upload a Worker with bindings + DO migrations. Used by
+	 * `provisionStack` (which needs R2 + DO + secret bindings); the
+	 * simpler `uploadWorker` covers the no-bindings code-only case.
+	 */
+	uploadWorkerWithBindings(input: UploadWorkerWithBindingsInput): Promise<void>;
 	/** DELETE a Worker script. Idempotent — 404 is treated as success. */
 	deleteWorker(name: string): Promise<void>;
 	/** Create an R2 bucket. */
@@ -94,32 +122,30 @@ export function makeCloudflareClient(opts: CloudflareClientOptions): CloudflareC
 
 	return {
 		async uploadWorker(name, body) {
-			// Modern ES-modules Workers upload: multipart/form-data carrying a
-			// JSON `metadata` part declaring `main_module` plus the actual
-			// module source. Cloudflare picks the format up from the
-			// content-type — passing JS as `application/javascript` would
+			// Modern ES-modules Workers upload: multipart/form-data carrying
+			// a JSON `metadata` part declaring `main_module` plus the actual
+			// module source. Passing JS as `application/javascript` would
 			// instead be parsed as the legacy service-worker format and
 			// reject `export default` syntax.
+			await this.uploadWorkerWithBindings({ name, body, bindings: [] });
+		},
+		async uploadWorkerWithBindings(input) {
+			const metadata: Record<string, unknown> = {
+				main_module: "worker.js",
+				compatibility_date: "2025-09-01",
+				compatibility_flags: ["nodejs_compat"],
+			};
+			if (input.bindings.length > 0) metadata.bindings = input.bindings;
+			if (input.migrations) metadata.migrations = input.migrations;
+
 			const form = new FormData();
-			form.append(
-				"metadata",
-				new Blob(
-					[
-						JSON.stringify({
-							main_module: "worker.js",
-							compatibility_date: "2025-09-01",
-							compatibility_flags: ["nodejs_compat"],
-						}),
-					],
-					{ type: "application/json" },
-				),
-			);
+			form.append("metadata", new Blob([JSON.stringify(metadata)], { type: "application/json" }));
 			form.append(
 				"worker.js",
-				new Blob([body], { type: "application/javascript+module" }),
+				new Blob([input.body], { type: "application/javascript+module" }),
 				"worker.js",
 			);
-			await callApi("PUT", `/workers/scripts/${encodeURIComponent(name)}`, {
+			await callApi("PUT", `/workers/scripts/${encodeURIComponent(input.name)}`, {
 				body: form,
 			});
 		},

@@ -27,11 +27,31 @@
  * read + write, so manual ops and automated tests share a registry.
  */
 
-export { type CloudflareClient, makeCloudflareClient } from "./api.js";
-export { type FixtureState, readFixtureState, writeFixtureState } from "./state.js";
+export {
+	type CloudflareClient,
+	type UploadWorkerWithBindingsInput,
+	type WorkerBinding,
+	makeCloudflareClient,
+} from "./api.js";
+export {
+	type FixtureState,
+	type StackState,
+	readFixtureState,
+	writeFixtureState,
+	readStackState,
+	writeStackState,
+} from "./state.js";
 export { provisionFixture } from "./commands/provision.js";
 export { teardownFixture } from "./commands/teardown.js";
 export { listFixtures } from "./commands/list.js";
 export { inspectFixture } from "./commands/inspect.js";
 export { statusReport, type FixtureStatus } from "./commands/status.js";
 export { findOrphanWorkers, type GcResult } from "./commands/gc.js";
+export {
+	provisionStack,
+	destroyStack,
+	loadStackWorkerBundle,
+	type ProvisionStackInput,
+	type DestroyStackInput,
+	type DestroyStackResult,
+} from "./commands/provision-stack.js";
