@@ -12,8 +12,10 @@
  * schema; the body is exposed as the entry's `body` field for downstream
  * rendering.
  *
- * Phase 6 carve-outs (in retro):
- *   - `.mdx` content entries — same MDX deferral as the compiler.
+ * Phase 14 update: `.mdx` entries land alongside `.md`. The same
+ * frontmatter / Zod-validation / slug derivation rules apply.
+ *
+ * Carve-outs (in retro):
  *   - Content-layer custom loaders (`loader: () => …`) — Astro's API for
  *     fetching from non-filesystem sources; the schema is in place but
  *     wiring is deferred.
@@ -34,7 +36,9 @@ export { z };
 const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/;
 const dec = new TextDecoder();
 const COLLECTIONS_PREFIX = "/src/content";
-const ENTRY_EXTENSIONS = [".md"] as const;
+// Order matters: `.mdx` is checked first so a file matching both suffixes
+// (rare but possible during migration) resolves the longer extension.
+const ENTRY_EXTENSIONS = [".mdx", ".md"] as const;
 
 export interface CollectionDefinition<T extends z.ZodTypeAny = z.ZodTypeAny> {
 	type?: "content" | "data";

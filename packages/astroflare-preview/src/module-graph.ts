@@ -34,7 +34,12 @@
  *     `.css`, etc.) are not compiled or bundled — Phase 6/8 work.
  */
 
-import { COMPILER_VERSION, compileAstro, compileMarkdown } from "@astroflare/compiler";
+import {
+	COMPILER_VERSION,
+	compileAstro,
+	compileMarkdown,
+	compileMdx,
+} from "@astroflare/compiler";
 import {
 	type Host,
 	type ImageMetadata,
@@ -46,7 +51,7 @@ import {
 } from "@astroflare/core";
 import { extractImports } from "./url-rewrite.js";
 
-const ASTRO_EXT = ".astro";
+const COMPILABLE_EXTENSIONS = [".astro", ".md", ".mdx"] as const;
 const IMAGE_EXTENSIONS = /\.(?:png|jpe?g|webp|gif|avif|svg|ico)$/i;
 const dec = new TextDecoder();
 const enc = new TextEncoder();
@@ -127,7 +132,7 @@ export class ModuleGraph {
 			this.#host.logger.event("module-graph.compile", { path, compileKey });
 		}
 
-		const resolvedImports = extractAstroImports(path, compiled);
+		const resolvedImports = extractCompilableImports(path, compiled);
 
 		const node: ModuleNode = {
 			path,
@@ -147,6 +152,13 @@ export class ModuleGraph {
 		// from the host's `ImageService`. Runs before TS-strip so esbuild
 		// sees a normal const declaration rather than an unresolved import.
 		const preprocessed = await this.#substituteImageImports(path, source);
+		if (path.endsWith(".mdx")) {
+			const result = await compileMdx(preprocessed, {
+				runtimeImport: this.#opts.runtimeImport,
+				filename: path,
+			});
+			return result.code;
+		}
 		if (path.endsWith(".md")) {
 			const result = await compileMarkdown(preprocessed, {
 				runtimeImport: this.#opts.runtimeImport,
@@ -249,14 +261,19 @@ export class ModuleGraph {
 }
 
 /**
- * Resolve every `.astro` import in compiled ESM relative to the importer's
- * directory. Returns workspace-absolute paths.
+ * Resolve every compilable import (`.astro`, `.md`, `.mdx`) in compiled ESM
+ * relative to the importer's directory. Returns workspace-absolute paths.
+ *
+ * Phase 14 broadens this from `.astro`-only so the closure picks up
+ * `import { frontmatter } from "./post.md"`-style references and the
+ * bundler can hoist named exports cross-module.
  */
-function extractAstroImports(importerPath: string, compiled: string): string[] {
+function extractCompilableImports(importerPath: string, compiled: string): string[] {
 	const importerDir = dirname(importerPath);
 	const out: string[] = [];
 	for (const spec of extractImports(compiled)) {
-		if (!spec.endsWith(ASTRO_EXT)) continue;
+		const ext = COMPILABLE_EXTENSIONS.find((e) => spec.endsWith(e));
+		if (!ext) continue;
 		out.push(joinPath(importerDir, spec));
 	}
 	return out;

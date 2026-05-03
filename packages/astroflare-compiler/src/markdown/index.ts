@@ -4,33 +4,29 @@
  * Compiles Markdown source into the same Astroflare component ABI shape the
  * `.astro` compiler produces (default-exporting `$component`). The user gets:
  *   - frontmatter as `Astro.props.frontmatter` (a plain object parsed from
- *     the YAML block at the top of the file)
+ *     the YAML block at the top of the file). Phase 14 also exposes it as
+ *     a top-level `export const frontmatter` so other modules can `import
+ *     { frontmatter } from "./post.md"`.
  *   - the rendered HTML as the component's body
+ *   - Shiki syntax highlighting on every fenced code block (Phase 14 — the
+ *     one opinionated default, not user-pluggable for now).
  *
- * Phase 6 minimum (per §3 Tier 1 of the brief):
- *   - YAML frontmatter
- *   - basic Markdown via `unified` + `remark-parse` + `remark-rehype` +
- *     `rehype-stringify`. No remark/rehype plugins yet (each is opt-in via
- *     `astroflare.config.ts#markdown.remarkPlugins`/`rehypePlugins` once we
- *     wire config plumbing).
- *
- * Phase 6 carve-outs (in retro):
- *   - MDX (full JSX-in-markdown) — uses `@mdx-js/mdx`. Substantively bigger
- *     than basic MD; deferred.
- *   - Shiki syntax highlighting — pure JS but ~5 MB of bundled grammars; the
- *     framework should accept a `rehype-shiki`-shaped plugin in config.
+ * Carve-outs (in retro):
  *   - User-supplied remark/rehype plugin chains — the schema exists in
  *     `AstroflareConfig.markdown` but we don't yet thread it into the
- *     compiler.
- *   - Slugged headings, automatic table-of-contents — common Astro features
- *     but plugin-driven, so they ride on the plugin chain wiring.
+ *     compiler. Phase 14 deliberately deferred this until real demand
+ *     surfaces; Shiki rides as the one default and nothing else.
+ *   - Slugged headings, automatic table-of-contents — common Astro
+ *     features but plugin-driven, so they ride on the plugin chain
+ *     wiring.
  */
 
 import rehypeStringify from "rehype-stringify";
 import remarkParse from "remark-parse";
 import remarkRehype from "remark-rehype";
-import { unified } from "unified";
+import { type Plugin, unified } from "unified";
 import { parse as parseYaml } from "yaml";
+import { rehypeShiki } from "../shiki/index.js";
 
 const RUNTIME_SYMBOLS = ["$component", "$render", "$rawHtml"] as const;
 
@@ -41,6 +37,10 @@ export interface MarkdownCompileOptions {
 	runtimeImport?: string;
 	/** Source filename for error messages. */
 	filename?: string;
+	/** Disable Shiki syntax highlighting (default: enabled — Phase 14). */
+	shiki?: false;
+	/** Extra rehype plugins. Internal — reserved for future config plumbing. */
+	rehypePlugins?: Plugin[];
 }
 
 export interface MarkdownCompileResult {
@@ -83,25 +83,33 @@ export async function compileMarkdown(
 		body = source.slice(fmMatch[0].length);
 	}
 
-	// 2. Compile Markdown body to HTML.
+	// 2. Compile Markdown body to HTML. Shiki sits between remark-rehype
+	//    and rehype-stringify so its `<pre><span style="color:#…">…` output
+	//    survives stringification (the `raw` hast nodes flow through
+	//    rehype-stringify because `allowDangerousHtml` is on).
+	const processor = unified()
+		.use(remarkParse)
+		.use(remarkRehype, { allowDangerousHtml: true });
+	if (opts.shiki !== false) {
+		processor.use(rehypeShiki());
+	}
+	for (const p of opts.rehypePlugins ?? []) {
+		processor.use(p);
+	}
 	const html = String(
-		await unified()
-			.use(remarkParse)
-			.use(remarkRehype, { allowDangerousHtml: true })
-			.use(rehypeStringify, { allowDangerousHtml: true })
-			.process(body),
+		await processor.use(rehypeStringify, { allowDangerousHtml: true }).process(body),
 	);
 
-	// 3. Emit ESM. Frontmatter is a local `const` (not a named export) so it
-	//    survives the inline bundler's IIFE wrapping — see `bundle.ts`. Astro's
-	//    common pattern of `import { frontmatter } from "./post.md"` (named
-	//    import from another `.md`) isn't yet supported; users get frontmatter
-	//    via `Astro.props.frontmatter` instead. Documented as a Phase 6
-	//    carve-out; the inline bundler would need to hoist named exports
-	//    cross-module, which is bundler-grade work.
+	// 3. Emit ESM. Frontmatter is a top-level *named* export so other modules
+	//    can `import { frontmatter } from "./post.md"` and consume it
+	//    (Astro's common pattern for blog index pages). The inline bundler
+	//    threads each module's named exports through its IIFE return object
+	//    and rewrites cross-module named imports against that — see
+	//    `bundle.ts` for the cross-module hoisting machinery added in
+	//    Phase 14.
 	const code = [
 		`import { ${RUNTIME_SYMBOLS.join(", ")} } from ${JSON.stringify(runtimeImport)};`,
-		`const frontmatter = ${JSON.stringify(frontmatter)};`,
+		`export const frontmatter = ${JSON.stringify(frontmatter)};`,
 		`const __html = ${JSON.stringify(html)};`,
 		"export default $component(async ({ Astro, ...$$props }, $$slots) => {",
 		"  Astro.props.frontmatter = frontmatter;",

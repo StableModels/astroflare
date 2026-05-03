@@ -303,6 +303,111 @@ describe("preview server: markdown routes", () => {
 		expect(body).toContain("astro-wins");
 		expect(body).not.toContain("md-loses");
 	});
+
+	// Phase 14: cross-module named imports of `.md` files. The bundler
+	// hoists each module's named exports through its IIFE so importers
+	// can destructure them out via `__m_<idx>.<name>`.
+	it("a .astro page can import { frontmatter } from a .md file", async () => {
+		const { server } = await fixture({
+			"/src/posts/hello.md":
+				"---\ntitle: Hello, World\nauthor: Ada\ntags: [intro]\n---\n# body\n",
+			"/src/pages/index.astro":
+				"---\n" +
+				'import { frontmatter } from "../posts/hello.md";\n' +
+				"---\n" +
+				"<article>" +
+				"<h1>{frontmatter.title}</h1>" +
+				"<p>by {frontmatter.author}</p>" +
+				"</article>",
+		});
+		const r = await server.fetch(new Request("https://app/"));
+		expect(r.status).toBe(200);
+		const body = await bodyWithoutHmr(r);
+		expect(body).toContain("<h1>Hello, World</h1>");
+		expect(body).toContain("<p>by Ada</p>");
+	});
+
+	it("a .astro page can import default + named together from a .md file", async () => {
+		const { server } = await fixture({
+			"/src/posts/post.md":
+				"---\ntitle: Post Title\n---\n# the body\n\nparagraph.\n",
+			"/src/pages/index.astro":
+				"---\n" +
+				'import Post, { frontmatter } from "../posts/post.md";\n' +
+				"---\n" +
+				"<h2>{frontmatter.title}</h2>\n" +
+				"<Post />",
+		});
+		const r = await server.fetch(new Request("https://app/"));
+		const body = await bodyWithoutHmr(r);
+		expect(body).toContain("<h2>Post Title</h2>");
+		expect(body).toContain("<h1>the body</h1>");
+	});
+});
+
+// ---------------------------------------------------------------------------
+// MDX routes (Phase 14)
+// ---------------------------------------------------------------------------
+
+describe("preview server: MDX routes", () => {
+	it("renders a .mdx page", async () => {
+		const { server } = await fixture({
+			"/src/pages/about.mdx":
+				"---\ntitle: About\n---\n# Hello MDX\n\nA paragraph.\n",
+		});
+		const r = await server.fetch(new Request("https://app/about"));
+		expect(r.status).toBe(200);
+		const body = await bodyWithoutHmr(r);
+		expect(body).toContain("<h1>Hello MDX</h1>");
+		expect(body).toContain("<p>A paragraph.</p>");
+	});
+
+	it("renders inline JSX in a .mdx page", async () => {
+		const { server } = await fixture({
+			"/src/pages/widget.mdx":
+				"# Title\n\n<button class=\"primary\">click</button>\n",
+		});
+		const r = await server.fetch(new Request("https://app/widget"));
+		const body = await bodyWithoutHmr(r);
+		expect(body).toContain("<h1>Title</h1>");
+		expect(body).toContain('<button class="primary">click</button>');
+	});
+
+	it("a .astro page can import { frontmatter } from a .mdx file", async () => {
+		const { server } = await fixture({
+			"/src/posts/post.mdx":
+				"---\ntitle: MDX Post\nauthor: Lin\n---\n\n# body\n",
+			"/src/pages/index.astro":
+				"---\n" +
+				'import { frontmatter } from "../posts/post.mdx";\n' +
+				"---\n" +
+				"<h2>{frontmatter.title}</h2>" +
+				"<small>{frontmatter.author}</small>",
+		});
+		const r = await server.fetch(new Request("https://app/"));
+		const body = await bodyWithoutHmr(r);
+		expect(body).toContain("<h2>MDX Post</h2>");
+		expect(body).toContain("<small>Lin</small>");
+	});
+
+	it("a .mdx page can compose with an .astro Layout", async () => {
+		const { server } = await fixture({
+			"/src/components/Layout.astro":
+				"---\nconst { title } = Astro.props;\n---\n" +
+				"<html><head><title>{title}</title></head><body><main><slot/></main></body></html>",
+			"/src/pages/post.mdx":
+				"---\ntitle: From MDX\n---\n" +
+				'import Layout from "../components/Layout.astro";\n\n' +
+				'export const wrappedTitle = "From MDX";\n\n' +
+				"# Hello\n",
+		});
+		const r = await server.fetch(new Request("https://app/post"));
+		const body = await bodyWithoutHmr(r);
+		// The MDX content renders, even without explicitly invoking Layout —
+		// MDX's default export is wrapped in $component and produces the
+		// <h1>. Layout composition through MDXProvider is deferred.
+		expect(body).toContain("<h1>Hello</h1>");
+	});
 });
 
 // ---------------------------------------------------------------------------

@@ -47,6 +47,9 @@ import RUNTIME_HMR_SRC from "../../packages/astroflare-runtime/dist/hmr-client.j
 import RUNTIME_INDEX_SRC from "../../packages/astroflare-runtime/dist/index.js?raw";
 // @ts-expect-error
 import RUNTIME_INTERNAL_SRC from "../../packages/astroflare-runtime/dist/internal.js?raw";
+// @ts-expect-error — Phase 14: jsx-runtime is re-exported from the runtime
+// index so the workerd resolver needs the file present in the module map.
+import RUNTIME_JSX_RUNTIME_SRC from "../../packages/astroflare-runtime/dist/jsx-runtime.js?raw";
 // @ts-expect-error
 import RUNTIME_RENDER_SRC from "../../packages/astroflare-runtime/dist/render.js?raw";
 
@@ -57,6 +60,7 @@ const RUNTIME_BUNDLE_MODULES: Record<string, string> = {
 	"runtime/hmr-client.js": RUNTIME_HMR_SRC as string,
 	"runtime/cookies.js": RUNTIME_COOKIES_SRC as string,
 	"runtime/components.js": RUNTIME_COMPONENTS_SRC as string,
+	"runtime/jsx-runtime.js": RUNTIME_JSX_RUNTIME_SRC as string,
 };
 
 const RUNTIME_IMPORT = "./runtime/index.js";

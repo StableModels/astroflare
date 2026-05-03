@@ -47,9 +47,9 @@ describe("routeFromFilePath", () => {
 		expect(r?.kind).toBe("endpoint");
 	});
 
-	it("ignores extensions that aren't yet supported", () => {
-		// `.mdx` is deferred to Phase 14.
-		expect(routeFromFilePath("/src/pages/post.mdx")).toBeNull();
+	it("recognises .mdx as a markdown route (Phase 14)", () => {
+		const r = routeFromFilePath("/src/pages/post.mdx");
+		expect(r?.kind).toBe("markdown");
 	});
 });
 

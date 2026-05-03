@@ -113,6 +113,23 @@ describe("getCollection", () => {
 		expect(entry?.body).toBe("the body");
 		expect(entry?.digest).toMatch(/^[a-f0-9]+$/);
 	});
+
+	it("reads .mdx entries alongside .md (Phase 14)", async () => {
+		const storage = await fixture({
+			"/src/content/blog/plain.md": "---\ntitle: Plain\n---\nbody A",
+			"/src/content/blog/jsx.mdx":
+				"---\ntitle: JSX\n---\n# body B\n\n<button>x</button>\n",
+		});
+		const reader = createContentReader(storage, {
+			collections: { blog: defineCollection({ schema: blogSchema }) },
+		});
+		const all = await reader.getCollection("blog");
+		expect(all.map((e) => e.slug).sort()).toEqual(["jsx", "plain"]);
+		const jsx = all.find((e) => e.slug === "jsx");
+		expect(jsx?.data.title).toBe("JSX");
+		// Body preserved as-is (MDX compilation happens in the route layer).
+		expect(jsx?.body).toContain("<button>x</button>");
+	});
 });
 
 describe("getEntry", () => {

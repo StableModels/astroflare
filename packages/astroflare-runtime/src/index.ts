@@ -16,5 +16,11 @@ export * from "./render.js";
 export * from "./hmr-client.js";
 export { CookieJar } from "./cookies.js";
 export { Image, Picture } from "./components.js";
+// JSX runtime — re-exported so a `runtimeImport` URL pointing at this
+// entrypoint can supply `jsx`, `jsxs`, `jsxDEV`, and `Fragment` from a
+// single source. The MDX compiler post-processes its output to alias
+// `_jsx` / `_jsxs` / `_Fragment` against these shared bundle-scope names
+// (see `mdx/index.ts`).
+export { jsx, jsxs, jsxDEV, Fragment } from "./jsx-runtime.js";
 
 export const RUNTIME_VERSION = "0.0.0";

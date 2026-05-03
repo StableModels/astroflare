@@ -4,11 +4,10 @@
  * Tier 0 scope (Phase 3): static routes, `[name]` dynamic single-segment,
  * trailing-slash tolerance, static-before-dynamic precedence.
  * Tier 1 (Phase 6) adds `.md` files alongside `.astro`.
+ * Phase 14 adds `.mdx` (full JSX-in-Markdown via `@mdx-js/mdx`).
  *
  * Deferred:
  *   - catchall `[...rest]`
- *   - `.mdx` (Phase 6 stretch / future)
- *   - `.ts`/`.js` endpoints (Phase 8)
  *   - rest-param patterns inside groups
  *   - finer-grained precedence (Astro has more nuance)
  */
@@ -41,6 +40,11 @@ export interface RouteMatch {
 const PAGES_PREFIX = "/src/pages";
 const PAGE_EXTENSIONS: ReadonlyArray<{ ext: string; kind: RouteKind }> = [
 	{ ext: ".astro", kind: "astro" },
+	// Note ordering: `.mdx` is matched before `.md` so that, given a file
+	// with both extensions in the same directory, the longer suffix wins.
+	// `routeFromFilePath` walks this list in order and uses the first
+	// match.
+	{ ext: ".mdx", kind: "markdown" },
 	{ ext: ".md", kind: "markdown" },
 	// Server endpoints. Phase 11 adds `.ts` alongside `.js`; the endpoint
 	// loader runs `.ts` source through esbuild-wasm before bundling.

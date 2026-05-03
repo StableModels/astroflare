@@ -134,17 +134,23 @@ runtime `<Image>` / `<Picture>` components; preview-server
 **Defer:** Image format conversion (AVIF/WebP), DPR variants, blurred
 placeholders, per-token source maps.
 
-### Phase 14 — MDX + Shiki + named `.md` exports
+### Phase 14 — MDX + Shiki + named `.md` exports ✓
 
-Full MDX via `@mdx-js/mdx`. Shiki shipped as the one opinionated
-syntax-highlighter default — not user-pluggable for now. Named
-exports from `.md` (so `import { frontmatter } from "./post.md"`
-works) — the inline bundler needs cross-module named-export hoisting,
-which is the bigger architectural lift in this phase.
+**Done.** Retro: [`docs/phases/phase-14-mdx-shiki.md`](./phases/phase-14-mdx-shiki.md).
+39 new tests; 521 total. Full MDX via `@mdx-js/mdx`; Shiki as the
+one opinionated default syntax-highlighter (`github-dark`, narrow
+language allowlist, `{shiki: false}` opt-out). Inline bundler now
+hoists arbitrary named exports cross-module so
+`import { frontmatter } from "./post.md"` works end-to-end —
+`parseImportClause` + `COMPILABLE_IMPORT_RE` handle every shape
+(default / named / namespace / mixed). JSX runtime in
+`@astroflare/runtime/jsx-runtime`; module-graph routes `.mdx`;
+content reader picks up `.mdx` entries.
 
-**Defer:** User remark/rehype plugin chains (deferred until a real
-user wants to override — keeping the markdown pipeline minimal until
-then). MDX components-from-config, content-layer custom loaders.
+**Defer:** User remark/rehype plugin chains (no demand yet). MDX
+components-from-config (`MDXProvider`-style). Custom Shiki
+transformers (line numbers / diff highlighting / copy buttons).
+Content-layer custom loaders.
 
 ### Phase 15 — Host implementation (production deploys)
 

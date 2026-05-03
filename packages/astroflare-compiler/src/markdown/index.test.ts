@@ -28,10 +28,10 @@ describe("compileMarkdown", () => {
 		expect(r.code).toContain('from "./runtime.js"');
 		expect(r.code).toContain("$component(");
 		expect(r.code).toContain("export default $component");
-		// Frontmatter is a local const (not a named export) so the inline
-		// bundler's IIFE wrap doesn't choke on `export const` inside a function.
-		expect(r.code).toContain("const frontmatter =");
-		expect(r.code).not.toContain("export const frontmatter");
+		// Frontmatter is a top-level named export (Phase 14). The inline
+		// bundler hoists it into the per-module IIFE's return object so
+		// downstream `import { frontmatter } from "./post.md"` resolves.
+		expect(r.code).toContain("export const frontmatter =");
 	});
 
 	it("preserves embedded HTML (allowDangerousHtml)", async () => {

@@ -17,6 +17,14 @@
     "./components": {
       "types": "./src/components.ts",
       "default": "./src/components.ts"
+    },
+    "./jsx-runtime": {
+      "types": "./src/jsx-runtime.ts",
+      "default": "./src/jsx-runtime.ts"
+    },
+    "./jsx-dev-runtime": {
+      "types": "./src/jsx-runtime.ts",
+      "default": "./src/jsx-runtime.ts"
     }
   },
   "scripts": {

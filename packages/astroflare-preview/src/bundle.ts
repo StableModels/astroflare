@@ -28,7 +28,9 @@ import type { ModuleInfo } from "./module-graph.js";
 
 /**
  * Runtime symbols imported by the bundle. The compiler-emitted ABI uses the
- * first eleven; `render` is the framework entrypoint the wrapper invokes.
+ * `$`-prefixed names; `render` is the framework entrypoint the wrapper
+ * invokes; `jsx` / `jsxs` / `Fragment` / `jsxDEV` are the JSX-runtime names
+ * MDX-compiled modules reference (see `mdx/index.ts`'s import-rewrite step).
  */
 const BUNDLE_RUNTIME_SYMBOLS = [
 	"$component",
@@ -43,6 +45,10 @@ const BUNDLE_RUNTIME_SYMBOLS = [
 	"$defineVars",
 	"$hydrationMarker",
 	"render",
+	"jsx",
+	"jsxs",
+	"jsxDEV",
+	"Fragment",
 ] as const;
 
 /**
@@ -63,11 +69,24 @@ const ANY_IMPORT_LINE_RE =
 	/^[ \t]*import\b(?:[ \t]+(?:type[ \t]+)?[\w$*,{}\s]+[ \t]+from)?[ \t]+["'][^"']+["'];?[ \t]*\r?\n?/gm;
 
 /**
- * Match `import <ident> from "<spec>.astro";` — captures the local binding
- * name (group 1) and the specifier (group 2).
+ * Match a top-level `import` declaration whose specifier ends in a *compilable*
+ * extension — `.astro`, `.md`, or `.mdx`. Captures the import clause (group 1)
+ * for parsing into default / namespace / named bindings, and the specifier
+ * (group 2). The clause-level parser (`parseImportClause`) handles every shape:
+ *
+ *     import X from "./Foo.md";
+ *     import { frontmatter } from "./post.md";
+ *     import * as ns from "./post.mdx";
+ *     import X, { frontmatter } from "./post.md";
+ *     import { a as b, c } from "./post.md";
+ *
+ * `.astro` modules typically only export `default`, but routing the import
+ * through the same clause parser (rather than a default-only regex like
+ * pre-Phase-14) keeps user-written named imports of `.astro` from being
+ * silently dropped to step 2's "strip every other import" pass.
  */
-const ASTRO_DEFAULT_IMPORT_RE =
-	/^[ \t]*import[ \t]+(\w+)[ \t]+from[ \t]+["']([^"']+\.astro)["'];?[ \t]*\r?\n?/gm;
+const COMPILABLE_IMPORT_RE =
+	/^[ \t]*import[ \t]+([^"';\n]+?)[ \t]+from[ \t]+["']([^"']+\.(?:astro|md|mdx))["'];?[ \t]*\r?\n?/gm;
 
 /** Match `export default <expr>;` at line start (markdown compiler output). */
 const EXPORT_DEFAULT_RE = /^[ \t]*export[ \t]+default[ \t]+/m;
@@ -102,11 +121,10 @@ const EXPORT_NAMED_RE =
 const EXPORT_LIST_RE = /^[ \t]*export[ \t]*\{([^}]*)\}[ \t]*;?[ \t]*$/gm;
 
 /**
- * Names exposed by route modules in addition to `default`. Bundles unwrap
- * these from the per-module IIFE so the page wrapper can reach for them
- * (e.g. `getStaticPaths` for dynamic-route deploys).
+ * Match a single named identifier — used for parsing import clauses and
+ * named-export lists.
  */
-const NAMED_EXPORTS_OF_INTEREST = ["getStaticPaths"] as const;
+const IDENT_RE = /^[A-Za-z_$][\w$]*$/;
 
 export function inlineBundle(modules: readonly ModuleInfo[], runtimeImport: string): string {
 	if (modules.length === 0) throw new Error("inlineBundle: empty closure");
@@ -163,46 +181,64 @@ function renderModuleBody(mod: ModuleInfo, idxByPath: Map<string, number>): Rend
 	let body = mod.compiled;
 	const namedExports: string[] = [];
 
-	// 1. Replace user .astro default imports with const bindings to other
-	//    IIFEs' `default` fields (the IIFE returns `{ default, ... }`).
-	body = body.replace(ASTRO_DEFAULT_IMPORT_RE, (_, varName, spec) => {
+	// 1. Rewrite cross-module imports of compilable files (`.astro`, `.md`,
+	//    `.mdx`) into destructuring against the importee's IIFE return
+	//    object. Every shape — default, named, namespace, mixed — folds into
+	//    one or more `const ... = __m_<idx>.<...>` lines.
+	body = body.replace(COMPILABLE_IMPORT_RE, (_, clause: string, spec: string) => {
 		const importerDir = dirname(mod.path);
 		const resolved = joinPath(importerDir, spec);
 		const idx = idxByPath.get(resolved);
+		const parsed = parseImportClause(clause);
 		if (idx === undefined) {
-			return `  // MISSING IMPORT: ${spec}\n  const ${varName} = undefined;\n`;
+			// Importee not in the closure — keep the original behaviour of
+			// binding everything to `undefined` so user code at least
+			// compiles. (Most often this means the importee was filtered
+			// from the closure, e.g. a TS file that wasn't followed.)
+			const lines: string[] = [`  // MISSING IMPORT: ${spec}`];
+			if (parsed.default) lines.push(`  const ${parsed.default} = undefined;`);
+			if (parsed.namespace) lines.push(`  const ${parsed.namespace} = undefined;`);
+			for (const b of parsed.named) lines.push(`  const ${b.to} = undefined;`);
+			return `${lines.join("\n")}\n`;
 		}
-		return `  const ${varName} = __m_${idx}.default;\n`;
+		const lines: string[] = [];
+		if (parsed.default) lines.push(`  const ${parsed.default} = __m_${idx}.default;`);
+		if (parsed.namespace) lines.push(`  const ${parsed.namespace} = __m_${idx};`);
+		if (parsed.named.length > 0) {
+			const parts = parsed.named.map((b) =>
+				b.from === b.to ? b.from : `${b.from}: ${b.to}`,
+			);
+			lines.push(`  const { ${parts.join(", ")} } = __m_${idx};`);
+		}
+		return `${lines.join("\n")}\n`;
 	});
 
 	// 2. Strip every remaining top-level `import ...` line. The runtime import
-	//    is now provided by the bundle's outer scope; non-.astro user imports
-	//    are dropped (Phase 4 limitation, documented in retro).
+	//    is now provided by the bundle's outer scope; non-compilable user
+	//    imports are dropped.
 	body = body.replace(ANY_IMPORT_LINE_RE, "");
 
 	// 3. Rewrite `export default <expr>` to assign to __default.
-	//    Markdown compiler still emits this shape directly; esbuild's
-	//    TS-strip pass produces the `export { X as default }` form which
-	//    the EXPORT_LIST_RE pass below handles.
+	//    Markdown compiler emits this shape directly; esbuild's TS-strip
+	//    pass produces the `export { X as default }` form which the
+	//    EXPORT_LIST_RE pass below handles.
 	body = body.replace(EXPORT_DEFAULT_RE, "  __default = ");
 
-	// 4. Strip `export ` from named declarations and remember their names so
-	//    the IIFE can include them in its return object. Restricted to the
-	//    set of names the bundle wrapper actually consults — other named
-	//    exports stay as the framework adds them, but they're invisible to
-	//    importers, which matches the Phase 4 carve-out.
-	body = body.replace(EXPORT_NAMED_RE, (full, kw, name) => {
+	// 4. Strip `export ` from named declarations and collect their names
+	//    so the IIFE can include them in its return object. Phase 14
+	//    drops the `NAMED_EXPORTS_OF_INTEREST` filter — every named export
+	//    is exposed so cross-module `import { frontmatter } from "./x.md"`
+	//    resolves. (The route wrapper still only consults `getStaticPaths`
+	//    on the route module; surplus exports are inert.)
+	body = body.replace(EXPORT_NAMED_RE, (full, _kw, name: string) => {
 		const replacement = full.replace(/^([ \t]*)export[ \t]+/, "$1");
-		if ((NAMED_EXPORTS_OF_INTEREST as readonly string[]).includes(name)) {
-			namedExports.push(name);
-		}
-		void kw;
+		namedExports.push(name);
 		return replacement;
 	});
 
 	// 5. Handle esbuild's normalised `export { X as default, Y };` block —
 	//    route each entry to the IIFE's return slots.
-	body = body.replace(EXPORT_LIST_RE, (_, list) => {
+	body = body.replace(EXPORT_LIST_RE, (_, list: string) => {
 		const lines: string[] = [];
 		for (const part of list.split(",")) {
 			const trimmed = part.trim();
@@ -213,26 +249,22 @@ function renderModuleBody(mod: ModuleInfo, idxByPath: Map<string, number>): Rend
 				const dst = asMatch[2] as string;
 				if (dst === "default") {
 					lines.push(`  __default = ${src};`);
-				} else if ((NAMED_EXPORTS_OF_INTEREST as readonly string[]).includes(dst)) {
+				} else {
 					namedExports.push(dst);
 					lines.push(`  const ${dst} = ${src};`);
 				}
-				// Other re-exports are dropped (invisible to importers).
 				continue;
 			}
 			// Bare `{ name }` — re-export of the same identifier.
-			const bareMatch = /^([A-Za-z_$][\w$]*)$/.exec(trimmed);
+			const bareMatch = IDENT_RE.exec(trimmed);
 			if (bareMatch) {
-				const name = bareMatch[1] as string;
-				if ((NAMED_EXPORTS_OF_INTEREST as readonly string[]).includes(name)) {
-					namedExports.push(name);
-				}
+				namedExports.push(trimmed);
 			}
 		}
 		return lines.join("\n");
 	});
 
-	// 5. Indent for readability inside the IIFE; preserve blank lines.
+	// 6. Indent for readability inside the IIFE; preserve blank lines.
 	const indented = body
 		.split("\n")
 		.map((line) => (line.length === 0 ? "" : `  ${line}`))
@@ -240,6 +272,76 @@ function renderModuleBody(mod: ModuleInfo, idxByPath: Map<string, number>): Rend
 
 	const final = indented.endsWith("\n") ? indented : `${indented}\n`;
 	return { body: final, namedExports };
+}
+
+interface ImportClause {
+	default?: string;
+	namespace?: string;
+	named: Array<{ from: string; to: string }>;
+}
+
+/**
+ * Parse the part of an `import` statement that sits between `import` and
+ * `from`. Handles every shape the bundler accepts:
+ *
+ *     X
+ *     { a, b, c as d }
+ *     * as ns
+ *     X, { a, b }
+ *     X, * as ns
+ *
+ * The result feeds into IIFE-destructuring: each part of the clause becomes
+ * a `const … = __m_<idx>.…` line.
+ */
+function parseImportClause(clause: string): ImportClause {
+	const out: ImportClause = { named: [] };
+	const trimmed = clause.trim();
+	if (!trimmed) return out;
+
+	if (trimmed.startsWith("{")) {
+		const close = trimmed.lastIndexOf("}");
+		if (close > 0) {
+			out.named = parseNamedList(trimmed.slice(1, close));
+		}
+		return out;
+	}
+
+	const nsOnlyMatch = /^\*[ \t]+as[ \t]+([A-Za-z_$][\w$]*)$/.exec(trimmed);
+	if (nsOnlyMatch) {
+		out.namespace = nsOnlyMatch[1] as string;
+		return out;
+	}
+
+	const defWithRestMatch = /^([A-Za-z_$][\w$]*)(?:[ \t]*,[ \t]*([\s\S]+))?$/.exec(trimmed);
+	if (defWithRestMatch) {
+		out.default = defWithRestMatch[1] as string;
+		const rest = (defWithRestMatch[2] ?? "").trim();
+		if (rest.startsWith("{")) {
+			const close = rest.lastIndexOf("}");
+			if (close > 0) {
+				out.named = parseNamedList(rest.slice(1, close));
+			}
+		} else {
+			const nsMatch = /^\*[ \t]+as[ \t]+([A-Za-z_$][\w$]*)$/.exec(rest);
+			if (nsMatch) out.namespace = nsMatch[1] as string;
+		}
+	}
+	return out;
+}
+
+function parseNamedList(inner: string): Array<{ from: string; to: string }> {
+	const out: Array<{ from: string; to: string }> = [];
+	for (const part of inner.split(",")) {
+		const p = part.trim();
+		if (!p) continue;
+		const asMatch = /^([A-Za-z_$][\w$]*)[ \t]+as[ \t]+([A-Za-z_$][\w$]*)$/.exec(p);
+		if (asMatch) {
+			out.push({ from: asMatch[1] as string, to: asMatch[2] as string });
+		} else if (IDENT_RE.test(p)) {
+			out.push({ from: p, to: p });
+		}
+	}
+	return out;
 }
 
 function topoSort(modules: readonly ModuleInfo[]): ModuleInfo[] {
