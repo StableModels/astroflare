@@ -152,22 +152,27 @@ components-from-config (`MDXProvider`-style). Custom Shiki
 transformers (line numbers / diff highlighting / copy buttons).
 Content-layer custom loaders.
 
-### Phase 15 — Host implementation (production deploys)
+### Phase 15 — Host implementation (production deploys) ✓
 
-`@astroflare/host-cloudflare/src/storage.ts` over `@cloudflare/workspace`
-+ `@cloudflare/shell`. `coordinator-do.ts` (DO that holds the module
-graph + pubsub fan-out). `project-worker.ts` entrypoint that exports
-all DO classes and exposes Cap'n Web RPC services (`FsService`,
-`LogService`). The Bundle DW pattern for the deploy pipeline (Workflow-
-orchestrated, esbuild-wasm-driven SSR bundles).
+**Done.** Retro: [`docs/phases/phase-15-host-implementation.md`](./phases/phase-15-host-implementation.md).
+29 new tests; 550 total. R2-backed `Storage`, DO-backed
+`Coordinator` with persistent module graph (sqlite-backed via
+`ctx.storage`), `project-worker.ts` entrypoint that wires every
+primitive into a single fetch handler. `RuntimeBundledExecutor`
+solves the runtime-injection problem by augmenting every spawned
+isolate's module map with the framework runtime as inlined source.
+Layer C integration tests in `tests/integration/` cover routing,
+cache invalidation, cross-module named imports, asset serving,
+DO persistence, and reverse-edge bookkeeping — all against real
+R2 + DOs + Worker Loader under Miniflare.
 
-Layer C integration tests in `tests/integration/` against this real host
-under Miniflare. Acceptance criterion §11.3 — `minimal-blog` deploy
-under 30 s on Miniflare.
-
-**Defer:** `ImageService` (Phase 13's interface gets implemented here),
-`EnvService` (Phase 12's env vars). They slot in but don't drive Phase 15's
-shape.
+**Phase 15a (separate, deferred):** the deploy pipeline. Bundle
+DW + esbuild-wasm + Workflow-orchestrated parallel render fan-out;
+Cap'n Web RPC services (`FsService` / `LogService` / `ImageService` /
+`EnvService`); `ImageService` production wiring against the
+Cloudflare Images binding; `EnvService` runtime helpers
+(`getSecret(name)` etc.). Phase 15 ships the runtime; 15a ships
+the deploy automation.
 
 ### Phase 16 — Hydration runtime + React integration
 

@@ -1,4 +1,28 @@
 name = "astroflare-integration-tests"
 main = "harness.ts"
-compatibility_date = "2024-12-01"
+# Worker Loader needs a late-2025 compat date.
+compatibility_date = "2025-09-01"
 compatibility_flags = ["nodejs_compat"]
+
+# Worker Loader: WorkerdExecutor spawns child isolates through this.
+[[worker_loaders]]
+binding = "LOADER"
+
+# Project workspace + compile cache. Tests pre-seed via env.FILES.put().
+[[r2_buckets]]
+binding = "FILES"
+bucket_name = "astroflare-integration-files"
+
+# Coordinator DO — persistent module graph keyed by workspaceId.
+[[durable_objects.bindings]]
+name = "COORDINATOR_DO"
+class_name = "CoordinatorDurableObject"
+
+# HMR DO — Hibernatable WebSocket fan-out.
+[[durable_objects.bindings]]
+name = "HMR_DO"
+class_name = "HmrDurableObject"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["CoordinatorDurableObject", "HmrDurableObject"]

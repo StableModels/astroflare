@@ -11,5 +11,7 @@
  */
 export * from "./executor.js";
 export * from "./transport.js";
+export * from "./r2-storage.js";
+export * from "./coordinator-do.js";
 
 export const HOST_CLOUDFLARE_VERSION = "0.0.0";
