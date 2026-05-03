@@ -1,30 +1,20 @@
 /**
- * Phase 21 smoke — the project-worker stack is provisioned, reachable,
- * and exposes its diagnostic endpoints. The stack starts with no
- * deploys, so any route returns 404; `/_aflare/stack/info` and
- * `/_aflare/deploy/status` answer with the worker's view of state.
- *
- * Phase 22 introduces deploys + per-route assertions; this file
- * stays at the substrate level so a regression in
- * provisioning/binding/upload surfaces here cleanly without
- * depending on the full deploy pipeline.
+ * Phase 21 stack-worker smoke. Verifies the project-worker stack is
+ * reachable, exposes its identity endpoint, and 404s on un-deployed
+ * routes. Phase 22 deploys fixtures during globalSetup; this spec
+ * stays at the stack-worker level (testing what the stack does, not
+ * what's deployed onto it).
  */
-
 import { describe, expect, it } from "vitest";
+import { readRuntimeEnv } from "./runtime-env.js";
 
-const STACK_URL = process.env.AFLARE_STACK_URL;
-const describeIfE2e = STACK_URL ? describe : describe.skip;
+const env = readRuntimeEnv();
+const describeIfE2e = env ? describe : describe.skip;
 
 describeIfE2e("e2e: stack worker (Phase 21)", () => {
-	it("is reachable + returns 404 for any route (no deploy yet)", async () => {
-		// biome-ignore lint/style/noNonNullAssertion: guarded by describeIfE2e
-		const res = await fetch(STACK_URL!);
-		expect(res.status).toBe(404);
-	});
-
-	it("/_aflare/stack/info returns the worker's identity + currentDeploy=null", async () => {
-		// biome-ignore lint/style/noNonNullAssertion: guarded by describeIfE2e
-		const res = await fetch(`${STACK_URL!.replace(/\/$/, "")}/_aflare/stack/info`);
+	it("/_aflare/stack/info returns the worker's identity", async () => {
+		const url = `${env?.stackUrl.replace(/\/$/, "")}/_aflare/stack/info`;
+		const res = await fetch(url);
 		expect(res.status).toBe(200);
 		const body = (await res.json()) as {
 			stackWorker: boolean;
@@ -33,14 +23,25 @@ describeIfE2e("e2e: stack worker (Phase 21)", () => {
 		};
 		expect(body.stackWorker).toBe(true);
 		expect(body.workspaceId).toBe("default");
-		expect(body.currentDeploy).toBeNull();
+		// Phase 22 deploys during globalSetup → a deploy hash is set.
+		// Without fixtures the field is null. The assertion is
+		// structural either way: 16-hex hash if present.
+		if (body.currentDeploy !== null) {
+			expect(body.currentDeploy).toMatch(/^[a-f0-9]{16}$/);
+		}
 	});
 
-	it("/_aflare/deploy/status returns currentDeploy=null pre-deploy", async () => {
-		// biome-ignore lint/style/noNonNullAssertion: guarded by describeIfE2e
-		const res = await fetch(`${STACK_URL!.replace(/\/$/, "")}/_aflare/deploy/status`);
-		expect(res.status).toBe(200);
-		const body = (await res.json()) as { currentDeploy: string | null };
-		expect(body.currentDeploy).toBeNull();
+	it("/_aflare/deploy/status mirrors currentDeploy", async () => {
+		const infoRes = await fetch(`${env?.stackUrl.replace(/\/$/, "")}/_aflare/stack/info`);
+		const info = (await infoRes.json()) as { currentDeploy: string | null };
+		const statusRes = await fetch(`${env?.stackUrl.replace(/\/$/, "")}/_aflare/deploy/status`);
+		expect(statusRes.status).toBe(200);
+		const status = (await statusRes.json()) as { currentDeploy: string | null };
+		expect(status.currentDeploy).toBe(info.currentDeploy);
+	});
+
+	it("returns 404 for routes outside the deployed fixture set", async () => {
+		const res = await fetch(`${env?.stackUrl.replace(/\/$/, "")}/this-route-doesnt-exist`);
+		expect(res.status).toBe(404);
 	});
 });

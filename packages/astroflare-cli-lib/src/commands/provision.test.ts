@@ -15,6 +15,9 @@ function makeMockClient(overrides: Partial<CloudflareClient> = {}): CloudflareCl
 		listWorkers: vi.fn(async () => []),
 		enableWorkerSubdomain: vi.fn(async () => undefined),
 		getAccountSubdomain: vi.fn(async () => "test-account"),
+		putR2Object: vi.fn(async () => undefined),
+		emptyR2Bucket: vi.fn(async () => undefined),
+		uploadWorkerWithBindings: vi.fn(async () => undefined),
 		...overrides,
 	};
 }

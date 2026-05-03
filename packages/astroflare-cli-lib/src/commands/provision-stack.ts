@@ -152,6 +152,10 @@ export async function destroyStack(input: DestroyStackInput): Promise<DestroySta
 		workerError = err;
 	}
 	try {
+		// R2 buckets must be empty before they can be deleted. Empty
+		// first; the helper paginates through the listing and deletes
+		// each object until the bucket is empty (or it gives up).
+		await input.client.emptyR2Bucket(state.bucketName);
 		await input.client.deleteR2Bucket(state.bucketName);
 	} catch (err) {
 		bucketError = err;

@@ -13,6 +13,10 @@
     "./ts": {
       "types": "./src/ts.ts",
       "default": "./src/ts.ts"
+    },
+    "./astro": {
+      "types": "./src/astro/index.ts",
+      "default": "./src/astro/index.ts"
     }
   },
   "scripts": {

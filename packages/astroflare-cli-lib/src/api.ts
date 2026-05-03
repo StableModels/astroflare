@@ -81,6 +81,24 @@ export interface CloudflareClient {
 	 * instance so a session of provision calls makes one HTTP request.
 	 */
 	getAccountSubdomain(): Promise<string>;
+	/**
+	 * PUT an object into an R2 bucket via the Cloudflare REST API. Used
+	 * by `deployStaticFixture` to ship rendered HTML + the
+	 * `/site/current` pointer; same shape as `cmdRollback` already uses
+	 * in the CLI.
+	 */
+	putR2Object(input: {
+		bucket: string;
+		key: string;
+		body: ArrayBuffer | Uint8Array | string;
+		contentType?: string;
+	}): Promise<void>;
+	/**
+	 * Delete every object in an R2 bucket (paginates through the
+	 * listing if needed). Used by `destroyStack` so subsequent
+	 * `deleteR2Bucket` doesn't 409 on a non-empty bucket.
+	 */
+	emptyR2Bucket(bucket: string): Promise<void>;
 }
 
 const DEFAULT_BASE = "https://api.cloudflare.com/client/v4";
@@ -183,6 +201,67 @@ export function makeCloudflareClient(opts: CloudflareClientOptions): CloudflareC
 			}
 			cachedSubdomain = result.subdomain;
 			return cachedSubdomain;
+		},
+		async putR2Object({ bucket, key, body, contentType }) {
+			// R2 PUT via REST returns plain HTTP semantics (not the
+			// success/result envelope), so call fetch directly rather
+			// than going through `callApi`.
+			const url = `${baseUrl}/accounts/${opts.accountId}/r2/buckets/${encodeURIComponent(
+				bucket,
+			)}/objects/${encodeURI(key)}`;
+			const res = await fetchImpl(url, {
+				method: "PUT",
+				headers: {
+					...headers(),
+					"content-type": contentType ?? "application/octet-stream",
+				},
+				body: body as BodyInit,
+			});
+			if (!res.ok) {
+				const text = await res.text();
+				throw new Error(`R2 PUT ${key}: ${res.status}: ${text}`);
+			}
+		},
+		async emptyR2Bucket(bucket) {
+			// Loop until a list call returns zero objects. The Cloudflare
+			// listing endpoint's pagination metadata is undocumented in
+			// the response shape we observe (`result_info` is sometimes
+			// undefined even with more objects pending), so we trust
+			// the empty-list signal instead.
+			const MAX_PASSES = 10;
+			for (let pass = 0; pass < MAX_PASSES; pass++) {
+				const url = `${baseUrl}/accounts/${opts.accountId}/r2/buckets/${encodeURIComponent(
+					bucket,
+				)}/objects`;
+				const res = await fetchImpl(url, { method: "GET", headers: headers() });
+				if (!res.ok) {
+					const text = await res.text();
+					throw new Error(`R2 list ${bucket}: ${res.status}: ${text}`);
+				}
+				const json = (await res.json()) as {
+					success?: boolean;
+					errors?: unknown;
+					result?: { key: string }[] | null;
+				};
+				if (json.success === false) {
+					throw new Error(`R2 list ${bucket}: success=false: ${JSON.stringify(json.errors)}`);
+				}
+				const objects = json.result ?? [];
+				if (objects.length === 0) return;
+				for (const obj of objects) {
+					const objUrl = `${baseUrl}/accounts/${opts.accountId}/r2/buckets/${encodeURIComponent(
+						bucket,
+					)}/objects/${encodeURI(obj.key)}`;
+					const dr = await fetchImpl(objUrl, { method: "DELETE", headers: headers() });
+					if (!dr.ok && dr.status !== 404) {
+						const text = await dr.text();
+						throw new Error(`R2 DELETE ${obj.key}: ${dr.status}: ${text}`);
+					}
+				}
+			}
+			throw new Error(
+				`R2 emptyR2Bucket: bucket ${bucket} still non-empty after ${MAX_PASSES} passes`,
+			);
 		},
 	};
 }

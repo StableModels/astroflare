@@ -1,36 +1,41 @@
 /**
  * Vitest globalSetup for the e2e project.
  *
- * Runs ONCE before any spec, in the same Node process that drives
- * the test runner. We use it to provision every fixture under
- * `tests/e2e/fixtures/` against real Cloudflare; spec files read
- * the resulting URLs from `process.env` (set here, inherited by
- * worker pools).
+ * Provisions one Astroflare project-worker stack against real
+ * Cloudflare, then deploys every fixture under
+ * `tests/e2e/fixtures/<name>/` into that stack as a single atomic
+ * deploy. Each fixture's routes mount under `/<name>/...` so all
+ * fixtures co-exist on the shared stack URL — specs append the
+ * fixture-prefixed route path.
  *
- * Vitest's globalSetup contract: the default export `setup(ctx)`
- * runs before tests, the `teardown()` returned from setup runs
- * after — same shape as a `beforeAll`/`afterAll` pair scoped to
- * the whole project.
+ * What this exercises end-to-end:
+ *   - Stack provisioning (Phase 21)
+ *   - The framework's local compile + render (`compileAstro` +
+ *     `render`) — same code paths as unit/integration tests
+ *   - The R2 upload + atomic flip ceremony (`/site/current` write)
+ *   - The stack worker's R2 read + serve path on real Cloudflare
  *
- * The teardown step always runs, even on test-suite failure, so
- * a flaky run never leaks Cloudflare resources. State files in
- * `tests/e2e/.state/<sha7>/` outlive the run only when the
- * teardown itself fails (rare); operators clean those up via
- * `af destroy-all` or `af gc`.
+ * Spec files don't read `process.env` directly because vitest's
+ * worker pool snapshots env at fork time and globalSetup mutations
+ * don't propagate. Per-run state is written to
+ * `tests/e2e/.state/<sha>/runtime.json` instead; specs call
+ * `readRuntimeEnv()` from disk fresh.
+ *
+ * Local-friendly: without CLOUDFLARE_* creds, setup is a no-op
+ * and specs self-skip (the runtime.json file is absent).
  */
 
 import { execSync } from "node:child_process";
-import { readdirSync, statSync } from "node:fs";
+import { existsSync, readdirSync, statSync } from "node:fs";
 import {
-	type FixtureState,
+	type FixtureSource,
+	deployStaticBundle,
 	destroyStack,
 	loadStackWorkerBundle,
 	makeCloudflareClient,
-	provisionFixture,
 	provisionStack,
-	teardownFixture,
 } from "@astroflare/cli-lib";
-import { loadFixtureBundle } from "@astroflare/cli/commands/fixtures";
+import { writeRuntimeEnv } from "./runtime-env.js";
 
 interface ProvisionContext {
 	accountId: string;
@@ -49,29 +54,21 @@ function readContext(): ProvisionContext {
 	return { accountId, apiToken, sha7, rootDir };
 }
 
-function discoverFixtures(rootDir: string): readonly string[] {
+function discoverFixtures(rootDir: string): readonly FixtureSource[] {
 	const dir = `${rootDir}/tests/e2e/fixtures`;
-	return readdirSync(dir).filter((name) => {
+	if (!existsSync(dir)) return [];
+	const out: FixtureSource[] = [];
+	for (const name of readdirSync(dir)) {
+		const fixtureDir = `${dir}/${name}`;
+		const pagesDir = `${fixtureDir}/src/pages`;
 		try {
-			return statSync(`${dir}/${name}/worker.js`).isFile();
-		} catch {
-			return false;
-		}
-	});
-}
-
-/** Spec files read these env vars: */
-function urlEnvVar(fixture: string): string {
-	if (fixture === "minimal") return "AFLARE_URL";
-	return `AFLARE_URL_${fixture.toUpperCase()}`;
+			if (statSync(pagesDir).isDirectory()) out.push({ name, dir: fixtureDir });
+		} catch {}
+	}
+	return out;
 }
 
 export default async function setup(): Promise<() => Promise<void>> {
-	// Local-friendly: when Cloudflare credentials aren't available
-	// (e.g. a developer running `pnpm test` without unlocking
-	// `.dev.vars`), skip provisioning entirely. The spec files
-	// already self-skip when their `AFLARE_URL_*` env vars are
-	// missing, so this is a clean no-op.
 	if (!process.env.CLOUDFLARE_ACCOUNT_ID || !process.env.CLOUDFLARE_API_TOKEN) {
 		console.log("[e2e setup] CLOUDFLARE_* credentials missing — skipping provisioning");
 		return async () => {};
@@ -81,9 +78,7 @@ export default async function setup(): Promise<() => Promise<void>> {
 		accountId: ctx.accountId,
 		apiToken: ctx.apiToken,
 	});
-	// One project-worker stack per e2e run. Phase 22 will deploy
-	// fixtures into this stack via `af deploy`; Phase 21's smoke spec
-	// just verifies the bare stack is up.
+
 	console.log(`[e2e setup] provisioning stack for sha=${ctx.sha7}`);
 	const stackState = await provisionStack({
 		rootDir: ctx.rootDir,
@@ -92,30 +87,33 @@ export default async function setup(): Promise<() => Promise<void>> {
 		client,
 		stackWorkerBundle: loadStackWorkerBundle(ctx.rootDir),
 	});
-	process.env.AFLARE_STACK_URL = stackState.url;
-	process.env.AFLARE_STACK_DEPLOY_TOKEN = stackState.deployToken;
 	console.log(`[e2e setup]   stack → ${stackState.url}`);
 
 	const fixtures = discoverFixtures(ctx.rootDir);
-	const provisioned: FixtureState[] = [];
-
-	console.log(`[e2e setup] provisioning ${fixtures.length} fixture(s)`);
-	for (const fixture of fixtures) {
-		const bundle = await loadFixtureBundle(fixture, ctx.rootDir);
-		const state = await provisionFixture({
-			rootDir: ctx.rootDir,
-			sha7: ctx.sha7,
-			fixture,
+	let deployHash: string | null = null;
+	if (fixtures.length > 0) {
+		console.log(`[e2e setup] deploying ${fixtures.length} fixture(s) as one atomic bundle`);
+		const result = await deployStaticBundle({
+			stack: stackState,
 			client,
-			workerBundle: bundle,
+			fixtures,
 		});
-		process.env[urlEnvVar(fixture)] = state.url;
-		console.log(`[e2e setup]   ${fixture} → ${state.url}`);
-		provisioned.push(state);
+		console.log(`[e2e setup]   deploy=${result.deployHash} routes=${result.routes.length}`);
+		for (const r of result.routes) {
+			console.log(`[e2e setup]     ${r.fixture}\t${r.route}`);
+		}
+		deployHash = result.deployHash;
+	} else {
+		console.log("[e2e setup] no .astro fixtures discovered — skipping deploy");
 	}
 
-	// workers.dev DNS settles within a couple of seconds — wait once
-	// for everyone before any spec issues a fetch.
+	writeRuntimeEnv({
+		stackUrl: stackState.url,
+		deployHash,
+		fixtures: fixtures.map((f) => f.name),
+	});
+	console.log(`[e2e setup]   wrote runtime env: ${fixtures.length} fixtures, deploy=${deployHash}`);
+
 	const settleMs = Number(process.env.AFLARE_SETTLE_MS ?? 8000);
 	if (settleMs > 0) {
 		console.log(`[e2e setup] waiting ${settleMs}ms for workers.dev DNS`);
@@ -123,22 +121,7 @@ export default async function setup(): Promise<() => Promise<void>> {
 	}
 
 	return async function teardown() {
-		console.log(`[e2e teardown] destroying ${provisioned.length} fixture(s) + 1 stack`);
-		for (const state of provisioned) {
-			try {
-				await teardownFixture({
-					rootDir: ctx.rootDir,
-					sha7: state.sha7,
-					fixture: state.fixture,
-					client,
-				});
-				console.log(`[e2e teardown]   destroyed ${state.workerName}`);
-			} catch (err) {
-				console.error(
-					`[e2e teardown]   FAILED to destroy ${state.workerName}: ${(err as Error).message}`,
-				);
-			}
-		}
+		console.log("[e2e teardown] destroying stack");
 		try {
 			await destroyStack({
 				rootDir: ctx.rootDir,

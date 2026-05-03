@@ -1,19 +1,20 @@
 /**
- * Phase 20a e2e — `basics` fixture.
+ * Phase 22 e2e — `basics` fixture.
  *
- * Verifies routing, static-asset serving, and scoped-CSS emission.
- * Skipped unless `AFLARE_URL_BASICS` is set; the workflow's
- * provision step exports it.
+ * Verifies routing across multiple pages, scoped CSS attribution
+ * (`data-aflare-h`), and frontmatter expression interpolation all
+ * round-trip through the framework's compile + render onto the
+ * deployed stack.
  */
 import { describe, expect, it } from "vitest";
+import { readRuntimeEnv } from "./runtime-env.js";
 
-const E2E_URL = process.env.AFLARE_URL_BASICS;
-const describeIfE2e = E2E_URL ? describe : describe.skip;
+const env = readRuntimeEnv();
+const describeIfE2e = env?.fixtures.includes("basics") ? describe : describe.skip;
 
-describeIfE2e("e2e: basics fixture", () => {
-	it("home page renders title and scoped style", async () => {
-		// biome-ignore lint/style/noNonNullAssertion: guarded by describeIfE2e
-		const url = E2E_URL!;
+describeIfE2e("e2e: basics fixture (Phase 22)", () => {
+	it("home page renders the title and ships scoped CSS", async () => {
+		const url = `${env?.stackUrl.replace(/\/$/, "")}/basics/`;
 		const res = await fetch(url);
 		expect(res.status).toBe(200);
 		const body = await res.text();
@@ -21,12 +22,14 @@ describeIfE2e("e2e: basics fixture", () => {
 		expect(body).toContain("Basics");
 		// Scoped style emits the data-aflare-h attribute. Verify the
 		// hash binds to both the <h1> and the <style> selector.
-		expect(body).toMatch(/data-aflare-h="[a-f0-9]{8}"/);
+		const hashMatch = body.match(/data-aflare-h="([a-f0-9]{8})"/);
+		expect(hashMatch).not.toBeNull();
+		const hash = hashMatch?.[1];
+		expect(body).toContain(`[data-aflare-h="${hash}"]`);
 	});
 
-	it("/about returns the about page", async () => {
-		// biome-ignore lint/style/noNonNullAssertion: guarded by describeIfE2e
-		const url = `${E2E_URL!.replace(/\/$/, "")}/about`;
+	it("/basics/about returns the about page", async () => {
+		const url = `${env?.stackUrl.replace(/\/$/, "")}/basics/about`;
 		const res = await fetch(url);
 		expect(res.status).toBe(200);
 		const body = await res.text();

@@ -55,3 +55,10 @@ export {
 	type DestroyStackInput,
 	type DestroyStackResult,
 } from "./commands/provision-stack.js";
+export {
+	deployStaticBundle,
+	type DeployStaticInput,
+	type DeployStaticResult,
+	type DeployedRoute,
+	type FixtureSource,
+} from "./commands/deploy-static.js";
