@@ -13,13 +13,26 @@
  */
 
 import { execSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 
 export interface RuntimeEnv {
 	stackUrl: string;
 	deployHash: string | null;
 	fixtures: readonly string[];
+	/** URL of the preview-worker stack (Phase 25, Mode A). */
+	previewUrl: string;
+	/**
+	 * Bearer token authorising `/_aflare/file` writes on the preview
+	 * worker. Specs that exercise file uploads pin this in their
+	 * Authorization header.
+	 */
+	previewDeployToken: string;
+	/**
+	 * Names of fixtures whose source trees were uploaded to the
+	 * preview workspace.
+	 */
+	previewFixtures: readonly string[];
 }
 
 function statePath(): string {
@@ -38,4 +51,22 @@ export function readRuntimeEnv(): RuntimeEnv | null {
 	const path = statePath();
 	if (!existsSync(path)) return null;
 	return JSON.parse(readFileSync(path, "utf8")) as RuntimeEnv;
+}
+
+/**
+ * Drop any stale runtime env from a prior run. Called by
+ * `globalSetup` when credentials are absent so a previous
+ * credentialed run's `runtime.json` doesn't make specs target
+ * URLs that have since been torn down.
+ */
+export function clearRuntimeEnv(): void {
+	const path = statePath();
+	if (existsSync(path)) {
+		try {
+			rmSync(path);
+		} catch {
+			// Best-effort — concurrent runs may race; specs still
+			// self-skip when readRuntimeEnv returns malformed data.
+		}
+	}
 }

@@ -36,7 +36,10 @@ export type WorkerBinding =
 	| { type: "r2_bucket"; name: string; bucket_name: string }
 	| { type: "durable_object_namespace"; name: string; class_name: string }
 	| { type: "secret_text"; name: string; text: string }
-	| { type: "plain_text"; name: string; text: string };
+	| { type: "plain_text"; name: string; text: string }
+	// `worker_loader` mirrors the wrangler `[[worker_loaders]]` block.
+	// Used by the preview worker to spawn compile + render isolates.
+	| { type: "worker_loader"; name: string };
 
 export interface UploadWorkerWithBindingsInput {
 	name: string;

@@ -11,11 +11,17 @@
  * a sub-ms per-call cost after esbuild-wasm's one-time init.
  */
 import { contentId } from "@astroflare/core";
-import { transformTS } from "../ts.js";
 import type { AstroDocument, AstroError } from "./ast.js";
 import { type EmitOptions, type EmitResult, emitDocument } from "./emitter.js";
 import { parseAstro } from "./parser.js";
 import { buildLineMap } from "./source-map.js";
+
+// `transformTS` lazily imported in the compile path so callers that
+// pass `skipTsTransform: true` (e.g. the preview worker on
+// Cloudflare, where the bundle size budget can't accommodate
+// esbuild-wasm) never load esbuild. Static-import users still see
+// the same eager-load behaviour because the import below resolves
+// at first call.
 
 export interface CompileOptions extends EmitOptions {
 	/**
@@ -61,6 +67,9 @@ export async function compileAstro(
 	}
 	let code = emitted.code;
 	try {
+		// Dynamic import — keeps esbuild-wasm out of bundles whose
+		// callers always pass `skipTsTransform: true`.
+		const { transformTS } = await import("../ts.js");
 		code = await transformTS(code, {
 			filename: opts.filename,
 			define: defineFromEnv(opts.env),

@@ -36,10 +36,13 @@ export {
 export {
 	type FixtureState,
 	type StackState,
+	type PreviewState,
 	readFixtureState,
 	writeFixtureState,
 	readStackState,
 	writeStackState,
+	readPreviewState,
+	writePreviewState,
 } from "./state.js";
 export { provisionFixture } from "./commands/provision.js";
 export { teardownFixture } from "./commands/teardown.js";
@@ -62,3 +65,17 @@ export {
 	type DeployedRoute,
 	type FixtureSource,
 } from "./commands/deploy-static.js";
+export {
+	provisionPreview,
+	destroyPreview,
+	loadPreviewWorkerBundle,
+	type ProvisionPreviewInput,
+	type DestroyPreviewInput,
+	type DestroyPreviewResult,
+} from "./commands/provision-preview.js";
+export {
+	uploadFiles,
+	type UploadFilesInput,
+	type UploadFilesResult,
+	type UploadedFile,
+} from "./commands/upload-files.js";

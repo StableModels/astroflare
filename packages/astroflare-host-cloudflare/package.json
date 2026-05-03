@@ -13,6 +13,10 @@
     "./project-worker": {
       "types": "./src/project-worker.ts",
       "default": "./src/project-worker.ts"
+    },
+    "./preview-worker": {
+      "types": "./src/preview-worker.ts",
+      "default": "./src/preview-worker.ts"
     }
   },
   "scripts": {
@@ -21,6 +25,7 @@
   "dependencies": {
     "@astroflare/core": "workspace:*",
     "@astroflare/build": "workspace:*",
+    "@astroflare/compiler": "workspace:*",
     "@astroflare/preview": "workspace:*",
     "@astroflare/runtime": "workspace:*"
   },

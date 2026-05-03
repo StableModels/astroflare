@@ -88,3 +88,41 @@ export function deleteStackState(rootDir: string, sha7: string, name: string): v
 	const path = stackStatePath(rootDir, sha7, name);
 	if (existsSync(path)) rmSync(path);
 }
+
+/**
+ * Preview-stack state — an in-Worker compile + render stack
+ * (Phase 25, dual-lifecycle Mode A). Distinct from `StackState`
+ * because the preview worker carries an extra Worker Loader
+ * binding and its compatibility flags differ.
+ */
+export interface PreviewState {
+	kind: "preview";
+	name: string;
+	sha7: string;
+	workerName: string;
+	bucketName: string;
+	url: string;
+	deployToken: string;
+	provisionedAt: string;
+}
+
+export function previewStatePath(rootDir: string, sha7: string, name: string): string {
+	return `${rootDir}/tests/e2e/.state/${sha7}/${name}.preview.json`;
+}
+
+export function readPreviewState(rootDir: string, sha7: string, name: string): PreviewState | null {
+	const path = previewStatePath(rootDir, sha7, name);
+	if (!existsSync(path)) return null;
+	return JSON.parse(readFileSync(path, "utf8")) as PreviewState;
+}
+
+export function writePreviewState(rootDir: string, state: PreviewState): void {
+	const path = previewStatePath(rootDir, state.sha7, state.name);
+	mkdirSync(dirname(path), { recursive: true });
+	writeFileSync(path, JSON.stringify(state, null, 2));
+}
+
+export function deletePreviewState(rootDir: string, sha7: string, name: string): void {
+	const path = previewStatePath(rootDir, sha7, name);
+	if (existsSync(path)) rmSync(path);
+}
