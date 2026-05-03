@@ -38,7 +38,7 @@ describe("initProject", () => {
 		initProject({ dir: target, name: "blog" });
 		const pkg = JSON.parse(readFileSync(`${target}/package.json`, "utf8"));
 		expect(pkg.name).toBe("blog");
-		expect(pkg.scripts.deploy).toBe("aflare deploy");
+		expect(pkg.scripts.deploy).toBe("af deploy");
 	});
 
 	it("falls back to the directory's basename when name is omitted", () => {

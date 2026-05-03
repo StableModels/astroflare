@@ -1,6 +1,6 @@
 name: e2e
 
-# Phase 20 — end-to-end tests against real Cloudflare.
+# End-to-end tests against real Cloudflare.
 #
 # Triggers:
 #   - push to main: every merge gets validated against the edge
@@ -8,11 +8,12 @@ name: e2e
 #     a quiet repo
 #   - workflow_dispatch: manual on-demand runs
 #
-# The job provisions per-fixture resources (Worker + R2 bucket),
-# runs the e2e specs against the deployed URL, and tears resources
-# down in a `if: always()` step so a failed test run never leaks.
-# Resource names are `aflare-e2e-<fixture>-<sha7>` so concurrent runs
-# on different SHAs never collide.
+# The vitest e2e project's globalSetup provisions every fixture
+# under `tests/e2e/fixtures/` (creates Worker + R2 bucket, enables
+# the workers.dev subdomain), exports each URL as an env var, and
+# the corresponding globalTeardown destroys everything when the run
+# finishes (success or failure). So this workflow is just `vitest
+# run --project e2e` — the test suite owns its own orchestration.
 
 on:
   push:
@@ -36,7 +37,6 @@ jobs:
     env:
       CLOUDFLARE_ACCOUNT_ID: 4ef06593037ec81daf64e272ab950efb
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      AFLARE_E2E_SHA: ${{ github.sha }}
     steps:
       - uses: actions/checkout@v6
 
@@ -54,45 +54,11 @@ jobs:
       - name: typecheck
         run: pnpm typecheck
 
-      # Provision every fixture. `aflare e2e provision` is idempotent —
-      # a previous failed run that didn't reach teardown won't double-
-      # create. Each provision logs the live URL; we extract them via
-      # the deterministic naming pattern.
-      - name: provision fixtures
-        id: provision
-        # Worker names embed AFLARE_E2E_SHA verbatim, so we truncate
-        # GITHUB_SHA to its short form (7 chars) before exporting.
-        # Cloudflare caps script names at 64 chars; the prefix
-        # `aflare-e2e-<fixture>-` plus a 7-char SHA stays well under.
+      - name: e2e tests (provision + run + teardown)
+        # Worker names embed AFLARE_E2E_SHA verbatim; truncate GITHUB_SHA
+        # to its short form (Cloudflare caps script names at 64 chars).
+        env:
+          AFLARE_E2E_SHA: ${{ github.sha }}
         run: |
           export AFLARE_E2E_SHA="${GITHUB_SHA:0:7}"
-          SUBDOMAIN="astroflare-e2e"
-          pnpm exec tsx ./packages/astroflare-cli/src/cli.ts e2e provision minimal
-          pnpm exec tsx ./packages/astroflare-cli/src/cli.ts e2e provision basics
-          pnpm exec tsx ./packages/astroflare-cli/src/cli.ts e2e provision ssr
-          # Workers.dev DNS settles within a couple of seconds; wait
-          # before driving HTTP at the live URL.
-          sleep 10
-          echo "sha7=$AFLARE_E2E_SHA" >> "$GITHUB_OUTPUT"
-          echo "url_minimal=https://aflare-e2e-minimal-$AFLARE_E2E_SHA.$SUBDOMAIN.workers.dev/" >> "$GITHUB_OUTPUT"
-          echo "url_basics=https://aflare-e2e-basics-$AFLARE_E2E_SHA.$SUBDOMAIN.workers.dev/" >> "$GITHUB_OUTPUT"
-          echo "url_ssr=https://aflare-e2e-ssr-$AFLARE_E2E_SHA.$SUBDOMAIN.workers.dev/" >> "$GITHUB_OUTPUT"
-
-      - name: aflare e2e status (sanity)
-        env:
-          AFLARE_E2E_SHA: ${{ steps.provision.outputs.sha7 }}
-        run: pnpm exec tsx ./packages/astroflare-cli/src/cli.ts e2e status
-
-      - name: e2e tests
-        env:
-          AFLARE_E2E_URL: ${{ steps.provision.outputs.url_minimal }}
-          AFLARE_E2E_URL_BASICS: ${{ steps.provision.outputs.url_basics }}
-          AFLARE_E2E_URL_SSR: ${{ steps.provision.outputs.url_ssr }}
-        run: pnpm exec vitest run --project e2e
-
-      # Teardown ALWAYS runs — failed test runs must not leak resources.
-      - name: teardown
-        if: always()
-        run: |
-          export AFLARE_E2E_SHA="${GITHUB_SHA:0:7}"
-          pnpm exec tsx ./packages/astroflare-cli/src/cli.ts e2e teardown-all || true
+          pnpm exec vitest run --project e2e

@@ -23,5 +23,13 @@ export default defineProject({
 		// 30s — provisioning can be sluggish on first request to a fresh
 		// edge node; this is "real network", not "in-process Miniflare".
 		testTimeout: 30_000,
+		// `globalSetup` provisions every fixture under `tests/e2e/fixtures/`
+		// before any spec runs, exports their URLs to env vars, and tears
+		// resources down on completion (success or failure). With creds
+		// absent the setup is a no-op and specs self-skip.
+		globalSetup: ["./global-setup.ts"],
+		// Setup needs ~10s to provision + wait for DNS — the run-level
+		// hooks should reflect that.
+		hookTimeout: 60_000,
 	},
 });

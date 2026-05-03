@@ -252,7 +252,14 @@ importers:
         specifier: ^2.1.8
         version: 2.1.8(@types/node@22.19.17)(happy-dom@15.11.7)
 
-  tests/e2e: {}
+  tests/e2e:
+    dependencies:
+      '@astroflare/cli':
+        specifier: workspace:*
+        version: link:../../packages/astroflare-cli
+      '@astroflare/e2e':
+        specifier: workspace:*
+        version: link:../../tools/aflare-e2e
 
   tests/integration:
     dependencies:

@@ -81,8 +81,8 @@ function scaffoldFiles(name: string, site: string): Record<string, string> {
 				private: true,
 				type: "module",
 				scripts: {
-					deploy: "aflare deploy",
-					status: "aflare status",
+					deploy: "af deploy",
+					status: "af status",
 				},
 				dependencies: {
 					"@astroflare/cli": "^0.0.0",

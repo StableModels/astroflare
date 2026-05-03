@@ -20,8 +20,7 @@ export interface ProvisionInput {
 	sha7: string;
 	fixture: string;
 	client: CloudflareClient;
-	/** Stub bundle source. The real CLI builds it from the fixture; for
-	 *  unit tests, callers pass a synthetic string. */
+	/** Worker bundle source — typically the fixture's `worker.js`. */
 	workerBundle: string;
 	/** Pattern: `aflare-e2e-<fixture>-<sha7>`. */
 	namePattern?: (fixture: string, sha7: string) => string;
@@ -29,13 +28,6 @@ export interface ProvisionInput {
 	urlPattern?: (workerName: string) => string;
 	/** Force re-provision when an existing state file is present. */
 	force?: boolean;
-	/**
-	 * Whether the fixture needs an R2 bucket. Default `true` (matches
-	 * the typical Astroflare project shape). Fixtures that don't read
-	 * from R2 set this to `false` so accounts without R2 enabled can
-	 * still run them.
-	 */
-	provisionR2?: boolean;
 }
 
 const DEFAULT_NAME_PATTERN = (fixture: string, sha7: string): string =>
@@ -48,12 +40,12 @@ export async function provisionFixture(input: ProvisionInput): Promise<FixtureSt
 	if (existing && !input.force) return existing;
 
 	const workerName = namePattern(input.fixture, input.sha7);
-	const provisionR2 = input.provisionR2 !== false;
-	const bucketName = provisionR2 ? `${workerName}-store` : "";
+	const bucketName = `${workerName}-store`;
 
-	if (provisionR2) {
-		await input.client.createR2Bucket(bucketName);
-	}
+	// Standard Astroflare project shape: every Worker pairs with an R2
+	// bucket for sources + assets. R2 is a hard dependency on the
+	// account; we don't fall back when it's missing.
+	await input.client.createR2Bucket(bucketName);
 	await input.client.uploadWorker(workerName, input.workerBundle);
 	// Workers don't get a public URL by default — explicitly enable the
 	// workers.dev subdomain so e2e specs can fetch the deployed Worker.
