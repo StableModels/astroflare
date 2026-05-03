@@ -14,7 +14,6 @@
     "@astroflare/host-cloudflare": "workspace:*",
     "@astroflare/preview": "workspace:*",
     "@astroflare/runtime": "workspace:*",
-    "@astroflare/site-workspace": "workspace:*",
     "@astroflare/test-utils": "workspace:*"
   },
   "devDependencies": {

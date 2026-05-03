@@ -28,7 +28,7 @@ export default defineConfig({
 				"**/*.test.ts",
 				"**/*.d.ts",
 				"**/index.ts", // re-export-only; nothing to cover.
-				"packages/astroflare-test-utils/**",
+				"packages/test-utils/**",
 			],
 			// Brief acceptance §11.4 — thresholds split between the
 			// framework (the user-facing surface) and the host (the
@@ -37,7 +37,7 @@ export default defineConfig({
 			thresholds: {
 				// Framework packages — generous for now; tighten as Phase
 				// 19's quality work continues.
-				"packages/astroflare-{core,compiler,runtime,preview,build,content,cli}/src/**/*.ts": {
+				"packages/{core,compiler,runtime,preview,build,content,cli}/src/**/*.ts": {
 					lines: 75,
 					functions: 75,
 					branches: 70,
@@ -45,7 +45,7 @@ export default defineConfig({
 				},
 				// Host package — slightly lower bar (more workerd-bound
 				// glue, harder to unit-test).
-				"packages/astroflare-host-cloudflare/src/**/*.ts": {
+				"packages/host-cloudflare/src/**/*.ts": {
 					lines: 65,
 					functions: 65,
 					branches: 60,

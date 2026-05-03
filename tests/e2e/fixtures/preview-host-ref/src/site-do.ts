@@ -32,8 +32,8 @@ import {
 	createPreviewHandler,
 	createWorkerdExecutor,
 	SqlCache,
+	WorkspaceSite,
 } from "@astroflare/host-cloudflare";
-import { WorkspaceSite } from "@astroflare/site-workspace";
 
 interface Env {
 	SITE_R2: R2Bucket;

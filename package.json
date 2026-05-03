@@ -10,7 +10,7 @@
   },
   "packageManager": "pnpm@10.28.2",
   "scripts": {
-    "build": "tsc -b packages/astroflare-runtime && pnpm --filter @astroflare/host-cloudflare run regen-runtime-modules && pnpm --filter @astroflare/starter run regen-starter-files && tsc -b",
+    "build": "tsc -b packages/runtime && pnpm --filter @astroflare/host-cloudflare run regen-runtime-modules && pnpm --filter @astroflare/starter run regen-starter-files && tsc -b",
     "clean": "tsc -b --clean && rimraf 'packages/*/dist' 'examples/*/dist'",
     "typecheck": "tsc -b",
     "lint": "biome check .",

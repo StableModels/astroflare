@@ -23,7 +23,7 @@ import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import { minimalBlogFiles } from "./fixture.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const RUNTIME_DIST = path.resolve(__dirname, "../../packages/astroflare-runtime/dist/index.js");
+const RUNTIME_DIST = path.resolve(__dirname, "../../packages/runtime/dist/index.js");
 const RUNTIME_URL = pathToFileURL(RUNTIME_DIST).href;
 
 const enc = (s: string) => new TextEncoder().encode(s);

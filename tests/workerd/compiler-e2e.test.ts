@@ -36,43 +36,43 @@ import { describe, expect, it } from "vitest";
 
 /* eslint-disable @typescript-eslint/ban-ts-comment */
 // @ts-expect-error — Vite ?raw default-exports string; type not carried.
-import RUNTIME_COMPONENTS_SRC from "../../packages/astroflare-runtime/dist/components.js?raw";
+import RUNTIME_COMPONENTS_SRC from "../../packages/runtime/dist/components.js?raw";
 // @ts-expect-error
-import RUNTIME_COOKIES_SRC from "../../packages/astroflare-runtime/dist/cookies.js?raw";
+import RUNTIME_COOKIES_SRC from "../../packages/runtime/dist/cookies.js?raw";
 // @ts-expect-error — Phase 15a: runtime/index.js re-exports env.js.
-import RUNTIME_ENV_SRC from "../../packages/astroflare-runtime/dist/env.js?raw";
+import RUNTIME_ENV_SRC from "../../packages/runtime/dist/env.js?raw";
 // @ts-expect-error — Phase 19: runtime/index.js re-exports error-overlay.
-import RUNTIME_ERROR_OVERLAY_SRC from "../../packages/astroflare-runtime/dist/error-overlay.js?raw";
+import RUNTIME_ERROR_OVERLAY_SRC from "../../packages/runtime/dist/error-overlay.js?raw";
 // @ts-expect-error
-import RUNTIME_HMR_SRC from "../../packages/astroflare-runtime/dist/hmr-client.js?raw";
+import RUNTIME_HMR_SRC from "../../packages/runtime/dist/hmr-client.js?raw";
 // @ts-expect-error — Phase 16: runtime/index.js re-exports hydration-client.
-import RUNTIME_HYDRATION_SRC from "../../packages/astroflare-runtime/dist/hydration-client.js?raw";
+import RUNTIME_HYDRATION_SRC from "../../packages/runtime/dist/hydration-client.js?raw";
 // @ts-expect-error — Phase 18: runtime/index.js re-exports i18n.
-import RUNTIME_I18N_SRC from "../../packages/astroflare-runtime/dist/i18n.js?raw";
+import RUNTIME_I18N_SRC from "../../packages/runtime/dist/i18n.js?raw";
 // Vite's `?raw` plugin works inside vitest-pool-workers. The relative
 // path bypasses the runtime package's `exports` map (which doesn't expose
 // `dist/`). The pretest `tsc -b` step builds the dist artifacts.
 // @ts-expect-error
-import RUNTIME_INDEX_SRC from "../../packages/astroflare-runtime/dist/index.js?raw";
+import RUNTIME_INDEX_SRC from "../../packages/runtime/dist/index.js?raw";
 // @ts-expect-error
-import RUNTIME_INTERNAL_SRC from "../../packages/astroflare-runtime/dist/internal.js?raw";
+import RUNTIME_INTERNAL_SRC from "../../packages/runtime/dist/internal.js?raw";
 // @ts-expect-error — Phase 14: jsx-runtime is re-exported from the runtime
 // index so the workerd resolver needs the file present in the module map.
-import RUNTIME_JSX_RUNTIME_SRC from "../../packages/astroflare-runtime/dist/jsx-runtime.js?raw";
+import RUNTIME_JSX_RUNTIME_SRC from "../../packages/runtime/dist/jsx-runtime.js?raw";
 // @ts-expect-error — Phase 17: runtime/index.js re-exports prefetch-client.
-import RUNTIME_PREFETCH_SRC from "../../packages/astroflare-runtime/dist/prefetch-client.js?raw";
+import RUNTIME_PREFETCH_SRC from "../../packages/runtime/dist/prefetch-client.js?raw";
 // @ts-expect-error — Phase 16a: runtime/index.js re-exports react-adapter.
-import RUNTIME_REACT_ADAPTER_SRC from "../../packages/astroflare-runtime/dist/react-adapter.js?raw";
+import RUNTIME_REACT_ADAPTER_SRC from "../../packages/runtime/dist/react-adapter.js?raw";
 // @ts-expect-error — Phase 16b: internal.js re-exports $ssrReactIsland.
-import RUNTIME_REACT_SSR_SRC from "../../packages/astroflare-runtime/dist/react-ssr.js?raw";
+import RUNTIME_REACT_SSR_SRC from "../../packages/runtime/dist/react-ssr.js?raw";
 // @ts-expect-error
-import RUNTIME_RENDER_SRC from "../../packages/astroflare-runtime/dist/render.js?raw";
+import RUNTIME_RENDER_SRC from "../../packages/runtime/dist/render.js?raw";
 // @ts-expect-error — Phase 17: runtime/index.js re-exports rss + sitemap.
-import RUNTIME_RSS_SRC from "../../packages/astroflare-runtime/dist/rss.js?raw";
+import RUNTIME_RSS_SRC from "../../packages/runtime/dist/rss.js?raw";
 // @ts-expect-error
-import RUNTIME_SITEMAP_SRC from "../../packages/astroflare-runtime/dist/sitemap.js?raw";
+import RUNTIME_SITEMAP_SRC from "../../packages/runtime/dist/sitemap.js?raw";
 // @ts-expect-error — Phase 17: runtime/index.js re-exports view-transitions-client.
-import RUNTIME_VT_SRC from "../../packages/astroflare-runtime/dist/view-transitions-client.js?raw";
+import RUNTIME_VT_SRC from "../../packages/runtime/dist/view-transitions-client.js?raw";
 
 const RUNTIME_BUNDLE_MODULES: Record<string, string> = {
 	"runtime/index.js": RUNTIME_INDEX_SRC as string,

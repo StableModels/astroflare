@@ -124,9 +124,9 @@ import {
 	createPreviewHandler,
 	createWorkerdExecutor,
 	SqlCache,
+	WorkspaceSite,
 } from "@astroflare/host-cloudflare";
 import { runtimeModules } from "@astroflare/host-cloudflare/runtime-modules";
-import { WorkspaceSite } from "@astroflare/site-workspace";
 
 interface Env { SITE_R2: R2Bucket; LOADER: WorkerLoader }
 
@@ -265,17 +265,19 @@ application's concern.
 @astroflare/build                             — buildSite + createSnapshotHandler (workers-runtime-safe)
 @astroflare/build/node                        — LocalSite + buildSite (Node-only)
 @astroflare/content                           — Zod-typed content collections
-@astroflare/host-cloudflare                   — createCoordinator, createPreviewHandler, R2Snapshots, etc.
+@astroflare/host-cloudflare                   — the only Cloudflare-touching package: createCoordinator,
+                                                 createPreviewHandler, R2Snapshots, WorkspaceSite, etc.
 @astroflare/host-cloudflare/runtime-modules   — pre-inlined runtime modules map for createWorkerdExecutor
-@astroflare/site-workspace                    — WorkspaceSite (adapter for @cloudflare/shell)
 @astroflare/starter                           — canonical project scaffold (programmatic + on-disk)
 @astroflare/starter/node                      — Node-only on-disk materialisation (writeStarterFiles)
 @astroflare/cli  / cli-lib                    — `af` binary + library
 @astroflare/test-utils                        — in-memory implementations for framework tests
 ```
 
-Only `@astroflare/host-cloudflare` and `@astroflare/site-workspace`
-import Cloudflare-specific APIs.
+`@astroflare/host-cloudflare` is the only package that imports
+Cloudflare-specific APIs (`@cloudflare/shell`, R2 bindings, Worker
+Loader bindings). Everything else in the framework is
+Cloudflare-agnostic.
 
 ## Status + roadmap
 

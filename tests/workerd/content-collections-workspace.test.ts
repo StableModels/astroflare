@@ -17,15 +17,19 @@
  *
  * Uses a mock Workspace + mock SQL backend so the test stays focused on
  * the WorkspaceSite ↔ content-collection contract; the
- * `WorkspaceSite` test in `packages/astroflare-site-workspace/` already
+ * `WorkspaceSite` test in `packages/site-workspace/` already
  * covers the SQL-backed sidecar against the same mock shape, and the
  * Workspace adapter itself is exercised in the `@cloudflare/shell`
  * package's own tests.
  */
 
 import { createContentReader, defineCollection, z } from "@astroflare/content";
-import { createCoordinator } from "@astroflare/host-cloudflare";
-import { type SqlBackend, type WorkspaceLike, WorkspaceSite } from "@astroflare/site-workspace";
+import {
+	type SqlBackend,
+	type WorkspaceLike,
+	WorkspaceSite,
+	createCoordinator,
+} from "@astroflare/host-cloudflare";
 import { describe, expect, it } from "vitest";
 
 const enc = (s: string) => new TextEncoder().encode(s);

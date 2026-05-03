@@ -22,8 +22,14 @@
 import { env } from "cloudflare:test";
 import { buildSite, createSnapshotHandler } from "@astroflare/build";
 import type { SnapshotEntry } from "@astroflare/core";
-import { R2SnapshotSink, R2Snapshots, createWorkerdExecutor } from "@astroflare/host-cloudflare";
-import { type SqlBackend, type WorkspaceLike, WorkspaceSite } from "@astroflare/site-workspace";
+import {
+	R2SnapshotSink,
+	R2Snapshots,
+	type SqlBackend,
+	type WorkspaceLike,
+	WorkspaceSite,
+	createWorkerdExecutor,
+} from "@astroflare/host-cloudflare";
 import { describe, expect, it } from "vitest";
 
 /* eslint-disable @typescript-eslint/ban-ts-comment */
@@ -31,39 +37,39 @@ import { describe, expect, it } from "vitest";
 // dist into the spawned isolate's module map so `./runtime/index.js`
 // resolves at compile + render time.
 // @ts-expect-error
-import RUNTIME_COMPONENTS_SRC from "../../packages/astroflare-runtime/dist/components.js?raw";
+import RUNTIME_COMPONENTS_SRC from "../../packages/runtime/dist/components.js?raw";
 // @ts-expect-error
-import RUNTIME_COOKIES_SRC from "../../packages/astroflare-runtime/dist/cookies.js?raw";
+import RUNTIME_COOKIES_SRC from "../../packages/runtime/dist/cookies.js?raw";
 // @ts-expect-error
-import RUNTIME_ENV_SRC from "../../packages/astroflare-runtime/dist/env.js?raw";
+import RUNTIME_ENV_SRC from "../../packages/runtime/dist/env.js?raw";
 // @ts-expect-error
-import RUNTIME_ERROR_OVERLAY_SRC from "../../packages/astroflare-runtime/dist/error-overlay.js?raw";
+import RUNTIME_ERROR_OVERLAY_SRC from "../../packages/runtime/dist/error-overlay.js?raw";
 // @ts-expect-error
-import RUNTIME_HMR_SRC from "../../packages/astroflare-runtime/dist/hmr-client.js?raw";
+import RUNTIME_HMR_SRC from "../../packages/runtime/dist/hmr-client.js?raw";
 // @ts-expect-error
-import RUNTIME_HYDRATION_SRC from "../../packages/astroflare-runtime/dist/hydration-client.js?raw";
+import RUNTIME_HYDRATION_SRC from "../../packages/runtime/dist/hydration-client.js?raw";
 // @ts-expect-error
-import RUNTIME_I18N_SRC from "../../packages/astroflare-runtime/dist/i18n.js?raw";
+import RUNTIME_I18N_SRC from "../../packages/runtime/dist/i18n.js?raw";
 // @ts-expect-error
-import RUNTIME_INDEX_SRC from "../../packages/astroflare-runtime/dist/index.js?raw";
+import RUNTIME_INDEX_SRC from "../../packages/runtime/dist/index.js?raw";
 // @ts-expect-error
-import RUNTIME_INTERNAL_SRC from "../../packages/astroflare-runtime/dist/internal.js?raw";
+import RUNTIME_INTERNAL_SRC from "../../packages/runtime/dist/internal.js?raw";
 // @ts-expect-error
-import RUNTIME_JSX_RUNTIME_SRC from "../../packages/astroflare-runtime/dist/jsx-runtime.js?raw";
+import RUNTIME_JSX_RUNTIME_SRC from "../../packages/runtime/dist/jsx-runtime.js?raw";
 // @ts-expect-error
-import RUNTIME_PREFETCH_SRC from "../../packages/astroflare-runtime/dist/prefetch-client.js?raw";
+import RUNTIME_PREFETCH_SRC from "../../packages/runtime/dist/prefetch-client.js?raw";
 // @ts-expect-error
-import RUNTIME_REACT_ADAPTER_SRC from "../../packages/astroflare-runtime/dist/react-adapter.js?raw";
+import RUNTIME_REACT_ADAPTER_SRC from "../../packages/runtime/dist/react-adapter.js?raw";
 // @ts-expect-error
-import RUNTIME_REACT_SSR_SRC from "../../packages/astroflare-runtime/dist/react-ssr.js?raw";
+import RUNTIME_REACT_SSR_SRC from "../../packages/runtime/dist/react-ssr.js?raw";
 // @ts-expect-error
-import RUNTIME_RENDER_SRC from "../../packages/astroflare-runtime/dist/render.js?raw";
+import RUNTIME_RENDER_SRC from "../../packages/runtime/dist/render.js?raw";
 // @ts-expect-error
-import RUNTIME_RSS_SRC from "../../packages/astroflare-runtime/dist/rss.js?raw";
+import RUNTIME_RSS_SRC from "../../packages/runtime/dist/rss.js?raw";
 // @ts-expect-error
-import RUNTIME_SITEMAP_SRC from "../../packages/astroflare-runtime/dist/sitemap.js?raw";
+import RUNTIME_SITEMAP_SRC from "../../packages/runtime/dist/sitemap.js?raw";
 // @ts-expect-error
-import RUNTIME_VT_SRC from "../../packages/astroflare-runtime/dist/view-transitions-client.js?raw";
+import RUNTIME_VT_SRC from "../../packages/runtime/dist/view-transitions-client.js?raw";
 
 const RUNTIME_MODULES: Record<string, string> = {
 	"runtime/index.js": RUNTIME_INDEX_SRC as string,
