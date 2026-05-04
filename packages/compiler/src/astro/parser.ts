@@ -442,8 +442,23 @@ class Parser {
 	 * but covers the cases that bite in practice — most notably regexes
 	 * containing `}` like `/[}]/` which would otherwise truncate the
 	 * expression body.
+	 *
+	 * JSX-tag short-circuit: a `/` immediately following `<` or `>` (no
+	 * whitespace between) is never a regex in `.astro` expression
+	 * context — it's the slash of a JSX closing tag (`</li>`) or the
+	 * leading slash of JSX text between sibling tags (`<Tag>/lit/`).
+	 * Without this, the canonical Astro list-rendering idiom
+	 * `{items.map((x) => (<li>{x}</li>))}` blows up: the `<` before
+	 * `/li>` matches the `<` arm of the switch below, the regex skipper
+	 * runs off the end of the source, and the brace counter never
+	 * unwinds. The walk-back loop intentionally requires no whitespace
+	 * between the tag-boundary char and the `/` so that JS like
+	 * `a < /pattern/.test(s)` (with the conventional space) still parses
+	 * as comparison + regex.
 	 */
 	private isRegexStart(slashPos: number, openPos: number): boolean {
+		const adj = this.source.charCodeAt(slashPos - 1);
+		if (adj === CC_LT || adj === CC_GT) return false;
 		// Walk back skipping whitespace and comments.
 		let j = slashPos - 1;
 		while (j > openPos) {

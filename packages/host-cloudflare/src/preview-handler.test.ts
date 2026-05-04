@@ -365,3 +365,70 @@ describe("createPreviewHandler: TypeScript frontmatter on workerd", () => {
 		expect(body).toMatch(/compile|TypeScript transform/i);
 	});
 });
+
+/**
+ * Brace-scanner JSX-tag heuristic, end-to-end: any `.astro` page whose
+ * body contained `</tag>` inside a `{...}` content expression used to
+ * compile-fail with `Unclosed expression (missing `}`)` — the `/` in
+ * `</li>` was misread as the start of a regex literal (the previous
+ * non-whitespace token was `<`, which the JS regex/division heuristic
+ * classifies as "value expected next") and the regex skipper ran off
+ * the end of the source. The parser fix in `findMatchingBrace` makes
+ * the same input parse cleanly, so an expression that returns
+ * string-coercible content (template-literal-built HTML, joined
+ * arrays, etc.) round-trips through the workerd-backed renderer
+ * without surfacing the parser error.
+ *
+ * Out of scope here: returning JSX *literals* like
+ * `{items.map((x) => (<li>{x}</li>))}` parses but still trips the
+ * downstream sucrase TS-strip pass — the emitter inlines the
+ * expression verbatim and sucrase parses it as TS, where bare `<li>`
+ * is invalid. Lifting that limitation needs a JSX-aware emitter +
+ * runtime helper; the parser fix is the prerequisite.
+ */
+describe("createPreviewHandler: closing tag inside a content expression", () => {
+	function bootSiteWithSource(source: string): Harness {
+		const site = new MemorySite();
+		site.write("/src/pages/index.astro", new TextEncoder().encode(source));
+		const cache = new MemoryCache();
+		const sql = makeMockSql();
+		const coordinator = createCoordinator({ sql });
+		const executor = createWorkerdExecutor({
+			loader: env.LOADER,
+			compatibilityDate: "2025-09-01",
+			compatibilityFlags: ["nodejs_compat"],
+			runtime: runtimeModules,
+		});
+		const handler = createPreviewHandler({ site, coordinator, executor, cache });
+		return { site, cache, coordinator, handler };
+	}
+
+	it("renders a `.map`-built list whose template literal carries `</li>` 200", async () => {
+		// The expression body is plain JS — no JSX literal to confuse
+		// sucrase — but it does contain a `</li>` byte sequence inside
+		// the template literal. Pre-fix the brace scanner mistook the
+		// `/` for a regex start and reported `Unclosed expression`,
+		// surfacing as HTTP 500. Post-fix the same input parses, the
+		// expression evaluates, and the rendered HTML survives —
+		// `$render` HTML-escapes interpolated string values, so the
+		// `<li>...</li>` markup lands as `&lt;li&gt;...&lt;/li&gt;`,
+		// which is fine: we just need 200 + the page-text content to
+		// reach the response, which is what the auto-escaped output
+		// proves.
+		const { handler } = bootSiteWithSource(
+			[
+				"---",
+				'const items = ["alpha", "beta"];',
+				"---",
+				'<ul>{items.map((x) => `<li>${x}</li>`).join("")}</ul>',
+			].join("\n"),
+		);
+		const res = await handler.fetch(new Request("https://app/"));
+		expect(res.status, await res.clone().text()).toBe(200);
+		const html = await res.text();
+		expect(html).toContain("alpha");
+		expect(html).toContain("beta");
+		expect(html).toContain("<ul>");
+		expect(html).toContain("</ul>");
+	});
+});
