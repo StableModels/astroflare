@@ -110,6 +110,78 @@ describe("parser — text and expressions", () => {
 	});
 });
 
+// Regression: the brace scanner used to mistake the `/` in a JSX
+// closing tag (`</li>`) for a regex literal because the previous
+// non-whitespace token was `<`, which the JS regex/division heuristic
+// classifies as "value expected next." That ran the regex skipper off
+// the end of the source and surfaced as `Unclosed expression (missing
+// `}`)` — blocking the canonical `.map((x) => (<li>...</li>))` idiom.
+describe("parser — JSX in content expressions", () => {
+	it("balances braces around `.map` arrow returning JSX", () => {
+		const src = `---
+const items = ["a", "b"];
+---
+<ul>{items.map((x) => (<li>{x}</li>))}</ul>`;
+		const r = parse(src);
+		expectNoErrors(r);
+	});
+
+	it("balances braces around nested JSX with attribute expressions", () => {
+		const src = `---
+const posts = [{ slug: "foo", title: "bar" }];
+---
+<div>{posts.map((p) => (<a href={p.slug}>{p.title}</a>))}</div>`;
+		const r = parse(src);
+		expectNoErrors(r);
+	});
+
+	it("balances braces around a ternary returning two JSX branches", () => {
+		const src = `---
+const open = true;
+---
+<div>{open ? (<details>open</details>) : (<summary>closed</summary>)}</div>`;
+		const r = parse(src);
+		expectNoErrors(r);
+	});
+
+	it("balances braces around self-closing JSX inside an expression", () => {
+		const src = `---
+const items = [1,2,3];
+---
+<ul>{items.map((n) => (<img src="/x.png" alt={n} />))}</ul>`;
+		const r = parse(src);
+		expectNoErrors(r);
+	});
+
+	it("still recognises a real regex literal after the JSX-tag guard", () => {
+		// Sanity: the new short-circuit only fires when `/` is glued to
+		// `<` or `>`. Regexes preceded by other expression-position
+		// tokens (here `(`) must keep working.
+		const r = parse("{'abc'.match(/foo/g)}");
+		expectNoErrors(r);
+		expect((r.doc.body[0] as { expression: string }).expression).toBe("'abc'.match(/foo/g)");
+	});
+
+	it("still parses comparison `>` followed by a non-JSX expression", () => {
+		const src = `---
+const x = 5;
+---
+<p>{x > 3 ? "big" : "small"}</p>`;
+		const r = parse(src);
+		expectNoErrors(r);
+	});
+
+	it("still parses `a < /pattern/.test(s)` (whitespace between `<` and `/`)", () => {
+		// The JSX guard is intentionally adjacency-sensitive: only `</`
+		// and `>/` (no whitespace) short-circuit. Conventional JS that
+		// puts a space between the comparison operator and the regex
+		// literal continues to parse as comparison + regex.
+		const r = parse("{a < /foo/.test(s)}");
+		expectNoErrors(r);
+		expect((r.doc.body[0] as { expression: string }).expression).toBe("a < /foo/.test(s)");
+	});
+});
+
 describe("parser — HTML elements", () => {
 	it("parses a self-closing void element with a static attribute", () => {
 		const r = parse('<input type="text" disabled />');
