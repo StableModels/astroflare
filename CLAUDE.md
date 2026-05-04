@@ -77,6 +77,24 @@ Guardrail when adding a dependency: try to run it inside a Worker
 shipping. If it needs `node:*` shimming, dynamic WASM, or a build-
 time hack only Node provides, find a different dependency or write
 the path yourself.
+
+### Hard rule: no leaf-package devDeps that hosts runtime-depend on
+
+`react`, `react-dom`, `vue`, `svelte`, `solid-js`, `preact` —
+anything a host application is likely to bundle into its own
+runtime — must live in the **root** `package.json`'s
+`devDependencies`, never in `packages/*/package.json`. Workspace
+embedders (Ember-style monorepos that vendor `packages/*` directly)
+treat leaf devDeps as workspace-level constraints; an exact pin
+(`"react": "18.3.1"`) on a leaf package displaces the host's own
+React resolution and produces duplicate-React bundles (minified
+React error #525 at render time). Root-level devDeps are treated
+as the monorepo's own dev tooling and don't propagate that way.
+
+Enforced by [`tests/repo/no-leaf-host-runtime-deps.test.ts`](tests/repo/no-leaf-host-runtime-deps.test.ts).
+When a leaf-package test legitimately needs one of these names,
+move the test to a project under `tests/<name>/` so the metadata
+stays out of the leaf's `package.json`.
 **Status (post-Phase 26 / 26b / 26c finalization):** the public
 host API surface is fully aligned. Hosts write their own
 `SiteDurableObject` (Mode A) or deploy worker (Mode B); they

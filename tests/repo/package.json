@@ -1,0 +1,12 @@
+{
+  "name": "@astroflare-internal/repo-tests",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "vitest run --project repo"
+  },
+  "devDependencies": {
+    "vitest": "^2.1.8"
+  }
+}
