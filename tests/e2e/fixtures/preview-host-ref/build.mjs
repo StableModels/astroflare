@@ -53,18 +53,10 @@ const result = await build({
 	format: "esm",
 	platform: "neutral",
 	target: "es2022",
-	// `cloudflare:workers` resolves inside workerd at runtime; never bundle.
-	// `esbuild-wasm` is reachable from `compileAstro` only when
-	// `skipTsTransform: false` — preview-handler always passes
-	// `skipTsTransform: true`, so the dynamic-import branch is dead at
-	// runtime. Mark it external so esbuild's static analysis doesn't
-	// try to resolve it under `platform: "neutral"`.
 	// `cloudflare:workers` + `node:*` resolve in workerd at runtime
-	// (`nodejs_compat` flag). `esbuild-wasm` is dead code under the
-	// preview-handler's `skipTsTransform: true` path.
+	// (`nodejs_compat` flag), so they're never bundled.
 	external: [
 		"cloudflare:workers",
-		"esbuild-wasm",
 		"node:crypto",
 		"node:diagnostics_channel",
 		"node:buffer",

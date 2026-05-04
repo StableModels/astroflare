@@ -183,7 +183,7 @@ function documentHasScopedStyle(nodes: readonly AstroNode[]): boolean {
  *   - `export (const|let|var) NAME = …;`     // semicolon-terminated
  *
  * Imports must hoist because (a) `import` is a syntax error inside an
- * arrow body and (b) the TS-strip pass (esbuild-wasm) parses the
+ * arrow body and (b) the TS-strip pass (sucrase) parses the
  * pre-bundler output. Exports hoist for the same reason.
  *
  * Other top-level `export`s (re-exports, `export type`, default exports)

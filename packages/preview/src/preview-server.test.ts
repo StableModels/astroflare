@@ -389,10 +389,11 @@ describe("preview server: hydration + islands", () => {
 		expect(r.status).toBe(200);
 		expect(r.headers.get("content-type")).toContain("application/javascript");
 		const body = await r.text();
-		// TS annotations stripped (esbuild normalises `export function X` to
-		// `function X; export { X };` — both forms are valid ESM).
+		// TS annotations stripped. sucrase passes `export function X` through
+		// verbatim; the previous esbuild-wasm path normalised the same input
+		// to `function X; export { X };`. Both are valid ESM, so accept either.
 		expect(body).toContain("function mount");
-		expect(body).toContain("export {");
+		expect(body).toMatch(/export\s+function\s+mount|export\s*\{[^}]*\bmount\b/);
 		expect(body).not.toContain(": HTMLElement");
 		expect(body).not.toContain(": { count");
 	});

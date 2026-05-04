@@ -305,6 +305,35 @@ const { title } = Astro.props;
 
 		expect(e1?.hash).toBe(e2?.hash);
 	});
+
+	// Regression coverage for the sucrase swap: the workers-runtime
+	// `buildSite` path runs the same `compileAstro` → `transformTS`
+	// pipeline as `createPreviewHandler`, so any TS-bearing
+	// frontmatter that would have crashed in V8 with `Unexpected
+	// strict mode reserved word` under the old esbuild-wasm path now
+	// renders cleanly through the snapshot publish path too.
+	it("strips TypeScript syntax in frontmatter so the spawned isolate parses the route", async () => {
+		const site = new MemorySite();
+		site.write(
+			"/src/pages/index.astro",
+			enc(
+				[
+					"---",
+					"interface Props { title: string }",
+					"type Greeting = string;",
+					'const t: Greeting = "hello";',
+					"---",
+					"<h1>{t}</h1>",
+				].join("\n"),
+			),
+		);
+
+		const executor = makeExecutor();
+		const entries = await collect(buildSite({ site, executor }));
+		expect(entries).toHaveLength(1);
+		const html = dec(entries[0]?.bytes ?? new Uint8Array());
+		expect(html).toContain("<h1>hello</h1>");
+	});
 });
 
 async function collect<T>(iter: AsyncIterable<T>): Promise<T[]> {

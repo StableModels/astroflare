@@ -64,13 +64,22 @@ opt-in. Concretely:
   `@astroflare/compiler`). The Node-only build pipeline at
   `@astroflare/build/node` is the lone exception, scoped to local
   CLI / CI use.
-- **No native bindings, no Vite, no `esbuild` native.** `esbuild-wasm`
-  is the one bundler primitive. (`§10` of the founding spec.)
+- **No native bindings, no Vite, no `esbuild` native.** Bundling and
+  syntax stripping use pure-JS primitives only — `sucrase` for the
+  compiler's TS-strip pass (`packages/compiler/src/ts.ts`), Shiki's
+  pure-JS regex engine for highlighting. (`§10` of the founding spec.)
+  `esbuild-wasm` is forbidden in any Worker-loaded path: it calls
+  `WebAssembly.instantiate()` at `initialize()` time, which Workers
+  blocks.
 - **No configuration option exposes a Worker-incompatible path**,
-  even gated behind a flag. Example: Shiki's WASM regex engine
+  even gated behind a flag. Examples: Shiki's WASM regex engine
   (Oniguruma) is more accurate but can't run on a Worker, so the
   compiler wires Shiki's pure-JS engine unconditionally; the
-  Oniguruma path is not user-selectable.
+  Oniguruma path is not user-selectable. Same shape for TS syntax
+  stripping — `transformTS` is sucrase-only; the previous
+  `esbuild-wasm` path was removed when embedders hit
+  `Wasm code generation disallowed by embedder` on any frontmatter
+  carrying `interface Props { ... }`.
 
 Guardrail when adding a dependency: try to run it inside a Worker
 (`workerd` test pool, miniflare, or a real preview deploy) before
