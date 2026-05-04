@@ -1,0 +1,14 @@
+---
+const recipes = [{ title: "Foo" }];
+---
+<div>
+  {recipes.map((r) => (
+    <article style="
+      background: var(--surface);
+      border-radius: 12px;
+      padding: 1.5rem;
+    ">
+      <h3>{r.title}</h3>
+    </article>
+  ))}
+</div>

@@ -1,0 +1,12 @@
+---
+const recipes = [{ title: "x", image: true, prepTime: "5m" }];
+---
+<div>
+  {recipes.map((r) => (
+    <div>
+      {r.image && (<div class="image">[img]</div>)}
+      <h3>{r.title}</h3>
+      {r.prepTime && (<p>Prep: {r.prepTime}</p>)}
+    </div>
+  ))}
+</div>

@@ -66,7 +66,9 @@ opt-in. Concretely:
   CLI / CI use.
 - **No native bindings, no Vite, no `esbuild` native.** Bundling and
   syntax stripping use pure-JS primitives only — `sucrase` for the
-  compiler's TS-strip pass (`packages/compiler/src/ts.ts`), Shiki's
+  compiler's TS-strip pass (`packages/compiler/src/ts.ts`),
+  `acorn` + `acorn-jsx` for the `.astro` body-expression brace
+  finder (`packages/compiler/src/astro/parser.ts`), Shiki's
   pure-JS regex engine for highlighting. (`§10` of the founding spec.)
   `esbuild-wasm` is forbidden in any Worker-loaded path: it calls
   `WebAssembly.instantiate()` at `initialize()` time, which Workers
@@ -199,6 +201,7 @@ Run everything: `pnpm test`. Run one project: `pnpm vitest run --project <name>`
 | A — Node | `packages/*/src/*.test.ts` | node | Pure framework logic. Fast (~ms). |
 | B — workerd | `tests/workerd/` + per-package `host-cloudflare` | workerd via `@cloudflare/vitest-pool-workers` | Code that depends on the workerd runtime. |
 | D — e2e | `tests/e2e/` | node | **Real Cloudflare.** Provisions both modes per run via the `af` CLI library, deploys fixtures, asserts live behaviour. Skips when `CLOUDFLARE_*` env vars are absent. |
+| Conformance | `tests/conformance/astro-syntax/` | node | Real-world Astro source patterns the framework must accept. Each `.astro` fixture parses without errors. Runs at parser level today; emit-side render-equivalence is the next layer (see test-suite preamble). |
 
 The Phase-15-era Layer C (Miniflare integration project) was retired
 with Phase 26b's hard-cut — those tests exercised the deleted DOs.

@@ -1,0 +1,4 @@
+---
+const posts = [{ slug: "foo", title: "bar" }];
+---
+<div>{posts.map((p) => (<a href={`/posts/${p.slug}/`}>{p.title}</a>))}</div>
