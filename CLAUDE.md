@@ -101,6 +101,11 @@ build cleanly into deployable bundles.
   version, no `node:*` imports. Lets hosts pre-render snapshots
   to R2 from inside a Worker (Ember and other Worker-runtime
   consumers). The Node version stays at `@astroflare/build/node`.
+  Dynamic `[slug]` routes are enumerated through the route's
+  `getStaticPaths()` export (one snapshot entry per declared
+  `{ params, props }` pair), so the snapshot pipeline and
+  `createPreviewHandler` agree on what the source tree contains —
+  preview and publish stay in lock-step.
 - `@astroflare/host-cloudflare/runtime-modules` ships a pre-inlined
   `runtimeModules: Record<string, string>` for
   `createWorkerdExecutor({ runtime })`. Bundler-agnostic; replaces

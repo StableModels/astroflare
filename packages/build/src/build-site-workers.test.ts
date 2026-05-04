@@ -11,8 +11,9 @@
  *   - each entry has the expected `route`, `contentType`, byte length,
  *     and a stable hex hash
  *   - `prefix` mounts pages under a sub-path, mirroring the Node version
- *   - dynamic `[slug].astro` routes throw the same error as the Node
- *     version (no `getStaticPaths` support yet)
+ *   - dynamic `[slug].astro` routes enumerate via `getStaticPaths` —
+ *     one entry per declared params/props pair, props threaded into the
+ *     render, errors and missing exports surfaced with the source path
  *   - missing pages glob → no entries (graceful empty-site case)
  */
 import { sha256Hex } from "@astroflare/core";
@@ -151,16 +152,132 @@ describe("buildSite (workers-runtime)", () => {
 		expect(routes.sort()).toEqual(["/tenant-a/", "/tenant-a/about"]);
 	});
 
-	it("throws on dynamic [slug] routes (no getStaticPaths support)", async () => {
+	it("enumerates a dynamic [slug] route via getStaticPaths and renders each entry", async () => {
+		const site = new MemorySite();
+		site.write(
+			"/src/pages/posts/[slug].astro",
+			enc(`---
+export async function getStaticPaths() {
+	return [
+		{ params: { slug: "hello-world" }, props: { title: "Hello, World" } },
+		{ params: { slug: "second-post" }, props: { title: "Second post" } },
+	];
+}
+const { slug } = Astro.params;
+const { title } = Astro.props;
+---
+<h1>{title}</h1>
+<p>slug: {slug}</p>`),
+		);
+
+		const executor = makeExecutor();
+		const entries = await collect(buildSite({ site, executor }));
+		const byRoute = new Map(entries.map((e) => [e.route, e]));
+		expect([...byRoute.keys()].sort()).toEqual(["/posts/hello-world", "/posts/second-post"]);
+
+		const first = byRoute.get("/posts/hello-world");
+		const second = byRoute.get("/posts/second-post");
+		if (!first || !second) throw new Error("expected both slugs");
+
+		const firstHtml = dec(first.bytes);
+		expect(firstHtml).toContain("Hello, World");
+		expect(firstHtml).toContain("hello-world");
+
+		const secondHtml = dec(second.bytes);
+		expect(secondHtml).toContain("Second post");
+		expect(secondHtml).toContain("second-post");
+
+		// Distinct props → distinct content → distinct hashes.
+		expect(first.hash).not.toBe(second.hash);
+		expect(first.hash).toBe(await sha256Hex(first.bytes));
+	});
+
+	it("interleaves static and dynamic routes in deterministic source order", async () => {
+		const site = new MemorySite();
+		site.write("/src/pages/index.astro", enc("---\n---\n<h1>home</h1>"));
+		site.write("/src/pages/about.md", enc("# about\n"));
+		site.write(
+			"/src/pages/posts/[slug].astro",
+			enc(`---
+export async function getStaticPaths() {
+	return [
+		{ params: { slug: "hello-world" }, props: { title: "Hello" } },
+		{ params: { slug: "second-post" }, props: { title: "Second" } },
+	];
+}
+const { title } = Astro.props;
+---
+<h1>{title}</h1>`),
+		);
+
+		const executor = makeExecutor();
+		const routes = (await collect(buildSite({ site, executor }))).map((e) => e.route);
+		// Pages glob is alphabetical by source path:
+		//   /src/pages/about.md            → /about
+		//   /src/pages/index.astro         → /
+		//   /src/pages/posts/[slug].astro  → /posts/<slug> × 2
+		expect(routes).toEqual(["/about", "/", "/posts/hello-world", "/posts/second-post"]);
+	});
+
+	it("yields no entries for a dynamic route whose getStaticPaths returns []", async () => {
+		const site = new MemorySite();
+		site.write(
+			"/src/pages/posts/[slug].astro",
+			enc(`---
+export async function getStaticPaths() { return []; }
+---
+<h1>unused</h1>`),
+		);
+		const executor = makeExecutor();
+		const entries = await collect(buildSite({ site, executor }));
+		expect(entries).toEqual([]);
+	});
+
+	it("surfaces a getStaticPaths exception with the source path", async () => {
+		const site = new MemorySite();
+		site.write(
+			"/src/pages/posts/[slug].astro",
+			enc(`---
+export async function getStaticPaths() { throw new Error("boom"); }
+---
+<h1>unused</h1>`),
+		);
+		const executor = makeExecutor();
+		await expect(collect(buildSite({ site, executor }))).rejects.toThrow(
+			/getStaticPaths failed for \/src\/pages\/posts\/\[slug\]\.astro.*boom/,
+		);
+	});
+
+	it("throws when a dynamic route has no getStaticPaths export", async () => {
 		const site = new MemorySite();
 		site.write("/src/pages/posts/[slug].astro", enc("---\n---\n<h1>post</h1>"));
 		const executor = makeExecutor();
-		const iter = buildSite({ site, executor });
-		await expect(async () => {
-			for await (const _ of iter) {
-				// drain
-			}
-		}).rejects.toThrow(/dynamic routes.*not yet supported/);
+		await expect(collect(buildSite({ site, executor }))).rejects.toThrow(
+			/dynamic route \/src\/pages\/posts\/\[slug\]\.astro has no getStaticPaths export/,
+		);
+	});
+
+	it("dynamic routes hash deterministically across runs", async () => {
+		const src = enc(`---
+export async function getStaticPaths() {
+	return [{ params: { slug: "stable" }, props: { title: "Stable" } }];
+}
+const { title } = Astro.props;
+---
+<p>{title}</p>`);
+		const site1 = new MemorySite();
+		const site2 = new MemorySite();
+		site1.write("/src/pages/posts/[slug].astro", src);
+		site2.write("/src/pages/posts/[slug].astro", src);
+
+		const exe1 = makeExecutor();
+		const exe2 = makeExecutor();
+
+		const e1 = (await collect(buildSite({ site: site1, executor: exe1 })))[0];
+		const e2 = (await collect(buildSite({ site: site2, executor: exe2 })))[0];
+
+		expect(e1?.route).toBe("/posts/stable");
+		expect(e1?.hash).toBe(e2?.hash);
 	});
 
 	it("yields no entries when the pages glob is empty", async () => {
