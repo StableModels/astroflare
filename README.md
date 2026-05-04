@@ -135,6 +135,15 @@ serving a `@cloudflare/shell` Workspace from a DO, `MemorySite` for
 in-memory fixtures, or your own implementation. No `node:*` imports
 in the build path.
 
+Dynamic `[slug]` routes deploy too: `buildSite` invokes the route's
+`getStaticPaths()` export through the same isolate it renders in,
+and emits one `SnapshotEntry` per declared `{ params, props }` pair.
+A `src/pages/posts/[slug].astro` whose `getStaticPaths` returns
+`[{ params: { slug: "hello-world" }, props: { title: "Hello" } }]`
+ships as `/posts/hello-world` with `Astro.props.title` populated —
+identical semantics to what `createPreviewHandler` serves at
+request time, so what you see in preview is what gets published.
+
 Working reference: [`tests/e2e/fixtures/deploy-host-ref/`](./tests/e2e/fixtures/deploy-host-ref/).
 
 ## Quick start — Mode A (preview)

@@ -11,8 +11,11 @@
  * to a Node side-car.
  *
  * Shape parity with the Node version:
- *   - astro/markdown pages under `/src/pages/`; dynamic routes need
- *     `getStaticPaths` (not yet supported, same as Node)
+ *   - astro/markdown pages under `/src/pages/`
+ *   - dynamic `[slug]` routes are enumerated through the route's
+ *     `getStaticPaths()` export (same machinery `createPreviewHandler`
+ *     uses) — one snapshot entry emitted per declared params/props
+ *     pair, so what renders in preview is what gets published
  *   - yields `SnapshotEntry` one at a time so callers can stream
  *     them straight into a `SnapshotSink.put`
  *   - route keys match `R2SnapshotSink`'s convention: leading /
@@ -32,13 +35,22 @@
  *     `node:url` / `node:module` imports
  */
 
-import type { Cache, Executor, Logger, RenderResult, Site, SnapshotEntry } from "@astroflare/core";
+import type {
+	Cache,
+	Executor,
+	Logger,
+	RenderResult,
+	Site,
+	SnapshotEntry,
+	TaskBundle,
+} from "@astroflare/core";
 import { sha256Hex } from "@astroflare/core";
 import { inlineBundle } from "@astroflare/preview/bundle";
 import { type MarkdownOptions, ModuleGraph } from "@astroflare/preview/module-graph";
 import {
 	DEFAULT_RUNTIME_IMPORT,
 	type RenderTaskInput,
+	type StaticPathsResult,
 	buildClosureRenderTask,
 } from "./render-task.js";
 
@@ -86,8 +98,12 @@ export interface WorkersBuildSiteOptions {
  * time. Yields entries one-at-a-time so callers pipe to a
  * `SnapshotSink` without buffering the whole site in memory.
  *
- * Static-only. Dynamic routes (`[slug].astro`) need `getStaticPaths`
- * enumeration — not yet supported here.
+ * Static and dynamic routes both go through this loop. For a dynamic
+ * `[slug]`-style page the route module's `getStaticPaths()` export is
+ * invoked once (through the same `bundleKey`'d isolate the renderer
+ * uses), and one entry is emitted per declared `{ params, props }`
+ * pair. The same machinery `createPreviewHandler` runs at request
+ * time, so the snapshot agrees with what preview serves.
  */
 export async function* buildSite(opts: WorkersBuildSiteOptions): AsyncIterable<SnapshotEntry> {
 	const enc = new TextEncoder();
@@ -119,28 +135,71 @@ export async function* buildSite(opts: WorkersBuildSiteOptions): AsyncIterable<S
 	pages.sort();
 
 	for (const sourcePath of pages) {
+		const closure = await compileClosure(moduleGraph, sourcePath, opts.logger);
+		const taskFactory = () => {
+			const code = inlineBundle(closure.modules, DEFAULT_RUNTIME_IMPORT);
+			return buildClosureRenderTask({ bundleCode: code });
+		};
+
 		const localRoute = pageRoute(sourcePath);
-		if (localRoute === null) {
+		if (localRoute !== null) {
+			// Static route — single render with empty params/props.
+			const route = prefixRoute(opts.prefix ?? "", localRoute);
+			const html = await renderRoute(
+				opts.executor,
+				closure.bundleKey,
+				taskFactory,
+				sourcePath,
+				route,
+				{},
+				{},
+				opts.logger,
+			);
+			const bytes = enc.encode(html);
+			const hash = await sha256Hex(bytes);
+			yield { route, bytes, contentType: "text/html;charset=utf-8", hash };
+			continue;
+		}
+
+		// Dynamic route — enumerate through getStaticPaths.
+		const staticPaths = await fetchStaticPaths(
+			opts.executor,
+			closure.bundleKey,
+			taskFactory,
+			sourcePath,
+			opts.logger,
+		);
+		if (staticPaths === null) {
 			throw new Error(
-				`buildSite: dynamic routes (${sourcePath}) need getStaticPaths to enumerate; not yet supported`,
+				`buildSite: dynamic route ${sourcePath} has no getStaticPaths export — every \`[param]\` page must export one`,
 			);
 		}
-		const route = prefixRoute(opts.prefix ?? "", localRoute);
-		const html = await compileAndRender(moduleGraph, opts.executor, sourcePath, route, opts.logger);
-		const bytes = enc.encode(html);
-		const hash = await sha256Hex(bytes);
-		yield {
-			route,
-			bytes,
-			contentType: "text/html;charset=utf-8",
-			hash,
-		};
+		for (const entry of staticPaths) {
+			const params = stringifyParams(entry.params);
+			const localUrl = dynamicRoute(sourcePath, params);
+			const route = prefixRoute(opts.prefix ?? "", localUrl);
+			const html = await renderRoute(
+				opts.executor,
+				closure.bundleKey,
+				taskFactory,
+				sourcePath,
+				route,
+				params,
+				entry.props ?? {},
+				opts.logger,
+			);
+			const bytes = enc.encode(html);
+			const hash = await sha256Hex(bytes);
+			yield { route, bytes, contentType: "text/html;charset=utf-8", hash };
+		}
 	}
 }
 
 /**
  * `/src/pages/index.astro` → `/`; `/src/pages/about.astro` → `/about`;
  * `/src/pages/about.md` → `/about`; `/src/pages/blog/index.astro` → `/blog`.
+ * Returns `null` for paths with `[param]` segments — the dynamic-route
+ * branch in `buildSite` handles those via `getStaticPaths` enumeration.
  */
 function pageRoute(sourcePath: string): string | null {
 	const noPrefix = sourcePath.replace(/^\/src\/pages\//, "/");
@@ -151,6 +210,37 @@ function pageRoute(sourcePath: string): string | null {
 	return noExt;
 }
 
+/**
+ * Substitute `[param]` segments in a dynamic page's source path with the
+ * matching values from `params`, producing the URL path for that entry.
+ *
+ *   `/src/pages/posts/[slug].astro` + `{ slug: "hello-world" }`
+ *     → `/posts/hello-world`
+ *   `/src/pages/[year]/index.astro` + `{ year: "2024" }`
+ *     → `/2024`
+ *
+ * Single-segment params only — `[...rest]` catchall is a router-side
+ * follow-up. Throws if any `[param]` segment isn't present in `params`,
+ * since `getStaticPaths` is contract-bound to declare every dynamic
+ * segment.
+ */
+function dynamicRoute(sourcePath: string, params: Record<string, string>): string {
+	const noPrefix = sourcePath.replace(/^\/src\/pages\//, "/");
+	const noExt = noPrefix.replace(/\.(astro|mdx|md)$/, "");
+	const substituted = noExt.replace(/\[([A-Za-z_$][\w$]*)\]/g, (_match, name: string) => {
+		const value = params[name];
+		if (value === undefined) {
+			throw new Error(
+				`buildSite: getStaticPaths entry for ${sourcePath} is missing param "${name}" (declared in the file path)`,
+			);
+		}
+		return encodeURIComponent(value);
+	});
+	if (substituted === "/index") return "/";
+	if (substituted.endsWith("/index")) return substituted.slice(0, -"/index".length);
+	return substituted;
+}
+
 function prefixRoute(prefix: string, route: string): string {
 	if (!prefix) return route;
 	const cleaned = prefix.replace(/^\/+|\/+$/g, "");
@@ -158,16 +248,26 @@ function prefixRoute(prefix: string, route: string): string {
 	return `/${cleaned}${route}`;
 }
 
-async function compileAndRender(
+/**
+ * `getStaticPaths` may return non-string values (e.g. numeric IDs).
+ * Stringify them up front so the URL substitution and downstream
+ * `Astro.params` consumers see consistent types — same coercion the
+ * preview handler does at request time (`preview-handler.ts`'s
+ * `paramsMatch`).
+ */
+function stringifyParams(params: Record<string, unknown>): Record<string, string> {
+	const out: Record<string, string> = {};
+	for (const [k, v] of Object.entries(params)) out[k] = String(v);
+	return out;
+}
+
+async function compileClosure(
 	moduleGraph: ModuleGraph,
-	executor: Executor,
 	sourcePath: string,
-	route: string,
 	logger: Logger | undefined,
-): Promise<string> {
-	let closure: Awaited<ReturnType<ModuleGraph["closure"]>>;
+): Promise<Awaited<ReturnType<ModuleGraph["closure"]>>> {
 	try {
-		closure = await moduleGraph.closure(sourcePath);
+		return await moduleGraph.closure(sourcePath);
 	} catch (err) {
 		logger?.event("buildSite.compile.failed", {
 			path: sourcePath,
@@ -175,27 +275,52 @@ async function compileAndRender(
 		});
 		throw new Error(`buildSite: compile failed for ${sourcePath}: ${(err as Error).message}`);
 	}
+}
 
+async function fetchStaticPaths(
+	executor: Executor,
+	bundleKey: string,
+	taskFactory: () => TaskBundle,
+	sourcePath: string,
+	logger: Logger | undefined,
+): Promise<StaticPathsResult> {
+	try {
+		return await executor.runCached<StaticPathsResult>(bundleKey, taskFactory, { kind: "paths" });
+	} catch (err) {
+		logger?.event("buildSite.static-paths.failed", {
+			path: sourcePath,
+			message: (err as Error).message,
+		});
+		throw new Error(
+			`buildSite: getStaticPaths failed for ${sourcePath}: ${(err as Error).message}`,
+		);
+	}
+}
+
+async function renderRoute(
+	executor: Executor,
+	bundleKey: string,
+	taskFactory: () => TaskBundle,
+	sourcePath: string,
+	route: string,
+	params: Record<string, string>,
+	props: Record<string, unknown>,
+	logger: Logger | undefined,
+): Promise<string> {
 	const input: RenderTaskInput = {
 		url: `http://stack.local${route}`,
 		method: "GET",
-		props: {},
-		params: {},
+		props,
+		params,
 	};
 
 	let result: RenderResult;
 	try {
-		result = await executor.runCached<RenderResult>(
-			closure.bundleKey,
-			() => {
-				const code = inlineBundle(closure.modules, DEFAULT_RUNTIME_IMPORT);
-				return buildClosureRenderTask({ bundleCode: code });
-			},
-			input,
-		);
+		result = await executor.runCached<RenderResult>(bundleKey, taskFactory, input);
 	} catch (err) {
 		logger?.event("buildSite.render.failed", {
 			path: sourcePath,
+			route,
 			message: (err as Error).message,
 		});
 		throw new Error(`buildSite: render failed for ${sourcePath}: ${(err as Error).message}`);
