@@ -5,10 +5,11 @@
  * source → ESM compilation. Internally splits into parse → emit so
  * tests of either half can use them directly.
  *
- * Phase 11: TypeScript syntax in frontmatter is stripped via
- * `transformTS` (esbuild-wasm). The transform always runs — TS is a
- * superset of JS, so JS-only frontmatter passes through unchanged at
- * a sub-ms per-call cost after esbuild-wasm's one-time init.
+ * TypeScript syntax in frontmatter is stripped via `transformTS`
+ * (sucrase, pure-JS — see `../ts.ts`). The transform always runs;
+ * JS-only frontmatter passes through unchanged at sub-ms cost. Same
+ * code path runs in Node, workerd, and any other ES2022-capable
+ * runtime — no WASM, no Node built-ins.
  */
 import { contentId } from "@astroflare/core";
 import type { AstroDocument, AstroError } from "./ast.js";
@@ -16,24 +17,17 @@ import { type EmitOptions, type EmitResult, emitDocument } from "./emitter.js";
 import { parseAstro } from "./parser.js";
 import { buildLineMap } from "./source-map.js";
 
-// `transformTS` lazily imported in the compile path so callers that
-// pass `skipTsTransform: true` (e.g. the preview worker on
-// Cloudflare, where the bundle size budget can't accommodate
-// esbuild-wasm) never load esbuild. Static-import users still see
-// the same eager-load behaviour because the import below resolves
-// at first call.
-
 export interface CompileOptions extends EmitOptions {
 	/**
-	 * Skip the TS-strip pass. Useful for tests that exercise the parser
-	 * + emitter only and don't want to wait on esbuild-wasm init. Default
-	 * `false`. Production code should leave this off.
+	 * Skip the TS-strip pass. Useful for parser-/emitter-only tests
+	 * and for callers whose source is guaranteed to be plain JS.
+	 * Default `false`.
 	 */
 	skipTsTransform?: boolean;
 	/**
 	 * `import.meta.env.<KEY>` substitutions, supplied from
-	 * `AstroflareConfig.env`. esbuild's `define` rewrites the accesses at
-	 * the TS-strip pass.
+	 * `AstroflareConfig.env`. The TS-strip pass replaces matching
+	 * member accesses with the JSON-stringified value.
 	 */
 	env?: Record<string, unknown>;
 }
@@ -44,9 +38,10 @@ export interface CompileResult extends EmitResult {
 }
 
 /**
- * Compile a `.astro` source string. Async because the TS-strip pass
- * goes through esbuild-wasm. If you need a synchronous parse/emit for
- * test introspection, use `parseAstro` + `emitDocument` directly.
+ * Compile a `.astro` source string. Async because the parser may
+ * yield to async hooks; the TS-strip pass itself is synchronous
+ * (sucrase). If you need a synchronous parse/emit for test
+ * introspection, use `parseAstro` + `emitDocument` directly.
  */
 export async function compileAstro(
 	source: string,
@@ -67,27 +62,19 @@ export async function compileAstro(
 	}
 	let code = emitted.code;
 	try {
-		// Dynamic import — keeps esbuild-wasm out of bundles whose
-		// callers always pass `skipTsTransform: true`.
 		const { transformTS } = await import("../ts.js");
 		code = await transformTS(code, {
 			filename: opts.filename,
 			define: defineFromEnv(opts.env),
 		});
 	} catch (err) {
-		const message = (err as Error).message ?? String(err);
-		if (isEsbuildEnvironmentError(message)) {
-			// The runtime environment can't initialise esbuild-wasm (typically
-			// workerd in a test, where the WASM blob isn't bound). Skip the
-			// strip pass — module sources are JS-only in that environment by
-			// convention, and the inline bundler tolerates the un-stripped
-			// emitter output.
-			return { ...emitted, code, map, doc, errors };
-		}
-		// Genuine syntax / type error in user code: record and fall back to
-		// the pre-transform code so callers can still display something.
+		// Surface as a compile error pinned to the source path. Callers
+		// (notably `module-graph.#compileSource`) translate this into a
+		// thrown `compile error in <path> ...` — a clean, named failure
+		// instead of an opaque downstream V8 syntax error.
+		const message = err instanceof Error ? err.message : String(err);
 		errors.push({
-			message: `TypeScript transform failed: ${message}`,
+			message: `TypeScript transform failed${opts.filename ? ` in ${opts.filename}` : ""}: ${message}`,
 			start: { line: 1, column: 1, offset: 0 },
 		});
 	}
@@ -95,18 +82,10 @@ export async function compileAstro(
 }
 
 /**
- * Distinguish "esbuild-wasm could not initialise in this environment"
- * (a host-config issue, recoverable: skip the transform) from a real
- * syntax error in user code (must surface to the caller).
- */
-function isEsbuildEnvironmentError(message: string): boolean {
-	return /wasmURL|wasmModule|initialize|fetch.*esbuild/i.test(message);
-}
-
-/**
- * Translate `AstroflareConfig.env` into esbuild's `define` shape. Each
- * key becomes `import.meta.env.KEY` mapped to the JSON-stringified
- * value. esbuild substitutes the access at the TS-strip pass.
+ * Translate `AstroflareConfig.env` into the `define` shape consumed by
+ * `transformTS`. Each key becomes `import.meta.env.<KEY>` mapped to a
+ * JSON-stringified value; the TS-strip pass replaces matching member
+ * accesses inline.
  */
 function defineFromEnv(
 	env: Record<string, unknown> | undefined,

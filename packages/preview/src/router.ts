@@ -57,7 +57,8 @@ const PAGE_EXTENSIONS: ReadonlyArray<{ ext: string; kind: RouteKind }> = [
 	{ ext: ".mdx", kind: "markdown" },
 	{ ext: ".md", kind: "markdown" },
 	// Server endpoints. Phase 11 adds `.ts` alongside `.js`; the endpoint
-	// loader runs `.ts` source through esbuild-wasm before bundling.
+	// loader runs `.ts` source through `transformTS` (sucrase) before
+	// bundling.
 	{ ext: ".js", kind: "endpoint" },
 	{ ext: ".ts", kind: "endpoint" },
 ];

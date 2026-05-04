@@ -254,8 +254,8 @@ export function createPreviewServer(opts: PreviewServerOptions): PreviewServer {
 				// Island component bundles (Phase 16). The compiler emits
 				// `component-url="/_aflare/island?path=/components/Counter.tsx"`;
 				// this route reads the source from storage, runs `.ts`/`.tsx`/
-				// `.jsx` through esbuild-wasm, and returns ESM the browser
-				// can dynamic-import.
+				// `.jsx` through `transformTS` (sucrase), and returns ESM the
+				// browser can dynamic-import.
 				if (url.pathname === ISLAND_PATH) {
 					const path = url.searchParams.get("path");
 					if (!path) {
@@ -505,15 +505,16 @@ function serveStaticClient(source: string): Response {
 
 /**
  * Read an island source file from storage and return JS the browser can
- * `import()`. `.ts`/`.tsx`/`.jsx`/`.mts` go through esbuild-wasm's
- * TS-strip + JSX transform; `.js`/`.mjs` pass through verbatim.
+ * `import()`. `.ts`/`.tsx`/`.jsx`/`.mts` go through `transformTS`
+ * (sucrase) for TS-strip + JSX transform; `.js`/`.mjs` pass through
+ * verbatim.
  *
  * Phase 16 carve-out: framework-specific JSX runtime resolution (React /
- * Preact) isn't wired here. The compiled output uses esbuild's default
- * automatic JSX with `react/jsx-runtime` as the source; the browser
- * either resolves that via an import map or the user ships a vanilla-JS
- * island that doesn't rely on a framework runtime. Phase 16a adds an
- * automatic React adapter that bundles the runtime.
+ * Preact) isn't wired here. The compiled output uses automatic JSX with
+ * `react/jsx-runtime` as the source; the browser either resolves that
+ * via an import map or the user ships a vanilla-JS island that doesn't
+ * rely on a framework runtime. Phase 16a adds an automatic React adapter
+ * that bundles the runtime.
  */
 async function serveIslandModule(host: Host, path: string): Promise<Response> {
 	// Reject path traversal — workspace paths start with `/` and use

@@ -291,3 +291,77 @@ const { title } = Astro.props;
 		expect(afterText).toContain("MUTATED-FOOTER");
 	});
 });
+
+/**
+ * Regression coverage for the Workers-incompatible-WASM TS-strip
+ * issue: any `.astro` file with TypeScript syntax in its frontmatter
+ * used to render 500 with `Unexpected strict mode reserved word` once
+ * the spawned isolate tried to parse `interface Props { ... }` as JS.
+ * The compile pipeline runs through sucrase now (pure JS, no runtime
+ * `WebAssembly.instantiate`), so TS-bearing frontmatter survives the
+ * round-trip end-to-end on workerd.
+ */
+describe("createPreviewHandler: TypeScript frontmatter on workerd", () => {
+	function bootSiteWithTSFrontmatter(source: string): Harness {
+		const site = new MemorySite();
+		site.write("/src/pages/index.astro", new TextEncoder().encode(source));
+		const cache = new MemoryCache();
+		const sql = makeMockSql();
+		const coordinator = createCoordinator({ sql });
+		const executor = createWorkerdExecutor({
+			loader: env.LOADER,
+			compatibilityDate: "2025-09-01",
+			compatibilityFlags: ["nodejs_compat"],
+			runtime: runtimeModules,
+		});
+		const handler = createPreviewHandler({ site, coordinator, executor, cache });
+		return { site, cache, coordinator, handler };
+	}
+
+	it("renders an `interface Props { ... }` route 200, not 500", async () => {
+		const { handler } = bootSiteWithTSFrontmatter(
+			[
+				"---",
+				"interface Props { title: string }",
+				'const t = "hello";',
+				"---",
+				"<h1>{t}</h1>",
+			].join("\n"),
+		);
+		const res = await handler.fetch(new Request("https://app/"));
+		expect(res.status, await res.clone().text()).toBe(200);
+		const html = await res.text();
+		expect(html).toContain("<h1>hello</h1>");
+	});
+
+	it("strips type aliases, parameter annotations, generics, and `as` casts", async () => {
+		const src = [
+			"---",
+			"type Greeting = string;",
+			"function greet<T extends Greeting>(name: T): T { return name; }",
+			'const n = ("world" as Greeting);',
+			"const out = greet(n);",
+			"---",
+			"<p>hello {out}</p>",
+		].join("\n");
+		const { handler } = bootSiteWithTSFrontmatter(src);
+		const res = await handler.fetch(new Request("https://app/"));
+		expect(res.status, await res.clone().text()).toBe(200);
+		const html = await res.text();
+		expect(html).toContain("hello world");
+	});
+
+	it("surfaces a TS syntax error as a named compile failure (not a downstream V8 error)", async () => {
+		const { handler } = bootSiteWithTSFrontmatter(
+			["---", "const x: = 5;", "---", "<p>broken</p>"].join("\n"),
+		);
+		const res = await handler.fetch(new Request("https://app/"));
+		expect(res.status).toBe(500);
+		const body = await res.text();
+		// Source path is named, and the failure mode is identified as a
+		// compile-stage problem — not the opaque "Unexpected strict
+		// mode reserved word" V8 syntax error embedders saw before.
+		expect(body).toMatch(/index\.astro/);
+		expect(body).toMatch(/compile|TypeScript transform/i);
+	});
+});
