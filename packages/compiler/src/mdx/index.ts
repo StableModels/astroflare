@@ -47,8 +47,7 @@ import { compile as mdxCompile } from "@mdx-js/mdx";
 import rehypeRaw from "rehype-raw";
 import type { PluggableList, Plugin } from "unified";
 import { parse as parseYaml } from "yaml";
-import { resolveShikiEngine } from "../markdown/index.js";
-import { type ShikiEngine, rehypeShiki } from "../shiki/index.js";
+import { rehypeShiki } from "../shiki/index.js";
 
 const RUNTIME_SYMBOLS = ["$component", "$render", "$rawHtml"] as const;
 
@@ -74,12 +73,12 @@ export interface MdxCompileOptions {
 	/** Source filename for error messages. */
 	filename?: string;
 	/**
-	 * Shiki syntax highlighting. See `MarkdownCompileOptions.shiki` —
-	 * defaults to `false` (no highlighting) so MDX routes don't require
-	 * runtime WASM. Set to `"javascript"` (or `true`) on Workers; set to
-	 * `"oniguruma"` only in Node-class environments.
+	 * Enable Shiki syntax highlighting on fenced code blocks. See
+	 * `MarkdownCompileOptions.shiki` for the rationale — only the
+	 * pure-JS regex engine ships, since Astroflare's hard rule is
+	 * "Workers-runnable only" and the WASM engine isn't.
 	 */
-	shiki?: boolean | ShikiEngine;
+	shiki?: boolean;
 	/** Extra remark plugins. Internal — reserved for future config plumbing. */
 	remarkPlugins?: Plugin[];
 	/** Extra rehype plugins. Internal — reserved for future config plumbing. */
@@ -143,9 +142,8 @@ export async function compileMdx(
 		"mdxjsEsm",
 	];
 	const rehypePlugins: PluggableList = [];
-	const shikiEngine = resolveShikiEngine(opts.shiki);
-	if (shikiEngine) {
-		rehypePlugins.push(rehypeShiki({ engine: shikiEngine }));
+	if (opts.shiki) {
+		rehypePlugins.push(rehypeShiki());
 		rehypePlugins.push([rehypeRaw, { passThrough: MDX_NODE_TYPES }]);
 	}
 	for (const p of opts.rehypePlugins ?? []) {

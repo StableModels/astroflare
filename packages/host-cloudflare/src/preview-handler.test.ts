@@ -111,7 +111,7 @@ interface Harness {
 }
 
 interface BootOptions {
-	markdownShiki?: boolean | "javascript" | "oniguruma";
+	markdownShiki?: boolean;
 }
 
 function bootHarness(opts: BootOptions = {}): Harness {
@@ -169,14 +169,14 @@ describe("createPreviewHandler: closure walking with the starter scaffold", () =
 		expect(html).toContain("hello");
 	});
 
-	it("highlights markdown code blocks when shiki: 'javascript' is enabled", async () => {
-		const { handler } = bootHarness({ markdownShiki: "javascript" });
+	it("highlights markdown code blocks when shiki: true is enabled", async () => {
+		const { handler } = bootHarness({ markdownShiki: true });
 		const res = await handler.fetch(new Request("https://app/about"));
 		expect(res.status, await res.clone().text()).toBe(200);
 		const html = await res.text();
 		// Shiki's signature: `<pre class="shiki ...">` plus inline color
-		// styles. The JS regex engine works inside workerd because there
-		// are no runtime WASM instantiations.
+		// styles. We always wire the JS regex engine — no runtime WASM,
+		// so workerd is happy.
 		expect(html).toMatch(/<pre[^>]*class="shiki/);
 		expect(html).toContain('style="color:');
 	});

@@ -68,10 +68,10 @@ export interface WorkersBuildSiteOptions {
 	 */
 	prefix?: string;
 	/**
-	 * Markdown / MDX compilation options. See
-	 * `CreatePreviewHandlerOptions.markdown` — same shape, same
-	 * defaults (Shiki off because runtime WASM is blocked on
-	 * Workers; opt in with `{ shiki: "javascript" }`).
+	 * Markdown / MDX compilation options. Same shape as
+	 * `CreatePreviewHandlerOptions.markdown` — defaults to no
+	 * highlighting; opt in with `{ shiki: true }` to enable Shiki's
+	 * pure-JS regex engine.
 	 */
 	markdown?: MarkdownOptions;
 	/** Optional structured logger; unused if absent. */

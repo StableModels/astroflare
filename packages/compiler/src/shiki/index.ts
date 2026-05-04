@@ -16,21 +16,17 @@
  *     `hast-util-raw` and emits proper JSX. Same result; different
  *     route.
  *
- * One highlighter per regex engine, cached at module scope. First call
- * for a given engine pays the grammar/theme load (~100 ms); subsequent
- * calls are fast.
+ * Single shared highlighter, cached at module scope. First call pays the
+ * grammar/theme load (~100 ms); subsequent calls are fast.
  *
- * ## Regex engines
+ * ## Cloudflare Workers compatibility (HARD RULE)
  *
- * Shiki supports two engines:
- *   - `"javascript"` (default) — pure JS, no WebAssembly. Works on
- *     Cloudflare Workers and any other environment that disallows
- *     runtime `WebAssembly.instantiate()` of arbitrary bytes.
- *   - `"oniguruma"` — Shiki's original WASM engine. More accurate on
- *     edge-case grammars, but `import('shiki/wasm')` hits Workers'
- *     "Wasm code generation disallowed by embedder" restriction.
- *     Hosts that bundle the WASM via static `[wasm_modules]` imports
- *     can opt in.
+ * Astroflare only ships paths that run on a Cloudflare Worker. Shiki's
+ * default Oniguruma regex engine fails that bar — it dynamically
+ * imports `shiki/wasm` and instantiates it at runtime, which Workers
+ * blocks (`Wasm code generation disallowed by embedder`). We
+ * therefore wire `createJavaScriptRegexEngine()` unconditionally; the
+ * Oniguruma path is not exposed.
  *
  * Carve-outs:
  *   - One default theme (`github-dark`) — no per-block theme override.
@@ -44,8 +40,6 @@ import type { Element, Root } from "hast";
 import { type Highlighter, type ShikiTransformer, createHighlighter } from "shiki";
 import { createJavaScriptRegexEngine } from "shiki/engine/javascript";
 import type { Plugin } from "unified";
-
-export type ShikiEngine = "javascript" | "oniguruma";
 
 const DEFAULT_THEME = "github-dark";
 
@@ -71,30 +65,22 @@ const DEFAULT_LANGS = [
 	"plaintext",
 ] as const;
 
-const highlighterCache = new Map<ShikiEngine, Promise<Highlighter>>();
+let highlighterPromise: Promise<Highlighter> | null = null;
 
 /**
- * Get (or lazily create) the process-wide highlighter for the requested
- * regex engine. Caching is essential — `createHighlighter` loads grammars
- * and is the dominant cost of compiling a code-heavy page.
+ * Get (or lazily create) the process-wide highlighter. Always uses the
+ * pure-JS regex engine — see the "Cloudflare Workers compatibility"
+ * note at the top of this file.
  */
-async function getHighlighter(engine: ShikiEngine): Promise<Highlighter> {
-	let promise = highlighterCache.get(engine);
-	if (!promise) {
-		promise =
-			engine === "javascript"
-				? createHighlighter({
-						themes: [DEFAULT_THEME],
-						langs: [...DEFAULT_LANGS],
-						engine: createJavaScriptRegexEngine(),
-					})
-				: createHighlighter({
-						themes: [DEFAULT_THEME],
-						langs: [...DEFAULT_LANGS],
-					});
-		highlighterCache.set(engine, promise);
+async function getHighlighter(): Promise<Highlighter> {
+	if (!highlighterPromise) {
+		highlighterPromise = createHighlighter({
+			themes: [DEFAULT_THEME],
+			langs: [...DEFAULT_LANGS],
+			engine: createJavaScriptRegexEngine(),
+		});
 	}
-	return promise;
+	return highlighterPromise;
 }
 
 interface ShikiOptions {
@@ -102,12 +88,6 @@ interface ShikiOptions {
 	theme?: string;
 	/** Optional transformers (Shiki's per-line / per-token hooks). */
 	transformers?: ShikiTransformer[];
-	/**
-	 * Regex engine. Defaults to `"javascript"` because Cloudflare Workers
-	 * disallows runtime WASM instantiation, and the JS engine works
-	 * everywhere with no bundling tricks.
-	 */
-	engine?: ShikiEngine;
 }
 
 /**
@@ -121,12 +101,11 @@ interface ShikiOptions {
 export function rehypeShiki(options: ShikiOptions = {}): Plugin<[], Root> {
 	const theme = options.theme ?? DEFAULT_THEME;
 	const transformers = options.transformers ?? [];
-	const engine = options.engine ?? "javascript";
 	return () => async (tree) => {
 		const targets = collectCodeBlocks(tree);
 		if (targets.length === 0) return;
 
-		const highlighter = await getHighlighter(engine);
+		const highlighter = await getHighlighter();
 		const knownLangs = new Set<string>(highlighter.getLoadedLanguages().concat(["plaintext"]));
 
 		for (const t of targets) {

@@ -93,10 +93,10 @@ export interface CreatePreviewHandlerOptions {
 	resolveRoute?: (pathname: string) => string | null;
 	/**
 	 * Markdown / MDX compilation options. Most commonly used to
-	 * enable Shiki syntax highlighting (default off — Cloudflare
-	 * Workers blocks runtime WASM, which Shiki's Oniguruma engine
-	 * relies on; pass `markdown: { shiki: "javascript" }` to enable
-	 * highlighting via the JS regex engine).
+	 * enable Shiki syntax highlighting — pass `markdown: { shiki:
+	 * true }` to highlight fenced blocks via Shiki's pure-JS regex
+	 * engine (the only Workers-compatible path). Default off so the
+	 * happy path stays minimal.
 	 */
 	markdown?: MarkdownOptions;
 	/** Optional structured logger; unused if absent. */

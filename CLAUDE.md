@@ -45,6 +45,38 @@ via the `Executor` abstraction. Mode B's **serve** step is a worker,
 fully subject to the rules: Astroflare ships a request-handler
 factory and an `R2Snapshots` adapter, never the worker entrypoint;
 the host owns the worker, the storage binding, and the path layout.
+
+### Hard rule: every shipped path must run on a Cloudflare Worker
+
+Workers-runnable-only is a load-bearing constraint, not a soft
+preference. When the choice is between a richer dependency that
+can't run on a Worker and a thinner one that can, we ship only the
+thinner one — and we don't expose the incompatible path even as an
+opt-in. Concretely:
+
+- **No runtime `WebAssembly.instantiate()`** of arbitrary bytes.
+  Workers blocks it (`Wasm code generation disallowed by embedder`).
+  Only modules statically declared in `wrangler.toml`'s
+  `[wasm_modules]` execute, and Astroflare doesn't ship any.
+- **No `node:*` imports** in any package that loads inside a
+  Worker (`@astroflare/build`, `@astroflare/host-cloudflare`,
+  `@astroflare/runtime`, `@astroflare/preview`,
+  `@astroflare/compiler`). The Node-only build pipeline at
+  `@astroflare/build/node` is the lone exception, scoped to local
+  CLI / CI use.
+- **No native bindings, no Vite, no `esbuild` native.** `esbuild-wasm`
+  is the one bundler primitive. (`§10` of the founding spec.)
+- **No configuration option exposes a Worker-incompatible path**,
+  even gated behind a flag. Example: Shiki's WASM regex engine
+  (Oniguruma) is more accurate but can't run on a Worker, so the
+  compiler wires Shiki's pure-JS engine unconditionally; the
+  Oniguruma path is not user-selectable.
+
+Guardrail when adding a dependency: try to run it inside a Worker
+(`workerd` test pool, miniflare, or a real preview deploy) before
+shipping. If it needs `node:*` shimming, dynamic WASM, or a build-
+time hack only Node provides, find a different dependency or write
+the path yourself.
 **Status (post-Phase 26 / 26b / 26c finalization):** the public
 host API surface is fully aligned. Hosts write their own
 `SiteDurableObject` (Mode A) or deploy worker (Mode B); they

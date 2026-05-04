@@ -34,13 +34,7 @@
  *     `.css`, etc.) are not compiled or bundled — Phase 6/8 work.
  */
 
-import {
-	COMPILER_VERSION,
-	type ShikiEngine,
-	compileAstro,
-	compileMarkdown,
-	compileMdx,
-} from "@astroflare/compiler";
+import { COMPILER_VERSION, compileAstro, compileMarkdown, compileMdx } from "@astroflare/compiler";
 import {
 	type Cache,
 	type ImageMetadata,
@@ -75,18 +69,14 @@ export interface ModuleInfo {
 
 export interface MarkdownOptions {
 	/**
-	 * Shiki syntax highlighting for fenced code blocks.
-	 *   - `false` (default) — highlighting off; fenced blocks render
-	 *     untouched. Safe everywhere, including Cloudflare Workers
-	 *     (which blocks the runtime WASM Shiki's Oniguruma engine
-	 *     uses).
-	 *   - `"javascript"` (or `true`) — Shiki's pure-JS regex engine.
-	 *     Works on Workers; slower than Oniguruma on large grammars.
-	 *   - `"oniguruma"` — Shiki's WASM engine. Only viable in
-	 *     Node-class environments or hosts with static `[wasm_modules]`
-	 *     access.
+	 * Enable Shiki syntax highlighting on fenced code blocks. `false`
+	 * (default) leaves them as plain `<pre><code class="language-…">`
+	 * pairs; `true` highlights via Shiki's pure-JS regex engine. The
+	 * WASM-backed Oniguruma engine is intentionally not exposed —
+	 * Astroflare ships only Workers-runnable paths, and Cloudflare
+	 * Workers blocks runtime WASM instantiation.
 	 */
-	shiki?: boolean | ShikiEngine;
+	shiki?: boolean;
 }
 
 export interface ModuleGraphOptions {
