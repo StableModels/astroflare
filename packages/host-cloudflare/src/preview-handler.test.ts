@@ -110,23 +110,15 @@ interface Harness {
 	handler: ReturnType<typeof createPreviewHandler>;
 }
 
-function bootHarness(): Harness {
+interface BootOptions {
+	markdownShiki?: boolean | "javascript" | "oniguruma";
+}
+
+function bootHarness(opts: BootOptions = {}): Harness {
 	const site = new MemorySite();
-	const enc = new TextEncoder();
 	for (const [path, bytes] of Object.entries(getStarterFiles())) {
 		site.write(`/${path}`, bytes);
 	}
-	// Shiki (the default markdown syntax-highlighter) loads WebAssembly,
-	// which workerd's test pool can't compile. Replace the starter's
-	// `about.md` with a code-block-free variant so the markdown render
-	// path stays exercised without dragging Shiki in. The body is what
-	// the test asserts on.
-	site.write(
-		"/src/pages/about.md",
-		enc.encode(
-			"---\ntitle: About\n---\n\n# About this site\n\nThis page is rendered from a markdown file.\n",
-		),
-	);
 	const cache = new MemoryCache();
 	const sql = makeMockSql();
 	const coordinator = createCoordinator({ sql });
@@ -141,6 +133,7 @@ function bootHarness(): Harness {
 		coordinator,
 		executor,
 		cache,
+		...(opts.markdownShiki !== undefined ? { markdown: { shiki: opts.markdownShiki } } : {}),
 	});
 	return { site, cache, coordinator, handler };
 }
@@ -159,25 +152,101 @@ describe("createPreviewHandler: closure walking with the starter scaffold", () =
 		expect(html).toContain("built with astroflare");
 	});
 
-	it("renders the markdown about page", async () => {
+	it("renders the markdown about page (no Shiki — default-off keeps Workers happy)", async () => {
 		const { handler } = bootHarness();
 		const res = await handler.fetch(new Request("https://app/about"));
 		expect(res.status, await res.clone().text()).toBe(200);
 		const html = await res.text();
+		// Body of the markdown survives — both the heading and the prose
+		// after it (which would have been swallowed if the WASM-loading
+		// Shiki path were still default-on and crashing).
 		expect(html).toContain("About this site");
+		expect(html).toContain("rendered from a markdown file");
+		// Without Shiki the fenced TS block in the starter's about.md
+		// renders as a plain `<code class="language-ts">` pair — the
+		// content is still there even if it isn't syntax-highlighted.
+		expect(html).toContain("language-ts");
+		expect(html).toContain("hello");
 	});
 
-	it("renders the dynamic [slug] route through the layout", async () => {
+	it("highlights markdown code blocks when shiki: 'javascript' is enabled", async () => {
+		const { handler } = bootHarness({ markdownShiki: "javascript" });
+		const res = await handler.fetch(new Request("https://app/about"));
+		expect(res.status, await res.clone().text()).toBe(200);
+		const html = await res.text();
+		// Shiki's signature: `<pre class="shiki ...">` plus inline color
+		// styles. The JS regex engine works inside workerd because there
+		// are no runtime WASM instantiations.
+		expect(html).toMatch(/<pre[^>]*class="shiki/);
+		expect(html).toContain('style="color:');
+	});
+
+	it("renders the dynamic [slug] route with `getStaticPaths` props", async () => {
 		const { handler } = bootHarness();
 		const res = await handler.fetch(new Request("https://app/posts/hello-world"));
 		expect(res.status, await res.clone().text()).toBe(200);
 		const html = await res.text();
-		// page reads `Astro.params.slug`; the slug comes from the
-		// router's param extraction.
+		// `Astro.params.slug` is populated from the URL.
 		expect(html).toContain("hello-world");
-		// layout chrome is also present (proves we walked through the
-		// Base layout despite the route being dynamic).
+		// `Astro.props.title` flows from `getStaticPaths()` — the starter
+		// declares `{ slug: "hello-world", title: "Hello, World" }`.
+		expect(html).toContain("Hello, World");
+		// Layout chrome wins through the closure walk.
 		expect(html).toContain("built with astroflare");
+		// `Base.astro` mounts the title in `<title>`, so the
+		// `getStaticPaths` props are visible there too.
+		expect(html).toContain("<title>Hello, World</title>");
+	});
+
+	it("renders the second declared slug with its own props", async () => {
+		const { handler } = bootHarness();
+		const res = await handler.fetch(new Request("https://app/posts/second-post"));
+		expect(res.status, await res.clone().text()).toBe(200);
+		const html = await res.text();
+		expect(html).toContain("second-post");
+		expect(html).toContain("Second post");
+	});
+
+	it("404s an undeclared dynamic slug instead of rendering empty props", async () => {
+		const { handler } = bootHarness();
+		const res = await handler.fetch(new Request("https://app/posts/not-declared"));
+		expect(res.status).toBe(404);
+	});
+
+	it("picks up new slugs after the route file changes + coordinator.notifyChanged", async () => {
+		const { site, coordinator, handler } = bootHarness();
+
+		// Sanity: the new slug isn't declared yet.
+		expect((await handler.fetch(new Request("https://app/posts/third-post"))).status).toBe(404);
+
+		const slugPath = "/src/pages/posts/[slug].astro";
+		const enc = new TextEncoder();
+		const updated = `---
+import Base from "../../layouts/Base.astro";
+
+export async function getStaticPaths() {
+	return [
+		{ params: { slug: "hello-world" }, props: { title: "Hello, World" } },
+		{ params: { slug: "second-post" }, props: { title: "Second post" } },
+		{ params: { slug: "third-post" }, props: { title: "Third post" } },
+	];
+}
+
+const { slug } = Astro.params;
+const { title } = Astro.props;
+---
+<Base title={title}>
+	<h1>{title}</h1>
+	<p>slug: {slug}</p>
+</Base>`;
+		site.write(slugPath, enc.encode(updated));
+		await coordinator.notifyChanged({ kind: "write", path: slugPath, hash: "mutated-slug" });
+
+		const res = await handler.fetch(new Request("https://app/posts/third-post"));
+		expect(res.status, await res.clone().text()).toBe(200);
+		const html = await res.text();
+		expect(html).toContain("third-post");
+		expect(html).toContain("Third post");
 	});
 
 	it("picks up layout edits after coordinator.notifyChanged", async () => {

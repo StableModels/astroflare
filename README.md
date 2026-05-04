@@ -193,6 +193,44 @@ it but is no longer recommended.
 
 Working reference: [`tests/e2e/fixtures/preview-host-ref/`](./tests/e2e/fixtures/preview-host-ref/).
 
+### Markdown rendering on Workers
+
+Cloudflare Workers blocks runtime `WebAssembly.instantiate()` of
+arbitrary bytes — only modules statically declared in `wrangler.toml`'s
+`[wasm_modules]` execute. Shiki's default Oniguruma regex engine
+dynamically imports its WASM, which trips that restriction with a
+`Wasm code generation disallowed by embedder` error on the first
+markdown route.
+
+So Astroflare ships markdown / MDX with Shiki **off by default**.
+Fenced blocks render as plain `<pre><code class="language-…">…`,
+which is the same shape Astro emits when its highlighter is
+disabled — content survives, no per-token coloring.
+
+To opt in, pass the `markdown` option to `createPreviewHandler`
+(Mode A) or `buildSite` (Mode B workers-runtime):
+
+```ts
+createPreviewHandler({
+	site,
+	coordinator,
+	executor,
+	cache,
+	markdown: { shiki: "javascript" },  // pure-JS regex engine; works on Workers
+});
+```
+
+The `"javascript"` engine is Shiki's pure-JS implementation — slower
+than Oniguruma on large grammars but no WASM. Hosts running in
+Node-class environments (or hosts that have arranged static
+`[wasm_modules]` access for their worker) can use `"oniguruma"`
+instead. `shiki: true` is an alias for `"javascript"`; `shiki: false`
+(or omitting the option) is the default-off path.
+
+The same option flows through to `compileMarkdown` / `compileMdx`
+directly for hosts using the compilers outside the preview
+pipeline.
+
 ## Starting a new project
 
 `@astroflare/starter` ships the canonical minimum-viable scaffold —

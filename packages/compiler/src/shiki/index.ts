@@ -1,10 +1,11 @@
 /**
- * Shiki — the one opinionated default syntax highlighter (Phase 14).
+ * Shiki — opt-in syntax highlighter for fenced code blocks.
  *
  * Both `compileMarkdown` and `compileMdx` thread this rehype plugin into
- * their unified pipelines. The plugin walks the hast tree, finds every
- * `<pre><code class="language-…">` produced by remark-rehype, and replaces
- * the pair with Shiki's highlighted HTML embedded as a `raw` hast node.
+ * their unified pipelines when highlighting is enabled. The plugin walks
+ * the hast tree, finds every `<pre><code class="language-…">` produced
+ * by remark-rehype, and replaces the pair with Shiki's highlighted HTML
+ * embedded as a `raw` hast node.
  *
  * Why "raw" nodes:
  *   - For `.md`: rehype-stringify already runs with `allowDangerousHtml:
@@ -15,22 +16,36 @@
  *     `hast-util-raw` and emits proper JSX. Same result; different
  *     route.
  *
- * Single shared highlighter cached at module scope. First call pays the
- * grammar/theme load (~100 ms); subsequent calls are fast.
+ * One highlighter per regex engine, cached at module scope. First call
+ * for a given engine pays the grammar/theme load (~100 ms); subsequent
+ * calls are fast.
  *
- * Phase 14 carve-outs:
+ * ## Regex engines
+ *
+ * Shiki supports two engines:
+ *   - `"javascript"` (default) — pure JS, no WebAssembly. Works on
+ *     Cloudflare Workers and any other environment that disallows
+ *     runtime `WebAssembly.instantiate()` of arbitrary bytes.
+ *   - `"oniguruma"` — Shiki's original WASM engine. More accurate on
+ *     edge-case grammars, but `import('shiki/wasm')` hits Workers'
+ *     "Wasm code generation disallowed by embedder" restriction.
+ *     Hosts that bundle the WASM via static `[wasm_modules]` imports
+ *     can opt in.
+ *
+ * Carve-outs:
  *   - One default theme (`github-dark`) — no per-block theme override.
  *   - Default language allowlist focused on web work; uncommon languages
  *     fall back to `plaintext`. The set covers what `withastro/astro`'s
  *     example fixtures actually use.
- *   - No transformers, no diff/notation handling. The plan called this
- *     out as "the one opinionated default" — adding hooks before real
- *     demand would invite plugin churn.
+ *   - No transformers, no diff/notation handling.
  */
 
 import type { Element, Root } from "hast";
 import { type Highlighter, type ShikiTransformer, createHighlighter } from "shiki";
+import { createJavaScriptRegexEngine } from "shiki/engine/javascript";
 import type { Plugin } from "unified";
+
+export type ShikiEngine = "javascript" | "oniguruma";
 
 const DEFAULT_THEME = "github-dark";
 
@@ -56,21 +71,30 @@ const DEFAULT_LANGS = [
 	"plaintext",
 ] as const;
 
-let highlighterPromise: Promise<Highlighter> | null = null;
+const highlighterCache = new Map<ShikiEngine, Promise<Highlighter>>();
 
 /**
- * Get (or lazily create) the process-wide highlighter. Caching is
- * essential — `createHighlighter` loads grammars from disk and is the
- * dominant cost of compiling a code-heavy page.
+ * Get (or lazily create) the process-wide highlighter for the requested
+ * regex engine. Caching is essential — `createHighlighter` loads grammars
+ * and is the dominant cost of compiling a code-heavy page.
  */
-async function getHighlighter(): Promise<Highlighter> {
-	if (!highlighterPromise) {
-		highlighterPromise = createHighlighter({
-			themes: [DEFAULT_THEME],
-			langs: [...DEFAULT_LANGS],
-		});
+async function getHighlighter(engine: ShikiEngine): Promise<Highlighter> {
+	let promise = highlighterCache.get(engine);
+	if (!promise) {
+		promise =
+			engine === "javascript"
+				? createHighlighter({
+						themes: [DEFAULT_THEME],
+						langs: [...DEFAULT_LANGS],
+						engine: createJavaScriptRegexEngine(),
+					})
+				: createHighlighter({
+						themes: [DEFAULT_THEME],
+						langs: [...DEFAULT_LANGS],
+					});
+		highlighterCache.set(engine, promise);
 	}
-	return highlighterPromise;
+	return promise;
 }
 
 interface ShikiOptions {
@@ -78,6 +102,12 @@ interface ShikiOptions {
 	theme?: string;
 	/** Optional transformers (Shiki's per-line / per-token hooks). */
 	transformers?: ShikiTransformer[];
+	/**
+	 * Regex engine. Defaults to `"javascript"` because Cloudflare Workers
+	 * disallows runtime WASM instantiation, and the JS engine works
+	 * everywhere with no bundling tricks.
+	 */
+	engine?: ShikiEngine;
 }
 
 /**
@@ -91,11 +121,12 @@ interface ShikiOptions {
 export function rehypeShiki(options: ShikiOptions = {}): Plugin<[], Root> {
 	const theme = options.theme ?? DEFAULT_THEME;
 	const transformers = options.transformers ?? [];
+	const engine = options.engine ?? "javascript";
 	return () => async (tree) => {
 		const targets = collectCodeBlocks(tree);
 		if (targets.length === 0) return;
 
-		const highlighter = await getHighlighter();
+		const highlighter = await getHighlighter(engine);
 		const knownLangs = new Set<string>(highlighter.getLoadedLanguages().concat(["plaintext"]));
 
 		for (const t of targets) {

@@ -26,7 +26,7 @@ import remarkParse from "remark-parse";
 import remarkRehype from "remark-rehype";
 import { type Plugin, unified } from "unified";
 import { parse as parseYaml } from "yaml";
-import { rehypeShiki } from "../shiki/index.js";
+import { type ShikiEngine, rehypeShiki } from "../shiki/index.js";
 
 const RUNTIME_SYMBOLS = ["$component", "$render", "$rawHtml"] as const;
 
@@ -37,8 +37,21 @@ export interface MarkdownCompileOptions {
 	runtimeImport?: string;
 	/** Source filename for error messages. */
 	filename?: string;
-	/** Disable Shiki syntax highlighting (default: enabled — Phase 14). */
-	shiki?: false;
+	/**
+	 * Shiki syntax highlighting:
+	 *   - `false` (default) — no highlighting; fenced blocks render as
+	 *     plain `<pre><code class="language-…">…</code></pre>`. The safe
+	 *     default because Cloudflare Workers blocks runtime WASM
+	 *     instantiation, which Shiki's Oniguruma engine relies on.
+	 *   - `"javascript"` — enable highlighting via Shiki's pure-JS regex
+	 *     engine. Slower than Oniguruma on large grammars but works on
+	 *     Workers without any bundling tricks.
+	 *   - `"oniguruma"` — Shiki's WASM engine. Only safe in environments
+	 *     that allow runtime WASM (Node, Bun) or hosts that have arranged
+	 *     static `[wasm_modules]` access for the worker.
+	 *   - `true` — alias for `"javascript"`.
+	 */
+	shiki?: boolean | ShikiEngine;
 	/** Extra rehype plugins. Internal — reserved for future config plumbing. */
 	rehypePlugins?: Plugin[];
 }
@@ -88,8 +101,9 @@ export async function compileMarkdown(
 	//    survives stringification (the `raw` hast nodes flow through
 	//    rehype-stringify because `allowDangerousHtml` is on).
 	const processor = unified().use(remarkParse).use(remarkRehype, { allowDangerousHtml: true });
-	if (opts.shiki !== false) {
-		processor.use(rehypeShiki());
+	const shikiEngine = resolveShikiEngine(opts.shiki);
+	if (shikiEngine) {
+		processor.use(rehypeShiki({ engine: shikiEngine }));
 	}
 	for (const p of opts.rehypePlugins ?? []) {
 		processor.use(p);
@@ -117,4 +131,17 @@ export async function compileMarkdown(
 	].join("\n");
 
 	return { code, frontmatter, html };
+}
+
+/**
+ * Resolve the user-facing `shiki` option to either an engine name (enable
+ * highlighting) or `null` (skip the rehype plugin). Default — when `shiki`
+ * is `undefined` — is `null`: highlighting is opt-in because Shiki's
+ * default Oniguruma engine relies on runtime WASM instantiation, which
+ * Cloudflare Workers blocks.
+ */
+export function resolveShikiEngine(shiki: boolean | ShikiEngine | undefined): ShikiEngine | null {
+	if (shiki === undefined || shiki === false) return null;
+	if (shiki === true) return "javascript";
+	return shiki;
 }

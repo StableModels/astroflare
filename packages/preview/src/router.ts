@@ -35,6 +35,16 @@ export interface Route {
 export interface RouteMatch {
 	route: Route;
 	params: Record<string, string>;
+	/**
+	 * Per-route props supplied by `getStaticPaths()` for the matched
+	 * params, or `{}` for static routes / dynamic routes whose static
+	 * paths haven't been resolved yet. The preview handler honours this
+	 * by populating `Astro.props` from it. The router itself is pure
+	 * pattern-matching and never invokes `getStaticPaths`; that runs
+	 * later in the request pipeline (see
+	 * `createPreviewHandler.resolveStaticPaths`).
+	 */
+	props: Record<string, unknown>;
 }
 
 const PAGES_PREFIX = "/src/pages";
@@ -93,7 +103,7 @@ export class Router {
 				const name = route.paramNames[i] as string;
 				params[name] = decodeURIComponent(m[i + 1] as string);
 			}
-			return { route, params };
+			return { route, params, props: {} };
 		}
 		return null;
 	}

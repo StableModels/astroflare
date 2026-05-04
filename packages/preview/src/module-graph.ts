@@ -34,7 +34,13 @@
  *     `.css`, etc.) are not compiled or bundled — Phase 6/8 work.
  */
 
-import { COMPILER_VERSION, compileAstro, compileMarkdown, compileMdx } from "@astroflare/compiler";
+import {
+	COMPILER_VERSION,
+	type ShikiEngine,
+	compileAstro,
+	compileMarkdown,
+	compileMdx,
+} from "@astroflare/compiler";
 import {
 	type Cache,
 	type ImageMetadata,
@@ -67,6 +73,22 @@ export interface ModuleInfo {
 	resolvedImports: readonly string[];
 }
 
+export interface MarkdownOptions {
+	/**
+	 * Shiki syntax highlighting for fenced code blocks.
+	 *   - `false` (default) — highlighting off; fenced blocks render
+	 *     untouched. Safe everywhere, including Cloudflare Workers
+	 *     (which blocks the runtime WASM Shiki's Oniguruma engine
+	 *     uses).
+	 *   - `"javascript"` (or `true`) — Shiki's pure-JS regex engine.
+	 *     Works on Workers; slower than Oniguruma on large grammars.
+	 *   - `"oniguruma"` — Shiki's WASM engine. Only viable in
+	 *     Node-class environments or hosts with static `[wasm_modules]`
+	 *     access.
+	 */
+	shiki?: boolean | ShikiEngine;
+}
+
 export interface ModuleGraphOptions {
 	/** Module specifier the compiled output uses for the runtime ABI imports. */
 	runtimeImport: string;
@@ -76,6 +98,8 @@ export interface ModuleGraphOptions {
 	 * invalidates compiled artifacts.
 	 */
 	env?: Record<string, unknown>;
+	/** Markdown / MDX compilation options. */
+	markdown?: MarkdownOptions;
 }
 
 /**
@@ -135,6 +159,7 @@ export class ModuleGraph {
 			compiler: COMPILER_VERSION,
 			runtimeImport: this.#opts.runtimeImport,
 			env: this.#opts.env ?? null,
+			markdown: this.#opts.markdown ?? null,
 		});
 
 		let compiled: string;
@@ -169,10 +194,12 @@ export class ModuleGraph {
 		// from the host's `ImageService`. Runs before TS-strip so esbuild
 		// sees a normal const declaration rather than an unresolved import.
 		const preprocessed = await this.#substituteImageImports(path, source);
+		const shiki = this.#opts.markdown?.shiki;
 		if (path.endsWith(".mdx")) {
 			const result = await compileMdx(preprocessed, {
 				runtimeImport: this.#opts.runtimeImport,
 				filename: path,
+				shiki,
 			});
 			return result.code;
 		}
@@ -180,6 +207,7 @@ export class ModuleGraph {
 			const result = await compileMarkdown(preprocessed, {
 				runtimeImport: this.#opts.runtimeImport,
 				filename: path,
+				shiki,
 			});
 			return result.code;
 		}

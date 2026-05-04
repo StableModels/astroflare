@@ -47,7 +47,8 @@ import { compile as mdxCompile } from "@mdx-js/mdx";
 import rehypeRaw from "rehype-raw";
 import type { PluggableList, Plugin } from "unified";
 import { parse as parseYaml } from "yaml";
-import { rehypeShiki } from "../shiki/index.js";
+import { resolveShikiEngine } from "../markdown/index.js";
+import { type ShikiEngine, rehypeShiki } from "../shiki/index.js";
 
 const RUNTIME_SYMBOLS = ["$component", "$render", "$rawHtml"] as const;
 
@@ -72,8 +73,13 @@ export interface MdxCompileOptions {
 	runtimeImport?: string;
 	/** Source filename for error messages. */
 	filename?: string;
-	/** Disable Shiki syntax highlighting (default: enabled — Phase 14). */
-	shiki?: false;
+	/**
+	 * Shiki syntax highlighting. See `MarkdownCompileOptions.shiki` —
+	 * defaults to `false` (no highlighting) so MDX routes don't require
+	 * runtime WASM. Set to `"javascript"` (or `true`) on Workers; set to
+	 * `"oniguruma"` only in Node-class environments.
+	 */
+	shiki?: boolean | ShikiEngine;
 	/** Extra remark plugins. Internal — reserved for future config plumbing. */
 	remarkPlugins?: Plugin[];
 	/** Extra rehype plugins. Internal — reserved for future config plumbing. */
@@ -137,8 +143,9 @@ export async function compileMdx(
 		"mdxjsEsm",
 	];
 	const rehypePlugins: PluggableList = [];
-	if (opts.shiki !== false) {
-		rehypePlugins.push(rehypeShiki());
+	const shikiEngine = resolveShikiEngine(opts.shiki);
+	if (shikiEngine) {
+		rehypePlugins.push(rehypeShiki({ engine: shikiEngine }));
 		rehypePlugins.push([rehypeRaw, { passThrough: MDX_NODE_TYPES }]);
 	}
 	for (const p of opts.rehypePlugins ?? []) {
