@@ -39,6 +39,7 @@ export {
 	type BuildRenderTaskOptions,
 	type BuildClosureRenderTaskOptions,
 	type RenderTaskInput,
+	type StaticPathsResult,
 } from "./render-task.js";
 
 export const BUILD_VERSION = "0.0.0";

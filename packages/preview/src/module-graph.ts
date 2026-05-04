@@ -67,6 +67,18 @@ export interface ModuleInfo {
 	resolvedImports: readonly string[];
 }
 
+export interface MarkdownOptions {
+	/**
+	 * Enable Shiki syntax highlighting on fenced code blocks. `false`
+	 * (default) leaves them as plain `<pre><code class="language-…">`
+	 * pairs; `true` highlights via Shiki's pure-JS regex engine. The
+	 * WASM-backed Oniguruma engine is intentionally not exposed —
+	 * Astroflare ships only Workers-runnable paths, and Cloudflare
+	 * Workers blocks runtime WASM instantiation.
+	 */
+	shiki?: boolean;
+}
+
 export interface ModuleGraphOptions {
 	/** Module specifier the compiled output uses for the runtime ABI imports. */
 	runtimeImport: string;
@@ -76,6 +88,8 @@ export interface ModuleGraphOptions {
 	 * invalidates compiled artifacts.
 	 */
 	env?: Record<string, unknown>;
+	/** Markdown / MDX compilation options. */
+	markdown?: MarkdownOptions;
 }
 
 /**
@@ -135,6 +149,7 @@ export class ModuleGraph {
 			compiler: COMPILER_VERSION,
 			runtimeImport: this.#opts.runtimeImport,
 			env: this.#opts.env ?? null,
+			markdown: this.#opts.markdown ?? null,
 		});
 
 		let compiled: string;
@@ -169,10 +184,12 @@ export class ModuleGraph {
 		// from the host's `ImageService`. Runs before TS-strip so esbuild
 		// sees a normal const declaration rather than an unresolved import.
 		const preprocessed = await this.#substituteImageImports(path, source);
+		const shiki = this.#opts.markdown?.shiki;
 		if (path.endsWith(".mdx")) {
 			const result = await compileMdx(preprocessed, {
 				runtimeImport: this.#opts.runtimeImport,
 				filename: path,
+				shiki,
 			});
 			return result.code;
 		}
@@ -180,6 +197,7 @@ export class ModuleGraph {
 			const result = await compileMarkdown(preprocessed, {
 				runtimeImport: this.#opts.runtimeImport,
 				filename: path,
+				shiki,
 			});
 			return result.code;
 		}

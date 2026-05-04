@@ -38,14 +38,32 @@ export interface BuildRenderTaskOptions {
  * The JSON-shaped input the produced task expects. The shim
  * reconstitutes `Request` and `URL` instances from the JSON-friendly
  * fields, since the executor's RPC boundary doesn't preserve them.
+ *
+ * `kind: "paths"` short-circuits the shim to invoke the route's
+ * `getStaticPaths()` instead of rendering. Used by `createPreviewHandler`
+ * to enumerate dynamic-route params; the bundle returns `null` if the
+ * module doesn't export `getStaticPaths`.
  */
-export interface RenderTaskInput {
-	url: string;
-	method?: string;
+export type RenderTaskInput =
+	| {
+			kind?: "render" | undefined;
+			url: string;
+			method?: string;
+			props?: Record<string, unknown>;
+			params?: Record<string, string>;
+			site?: string;
+	  }
+	| { kind: "paths" };
+
+/**
+ * Result of `RenderTaskInput` with `kind: "paths"`. `null` means the
+ * route module doesn't export `getStaticPaths` (which is an error for
+ * dynamic routes — caught upstream).
+ */
+export type StaticPathsResult = ReadonlyArray<{
+	params: Record<string, string>;
 	props?: Record<string, unknown>;
-	params?: Record<string, string>;
-	site?: string;
-}
+}> | null;
 
 /**
  * Build a `TaskBundle` that, when executed, renders the supplied route
@@ -56,8 +74,13 @@ export function buildRenderTask(opts: BuildRenderTaskOptions): TaskBundle {
 	const runtimeImport = opts.runtimeImport ?? DEFAULT_RUNTIME_IMPORT;
 	const shim = [
 		'import component from "./route.js";',
+		'import * as __route from "./route.js";',
 		`import { render } from ${JSON.stringify(runtimeImport)};`,
 		"export default async (input) => {",
+		'  if (input && input.kind === "paths") {',
+		"    const fn = __route.getStaticPaths;",
+		"    return fn ? await fn() : null;",
+		"  }",
 		'  const request = new Request(input.url, { method: input.method ?? "GET" });',
 		"  const ctx = {",
 		"    props: input.props ?? {},",
@@ -104,6 +127,15 @@ export function buildClosureRenderTask(opts: BuildClosureRenderTaskOptions): Tas
 	const shim = [
 		'import bundle from "./bundle.js";',
 		"export default async (input) => {",
+		// Dynamic-route params enumeration: the inline-bundled wrapper
+		// already discriminates `ctx.kind === "paths"` (see
+		// `inlineBundle` in `@astroflare/preview/bundle`). Pass it
+		// through verbatim — the bundle returns the
+		// `getStaticPaths()` result, or `null` if the route doesn't
+		// export one.
+		'  if (input && input.kind === "paths") {',
+		'    return await bundle({ kind: "paths" });',
+		"  }",
 		'  const request = new Request(input.url, { method: input.method ?? "GET" });',
 		"  const ctx = {",
 		"    props: input.props ?? {},",

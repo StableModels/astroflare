@@ -72,8 +72,13 @@ export interface MdxCompileOptions {
 	runtimeImport?: string;
 	/** Source filename for error messages. */
 	filename?: string;
-	/** Disable Shiki syntax highlighting (default: enabled — Phase 14). */
-	shiki?: false;
+	/**
+	 * Enable Shiki syntax highlighting on fenced code blocks. See
+	 * `MarkdownCompileOptions.shiki` for the rationale — only the
+	 * pure-JS regex engine ships, since Astroflare's hard rule is
+	 * "Workers-runnable only" and the WASM engine isn't.
+	 */
+	shiki?: boolean;
 	/** Extra remark plugins. Internal — reserved for future config plumbing. */
 	remarkPlugins?: Plugin[];
 	/** Extra rehype plugins. Internal — reserved for future config plumbing. */
@@ -137,7 +142,7 @@ export async function compileMdx(
 		"mdxjsEsm",
 	];
 	const rehypePlugins: PluggableList = [];
-	if (opts.shiki !== false) {
+	if (opts.shiki) {
 		rehypePlugins.push(rehypeShiki());
 		rehypePlugins.push([rehypeRaw, { passThrough: MDX_NODE_TYPES }]);
 	}

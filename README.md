@@ -25,6 +25,35 @@ narrow capabilities and request-handler factories.
 The full architectural rationale is in
 [`CLAUDE.md`](./CLAUDE.md) under "Architectural North Star."
 
+### Hard rule: Workers-runnable only
+
+Every code path Astroflare exposes — compile, render, build,
+runtime — must be runnable on a Cloudflare Worker. No exceptions,
+no opt-ins for Node-class environments, no escape hatches that
+ship paths the Worker can't execute. Concretely:
+
+- **No runtime `WebAssembly.instantiate()`** of arbitrary bytes.
+  The Worker embedder blocks it. Only `.wasm` modules statically
+  declared in `wrangler.toml`'s `[wasm_modules]` may execute, and
+  Astroflare doesn't ship any (so consumers don't have to wire
+  them).
+- **No `node:*` imports** in the runtime / preview / build
+  pipelines that ship to a Worker. The Node-only build pipeline
+  in `@astroflare/build/node` is for local CLI use; everything
+  else (`@astroflare/build`, `@astroflare/host-cloudflare`,
+  `@astroflare/runtime`, …) imports nothing from `node:*`.
+- **No native bindings, no Vite, no esbuild-native.**
+  `esbuild-wasm` is the one allowed bundler primitive.
+- **No options that would let a host opt out of the rule.** When
+  there's a choice between an incompatible-but-richer dependency
+  and a compatible-but-thinner one, we ship only the compatible
+  one. Example: Shiki's WASM (Oniguruma) regex engine is more
+  accurate, but it can't run on a Worker, so Astroflare wires
+  Shiki's pure-JS regex engine unconditionally — the WASM path
+  isn't an option you can turn on, even via configuration.
+
+If you find a code path that violates this, it's a bug. File it.
+
 ## Two modes
 
 | Mode | Purpose | Lifecycle |
@@ -192,6 +221,32 @@ global-substitution pattern still works for hosts that prefer
 it but is no longer recommended.
 
 Working reference: [`tests/e2e/fixtures/preview-host-ref/`](./tests/e2e/fixtures/preview-host-ref/).
+
+### Markdown rendering
+
+Astroflare ships markdown / MDX with Shiki **off by default**. Fenced
+blocks render as plain `<pre><code class="language-…">…</code></pre>` —
+content survives, no per-token coloring.
+
+To opt in, pass the `markdown` option to `createPreviewHandler`
+(Mode A) or `buildSite` (Mode B workers-runtime):
+
+```ts
+createPreviewHandler({
+	site,
+	coordinator,
+	executor,
+	cache,
+	markdown: { shiki: true },  // highlight via Shiki's JS regex engine
+});
+```
+
+`shiki` is a `boolean`. When enabled we always wire Shiki's pure-JS
+regex engine (`createJavaScriptRegexEngine`); the WASM-backed
+Oniguruma engine is intentionally not exposed — it can't run on a
+Worker (see "Hard rule" below). The same option flows through to
+`compileMarkdown` / `compileMdx` for hosts using the compilers
+outside the preview pipeline.
 
 ## Starting a new project
 

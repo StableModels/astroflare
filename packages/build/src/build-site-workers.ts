@@ -35,7 +35,7 @@
 import type { Cache, Executor, Logger, RenderResult, Site, SnapshotEntry } from "@astroflare/core";
 import { sha256Hex } from "@astroflare/core";
 import { inlineBundle } from "@astroflare/preview/bundle";
-import { ModuleGraph } from "@astroflare/preview/module-graph";
+import { type MarkdownOptions, ModuleGraph } from "@astroflare/preview/module-graph";
 import {
 	DEFAULT_RUNTIME_IMPORT,
 	type RenderTaskInput,
@@ -67,6 +67,13 @@ export interface WorkersBuildSiteOptions {
 	 * `/`. Mirrors the Node version's `prefix` option.
 	 */
 	prefix?: string;
+	/**
+	 * Markdown / MDX compilation options. Same shape as
+	 * `CreatePreviewHandlerOptions.markdown` — defaults to no
+	 * highlighting; opt in with `{ shiki: true }` to enable Shiki's
+	 * pure-JS regex engine.
+	 */
+	markdown?: MarkdownOptions;
 	/** Optional structured logger; unused if absent. */
 	logger?: Logger;
 }
@@ -87,7 +94,10 @@ export async function* buildSite(opts: WorkersBuildSiteOptions): AsyncIterable<S
 	const cache = opts.cache ?? createNoopCache();
 	const moduleGraph = new ModuleGraph(
 		{ site: opts.site, cache, logger: opts.logger },
-		{ runtimeImport: DEFAULT_RUNTIME_IMPORT },
+		{
+			runtimeImport: DEFAULT_RUNTIME_IMPORT,
+			...(opts.markdown ? { markdown: opts.markdown } : {}),
+		},
 	);
 
 	const pagePatterns = [

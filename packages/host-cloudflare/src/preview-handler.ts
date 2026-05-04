@@ -24,7 +24,13 @@
  *      on to dodge vite-node's tmp-dir module resolution. Wrap with the
  *      JSON shim from `buildClosureRenderTask` so the executor's
  *      JSON-RPC boundary survives.
- *   5. **`executor.runCached(bundleKey, …)`** — same closure → same
+ *   5. **For dynamic routes**, run the route module's `getStaticPaths`
+ *      via `executor.runCached(bundleKey, …, { kind: "paths" })` and
+ *      filter the URL params against the declared set. Unknown slugs
+ *      404; matching entries supply the page's `Astro.props`. Result is
+ *      memoised per bundleKey, so a layout edit invalidates the paths
+ *      cache automatically.
+ *   6. **`executor.runCached(bundleKey, …)`** — same closure → same
  *      isolate. A layout edit changes every dependent route's
  *      `bundleKey`, which forces a fresh isolate; a no-op edit
  *      preserves the cache.
@@ -39,7 +45,11 @@
  * the coordinator inside their own routing.
  */
 
-import { type RenderTaskInput, buildClosureRenderTask } from "@astroflare/build";
+import {
+	type RenderTaskInput,
+	type StaticPathsResult,
+	buildClosureRenderTask,
+} from "@astroflare/build";
 import type {
 	Cache,
 	Executor,
@@ -50,7 +60,7 @@ import type {
 	Subscription,
 } from "@astroflare/core";
 import { inlineBundle } from "@astroflare/preview/bundle";
-import { ModuleGraph } from "@astroflare/preview/module-graph";
+import { type MarkdownOptions, ModuleGraph } from "@astroflare/preview/module-graph";
 import { Router } from "@astroflare/preview/router";
 import type { AstroflareCoordinator } from "./coordinator.js";
 
@@ -81,6 +91,14 @@ export interface CreatePreviewHandlerOptions {
 	 * hosts shouldn't normally need to override this.
 	 */
 	resolveRoute?: (pathname: string) => string | null;
+	/**
+	 * Markdown / MDX compilation options. Most commonly used to
+	 * enable Shiki syntax highlighting — pass `markdown: { shiki:
+	 * true }` to highlight fenced blocks via Shiki's pure-JS regex
+	 * engine (the only Workers-compatible path). Default off so the
+	 * happy path stays minimal.
+	 */
+	markdown?: MarkdownOptions;
 	/** Optional structured logger; unused if absent. */
 	logger?: Logger;
 }
@@ -93,6 +111,14 @@ interface RouteResolution {
 	sourcePath: string;
 	params: Record<string, string>;
 	kind: "astro" | "markdown" | "endpoint";
+	/**
+	 * `true` when the route file has dynamic `[param]` segments.
+	 * Dynamic routes go through the `getStaticPaths` filter before
+	 * rendering — a URL whose params don't match any declared entry
+	 * 404s; matching entries contribute their `props` to the render.
+	 * Static routes skip the filter and render with empty props.
+	 */
+	isDynamic: boolean;
 }
 
 export function createPreviewHandler(opts: CreatePreviewHandlerOptions): PreviewHandler {
@@ -104,8 +130,21 @@ export function createPreviewHandler(opts: CreatePreviewHandlerOptions): Preview
 			logger: opts.logger,
 			coordinator: opts.coordinator,
 		},
-		{ runtimeImport: RUNTIME_IMPORT },
+		{
+			runtimeImport: RUNTIME_IMPORT,
+			...(opts.markdown ? { markdown: opts.markdown } : {}),
+		},
 	);
+
+	/**
+	 * Per-bundle `getStaticPaths()` result cache. Keyed by bundleKey
+	 * (which captures every module in the closure's compile state), so
+	 * any source change that affects the route or its deps produces a
+	 * fresh entry. Stale entries from previous bundleKeys leak but the
+	 * map stays small under realistic project sizes; if it ever
+	 * matters, prune on HMR `update`/`prune` events.
+	 */
+	const staticPathsCache = new Map<string, Promise<StaticPathsResult>>();
 
 	// File-based router; only constructed if no `resolveRoute` override.
 	const router = opts.resolveRoute ? null : new Router();
@@ -143,7 +182,7 @@ export function createPreviewHandler(opts: CreatePreviewHandlerOptions): Preview
 			const sourcePath = opts.resolveRoute(pathname);
 			if (!sourcePath) return null;
 			const kind = sourcePath.endsWith(".md") || sourcePath.endsWith(".mdx") ? "markdown" : "astro";
-			return { sourcePath, params: {}, kind };
+			return { sourcePath, params: {}, kind, isDynamic: false };
 		}
 		await ensureRoutes();
 		const match = router?.match(pathname);
@@ -152,6 +191,7 @@ export function createPreviewHandler(opts: CreatePreviewHandlerOptions): Preview
 			sourcePath: match.route.filePath,
 			params: match.params,
 			kind: match.route.kind,
+			isDynamic: !match.route.isStatic,
 		};
 	}
 
@@ -168,18 +208,75 @@ export function createPreviewHandler(opts: CreatePreviewHandlerOptions): Preview
 			if (resolution.kind === "endpoint") {
 				return notFound();
 			}
-			return renderRoute(opts, moduleGraph, resolution, req);
+			return renderRoute(opts, moduleGraph, staticPathsCache, resolution, req);
 		},
 	};
+}
+
+/**
+ * Run the route's `getStaticPaths()` once per bundleKey, memoising the
+ * result. Returns `null` if the route module doesn't export
+ * `getStaticPaths` — which is an error for dynamic routes (the caller
+ * 404s) but expected for static ones (the caller never calls in).
+ */
+async function fetchStaticPaths(
+	executor: Executor,
+	cache: Map<string, Promise<StaticPathsResult>>,
+	bundleKey: string,
+	taskFactory: () => ReturnType<typeof buildClosureRenderTask>,
+): Promise<StaticPathsResult> {
+	const existing = cache.get(bundleKey);
+	if (existing) return existing;
+	const promise = executor
+		.runCached<StaticPathsResult>(bundleKey, taskFactory, { kind: "paths" })
+		.catch((err) => {
+			// On failure, drop the cache entry so the next request retries
+			// (e.g. user fixed a syntax error in the route file).
+			cache.delete(bundleKey);
+			throw err;
+		});
+	cache.set(bundleKey, promise);
+	return promise;
+}
+
+function findMatchingPath(
+	paths: StaticPathsResult,
+	urlParams: Record<string, string>,
+): { params: Record<string, string>; props: Record<string, unknown> } | null {
+	if (!paths) return null;
+	for (const entry of paths) {
+		if (paramsMatch(entry.params, urlParams)) {
+			return {
+				params: { ...entry.params },
+				props: entry.props ? { ...entry.props } : {},
+			};
+		}
+	}
+	return null;
+}
+
+function paramsMatch(declared: Record<string, string>, url: Record<string, string>): boolean {
+	const declaredKeys = Object.keys(declared);
+	if (declaredKeys.length !== Object.keys(url).length) return false;
+	for (const k of declaredKeys) {
+		// `getStaticPaths` may return non-string values (e.g. numeric IDs);
+		// stringify before comparing since URL-extracted params are always
+		// strings.
+		if (String(declared[k]) !== url[k]) return false;
+	}
+	return true;
 }
 
 async function renderRoute(
 	opts: CreatePreviewHandlerOptions,
 	moduleGraph: ModuleGraph,
+	staticPathsCache: Map<string, Promise<StaticPathsResult>>,
 	resolution: RouteResolution,
 	request: Request,
 ): Promise<Response> {
-	const { sourcePath, params } = resolution;
+	const { sourcePath, isDynamic } = resolution;
+	let { params } = resolution;
+	let props: Record<string, unknown> = {};
 
 	// Verify the file still exists. `Router.discover` runs on the
 	// previous tree, so a freshly-deleted page may still be in the
@@ -202,24 +299,62 @@ async function renderRoute(
 		});
 	}
 
+	// `taskFactory` is shared between the optional `getStaticPaths` call
+	// and the render call below — both go through the same bundleKey'd
+	// isolate, so the executor only ever spawns once per closure.
+	const taskFactory = () => {
+		const code = inlineBundle(closure.modules, RUNTIME_IMPORT);
+		return buildClosureRenderTask({ bundleCode: code });
+	};
+
+	// Dynamic routes: call `getStaticPaths()` to validate the URL params
+	// and pick up the entry's `props`. A URL whose params don't appear
+	// in the declared set 404s; matching entries set both `params`
+	// (canonicalised through `getStaticPaths`'s shape, in case a value
+	// was numeric) and `props`.
+	if (isDynamic) {
+		let staticPaths: StaticPathsResult;
+		try {
+			staticPaths = await fetchStaticPaths(
+				opts.executor,
+				staticPathsCache,
+				closure.bundleKey,
+				taskFactory,
+			);
+		} catch (err) {
+			opts.logger?.event("preview.static-paths.failed", {
+				path: sourcePath,
+				message: (err as Error).message,
+			});
+			return new Response(`getStaticPaths failed: ${(err as Error).message}`, {
+				status: 500,
+				headers: { "content-type": "text/plain;charset=utf-8" },
+			});
+		}
+		if (staticPaths === null) {
+			// Dynamic route file with no `getStaticPaths` export. SSR-style
+			// pass-through dynamic routing is a Phase-N follow-up; for now
+			// the URL doesn't resolve.
+			opts.logger?.event("preview.static-paths.missing", { path: sourcePath });
+			return notFound();
+		}
+		const matched = findMatchingPath(staticPaths, params);
+		if (!matched) return notFound();
+		params = matched.params;
+		props = matched.props;
+	}
+
 	const url = new URL(request.url);
 	const input: RenderTaskInput = {
 		url: url.href,
 		method: request.method,
-		props: {},
+		props,
 		params,
 	};
 
 	let result: RenderResult;
 	try {
-		result = await opts.executor.runCached<RenderResult>(
-			closure.bundleKey,
-			() => {
-				const code = inlineBundle(closure.modules, RUNTIME_IMPORT);
-				return buildClosureRenderTask({ bundleCode: code });
-			},
-			input,
-		);
+		result = await opts.executor.runCached<RenderResult>(closure.bundleKey, taskFactory, input);
 	} catch (err) {
 		opts.logger?.event("preview.render.failed", {
 			path: sourcePath,

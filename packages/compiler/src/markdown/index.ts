@@ -37,8 +37,20 @@ export interface MarkdownCompileOptions {
 	runtimeImport?: string;
 	/** Source filename for error messages. */
 	filename?: string;
-	/** Disable Shiki syntax highlighting (default: enabled — Phase 14). */
-	shiki?: false;
+	/**
+	 * Enable Shiki syntax highlighting on fenced code blocks.
+	 *
+	 *   - `false` (default) — no highlighting; fenced blocks render as
+	 *     plain `<pre><code class="language-…">…</code></pre>`.
+	 *   - `true` — highlight via Shiki's pure-JS regex engine.
+	 *
+	 * Astroflare only ships Workers-runnable paths, so the WASM-backed
+	 * Oniguruma engine is not exposed: Cloudflare Workers blocks runtime
+	 * `WebAssembly.instantiate()` of arbitrary bytes, which Shiki's
+	 * default regex engine relies on. The JS regex engine is the only
+	 * supported path.
+	 */
+	shiki?: boolean;
 	/** Extra rehype plugins. Internal — reserved for future config plumbing. */
 	rehypePlugins?: Plugin[];
 }
@@ -88,7 +100,7 @@ export async function compileMarkdown(
 	//    survives stringification (the `raw` hast nodes flow through
 	//    rehype-stringify because `allowDangerousHtml` is on).
 	const processor = unified().use(remarkParse).use(remarkRehype, { allowDangerousHtml: true });
-	if (opts.shiki !== false) {
+	if (opts.shiki) {
 		processor.use(rehypeShiki());
 	}
 	for (const p of opts.rehypePlugins ?? []) {
