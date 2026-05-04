@@ -27,5 +27,6 @@ export default [
 	"./packages/starter/vitest.config.ts",
 	"./tests/workerd/vitest.config.ts",
 	"./tests/e2e/vitest.config.ts",
+	"./tests/repo/vitest.config.ts",
 	"./examples/minimal-blog/vitest.config.ts",
 ];
