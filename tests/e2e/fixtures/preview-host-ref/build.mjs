@@ -56,21 +56,18 @@ const result = await build({
 	// `cloudflare:workers` + `node:*` resolve in workerd at runtime
 	// (`nodejs_compat` flag), so they're never bundled.
 	//
-	// `sucrase` is reachable only via `compileAstro` when
-	// `skipTsTransform: false`; the preview-handler always passes
-	// `skipTsTransform: true` (the spawned isolate strips TS itself
-	// off the runtime modules path), so the dynamic-import branch is
-	// dead at runtime. `style-to-js` is reachable only via
-	// `compileMdx`'s hast pipeline, which the preview handler doesn't
-	// invoke directly. Mark both external so esbuild's static
-	// analysis doesn't try to resolve them under `platform: "neutral"`,
-	// which ships an empty `mainFields` and can't see their CJS-only
-	// `main` declarations. Same shape as PR #10's `esbuild-wasm`
-	// treatment.
+	// Note: unlike deploy-host-ref, we **don't** externalise `sucrase`
+	// or `style-to-js` here. The preview handler statically imports
+	// `transformTS` from `@astroflare/compiler/ts` (used to strip TS
+	// off `.ts`/`.tsx`/`.jsx` workspace files before module
+	// substitution), and that import chain pulls sucrase into the
+	// bundle. Marking it external would let the build succeed but
+	// the upload would 400 with `No such module "sucrase". imported
+	// from "worker.js"` — Workers can't resolve module names that
+	// aren't built in. Same logic for `style-to-js` via the
+	// `compileMdx` hast pipeline.
 	external: [
 		"cloudflare:workers",
-		"sucrase",
-		"style-to-js",
 		"node:crypto",
 		"node:diagnostics_channel",
 		"node:buffer",
@@ -83,6 +80,11 @@ const result = await build({
 		"node:stream",
 	],
 	conditions: ["workerd"],
+	// `platform: "neutral"` defaults to an empty `mainFields`, which
+	// silently skips CJS-only deps (sucrase, style-to-js) that publish
+	// `main` but not `module`/`exports`. Mirror what wrangler uses for
+	// Worker bundles so the resolver can find both.
+	mainFields: ["workerd", "browser", "module", "main"],
 	metafile: true,
 	outfile: OUTFILE,
 	logLevel: "warning",

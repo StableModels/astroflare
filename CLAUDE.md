@@ -259,13 +259,6 @@ The e2e project self-skips when `CLOUDFLARE_ACCOUNT_ID` and
    name; teardown wipes `runtime.json` so a subsequent no-creds
    run self-skips cleanly.
 
-Known sharp edges as of this writing:
-- The R2 bucket creation step returns 409 if a previous run's
-  preview-host bucket survived teardown (`/r2/buckets → 409: bucket
-  already exists`). The setup catches it and continues with
-  `previewHostUrl = null`; preview-host specs self-skip. To clear,
-  delete the bucket via the Cloudflare dashboard or `af destroy`.
-
 Stack-isolation note: the suite intentionally provisions *two*
 stacks per run — `aflare-stack-e2e-<sha7>` (globalSetup, owns
 `basics` + `minimal`) and `aflare-stack-e2e-ceremony-<sha7>`
@@ -274,6 +267,14 @@ The split exists so ceremony's redeploys don't flip the shared
 `current` pointer underneath the basics/minimal specs while
 Vitest runs spec files in parallel. Both stacks tear down on
 suite exit; orphans get swept by the next run.
+
+Orphan-resource note: `createR2Bucket` is idempotent — a 409 with
+the `you own it` suffix (Cloudflare error code 10004) is swallowed
+and the existing bucket is adopted. Teardown drops local state
+unconditionally (so a partial-failed `deleteR2Bucket` doesn't leave
+the worker holding a stale state file), and the next provision
+re-adopts the bucket via the idempotent path. Same shape as
+`deleteWorker` treating 404 as success.
 
 ## Cloudflare CLI (`af`)
 
