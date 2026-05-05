@@ -1,0 +1,5 @@
+---
+const Card = (props) => (<article class="card"><h3>{props.title}</h3></article>);
+const items = [{ id: 1, title: "Foo" }, { id: 2, title: "Bar" }];
+---
+<div>{items.map((item) => (<Card title={item.title} />))}</div>

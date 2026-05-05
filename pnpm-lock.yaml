@@ -315,6 +315,12 @@ importers:
       '@astroflare/compiler':
         specifier: workspace:*
         version: link:../../packages/compiler
+      '@astroflare/runtime':
+        specifier: workspace:*
+        version: link:../../packages/runtime
+      '@astroflare/test-utils':
+        specifier: workspace:*
+        version: link:../../packages/test-utils
     devDependencies:
       vitest:
         specifier: ^2.1.8

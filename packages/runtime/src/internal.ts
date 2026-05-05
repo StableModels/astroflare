@@ -579,3 +579,11 @@ export async function renderToString(value: unknown): Promise<string> {
 // in `react-ssr.ts`; users typically pull it in via the top-level
 // `@astroflare/runtime` index.
 export { $ssrReactIsland } from "./react-ssr.js";
+
+// Classic-runtime JSX pragma + Fragment sentinel — what sucrase's
+// JSX transform emits calls against when lowering JSX inside `.astro`
+// expression bodies. Re-exported through `internal` so the compiler
+// emitter's `RUNTIME_SYMBOLS` list resolves them from a single source.
+// Implementation lives in `jsx-runtime.ts` next to the automatic-runtime
+// `jsx` / `jsxs` / `Fragment` MDX uses.
+export { $$jsx, $$Fragment } from "./jsx-runtime.js";

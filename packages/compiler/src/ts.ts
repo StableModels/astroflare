@@ -1,5 +1,6 @@
 /**
- * `transformTS(source) → string` — strip TypeScript syntax to plain ESM.
+ * `transformTS(source) → string` — strip TypeScript syntax to plain ESM
+ * and (when `loader: "tsx"`) lower JSX to `$$jsx` runtime calls.
  *
  * Backed by [sucrase](https://github.com/alangpierce/sucrase): a pure-JS
  * TS/JSX stripper. The previous implementation routed through
@@ -18,6 +19,19 @@
  * This is the same workers-incompatible-WASM pattern as the Shiki
  * Oniguruma engine: see CLAUDE.md's "Hard rule: every shipped path
  * must run on a Cloudflare Worker" — TS transform is on that list.
+ *
+ * **JSX pass.** When the caller passes `loader: "tsx"`, sucrase's
+ * `jsx` transform runs alongside `typescript`. It uses the *classic*
+ * runtime with custom pragmas (`$$jsx` / `$$Fragment`) that point at
+ * Astroflare-runtime primitives — `<li>{x}</li>` lowers to
+ * `$$jsx("li", null, x)`, `<>x</>` lowers to
+ * `$$jsx($$Fragment, null, "x")`. The runtime's `$$jsx` dispatches on
+ * the tag's type (string → HTML element, function → component) and
+ * returns a `RawHtml` marker that composes with `$render` template
+ * literals without double-escaping. `compileAstro` always passes
+ * `loader: "tsx"` so JSX-in-expression bodies (`{items.map((x) => (<li>{x}</li>))}`)
+ * survive end-to-end; plain-JS bodies are unaffected because the JSX
+ * transform is a no-op on input that contains no JSX tokens.
  *
  * `import.meta.env.<KEY>` substitution (formerly esbuild's `define`)
  * is handled here as a textual pre-pass before sucrase. The pattern
@@ -78,6 +92,18 @@ export function transformTSSync(source: string, opts: TransformTsOptions = {}): 
 			// at the top of every file that uses `??`. We only want
 			// **type stripping**, not ES downleveling.
 			disableESTransforms: true,
+			// Classic JSX runtime targeting Astroflare-runtime primitives.
+			// `<li>{x}</li>` → `$$jsx("li", null, x)`, `<>x</>` →
+			// `$$jsx($$Fragment, null, "x")`. The pragmas are the names
+			// the emitter unconditionally imports from
+			// `@astroflare/runtime/internal` (see `RUNTIME_SYMBOLS` in
+			// `astro/emitter.ts`). `production: true` strips the React
+			// dev-mode `__self` / `__source` props sucrase otherwise
+			// adds — they're noise for a non-React runtime.
+			jsxRuntime: "classic",
+			jsxPragma: "$$jsx",
+			jsxFragmentPragma: "$$Fragment",
+			production: true,
 			...(opts.filename ? { filePath: opts.filename } : {}),
 		});
 		return result.code;

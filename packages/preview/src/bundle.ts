@@ -30,7 +30,9 @@ import type { ModuleInfo } from "./module-graph.js";
  * Runtime symbols imported by the bundle. The compiler-emitted ABI uses the
  * `$`-prefixed names; `render` is the framework entrypoint the wrapper
  * invokes; `jsx` / `jsxs` / `Fragment` / `jsxDEV` are the JSX-runtime names
- * MDX-compiled modules reference (see `mdx/index.ts`'s import-rewrite step).
+ * MDX-compiled modules reference (see `mdx/index.ts`'s import-rewrite step);
+ * `$$jsx` / `$$Fragment` are the classic-runtime pragmas sucrase lowers
+ * JSX-in-expression bodies of `.astro` files against (see `ts.ts`).
  */
 const BUNDLE_RUNTIME_SYMBOLS = [
 	"$component",
@@ -46,6 +48,8 @@ const BUNDLE_RUNTIME_SYMBOLS = [
 	"$hydrationMarker",
 	"$island",
 	"$ssrReactIsland",
+	"$$jsx",
+	"$$Fragment",
 	"render",
 	"jsx",
 	"jsxs",

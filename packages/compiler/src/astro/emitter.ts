@@ -78,7 +78,14 @@ const DEFAULT_RUNTIME_IMPORT = "@astroflare/runtime/internal";
 
 /** All runtime symbols the emitter may reach for. Imported unconditionally so
  * the emitter doesn't have to track which ones a given file actually uses;
- * tree-shaking handles dead removal at deploy time. */
+ * tree-shaking handles dead removal at deploy time.
+ *
+ * `$$jsx` / `$$Fragment` are the classic-runtime JSX pragmas sucrase
+ * lowers JSX-in-expression bodies against (`<li>{x}</li>` →
+ * `$$jsx("li", null, x)`). Imported here so the lowered call sites
+ * resolve at module scope; the JSX transform itself runs downstream
+ * in `transformTS` (see `ts.ts`).
+ */
 const RUNTIME_SYMBOLS = [
 	"$component",
 	"$render",
@@ -93,6 +100,8 @@ const RUNTIME_SYMBOLS = [
 	"$hydrationMarker",
 	"$island",
 	"$ssrReactIsland",
+	"$$jsx",
+	"$$Fragment",
 ] as const;
 
 const CLIENT_DIRECTIVE_MODES = new Set([

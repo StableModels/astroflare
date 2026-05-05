@@ -63,8 +63,17 @@ export async function compileAstro(
 	let code = emitted.code;
 	try {
 		const { transformTS } = await import("../ts.js");
+		// `loader: "tsx"` enables sucrase's JSX transform alongside
+		// TS-strip. The emitter dumps body expression source verbatim
+		// into `$render`-template-literal interpolations; any JSX in
+		// those expressions (`{items.map((x) => (<li>{x}</li>))}`) is
+		// lowered to `$$jsx(...)` calls against the runtime ABI here,
+		// not in a separate emit pass. Plain-JS expressions pass
+		// through unchanged — sucrase's JSX transform is a no-op on
+		// input that contains no JSX tokens.
 		code = await transformTS(code, {
 			filename: opts.filename,
+			loader: "tsx",
 			define: defineFromEnv(opts.env),
 		});
 	} catch (err) {
