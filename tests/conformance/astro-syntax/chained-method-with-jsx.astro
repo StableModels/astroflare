@@ -1,0 +1,14 @@
+---
+const recipes = [
+  { featured: true, slug: "foo", title: "bar" },
+  { featured: false, slug: "baz", title: "qux" },
+];
+---
+<div>
+  {recipes
+    .filter((r) => r.featured)
+    .slice(0, 6)
+    .map((r) => (
+      <a href={`/${r.slug}/`}>{r.title}</a>
+    ))}
+</div>

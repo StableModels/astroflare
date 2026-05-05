@@ -114,6 +114,55 @@ describe("makeCloudflareClient", () => {
 		expect((init as RequestInit).body).toBe('{"name":"my-bucket"}');
 	});
 
+	// Adopt-existing semantics for orphan buckets. A previous run's
+	// `deleteR2Bucket` can partial-fail (transient API errors) while
+	// `destroyPreviewHost` / `destroyStack` still drop local state — the
+	// next provision can't see the orphan via `readPreviewState` and
+	// 409s on `createR2Bucket`. Treat that 409 as success when the
+	// "you own it" suffix confirms the bucket is ours.
+	it("createR2Bucket adopts a 409 when the bucket already belongs to us", async () => {
+		const fetchImpl = vi.fn().mockResolvedValue(
+			mockResponse(409, {
+				success: false,
+				errors: [
+					{
+						code: 10004,
+						message: "The bucket you tried to create already exists, and you own it.",
+					},
+				],
+			}),
+		);
+		const client = makeCloudflareClient({
+			accountId: "A",
+			apiToken: "T",
+			fetchImpl,
+			baseUrl: "https://stub",
+		});
+		await expect(client.createR2Bucket("orphaned")).resolves.toBeUndefined();
+	});
+
+	it("createR2Bucket re-throws a 409 when the bucket name is taken by another account", async () => {
+		const fetchImpl = vi.fn().mockResolvedValue(
+			mockResponse(409, {
+				success: false,
+				errors: [
+					{
+						code: 10004,
+						message:
+							"The bucket you tried to create already exists, and is owned by another account.",
+					},
+				],
+			}),
+		);
+		const client = makeCloudflareClient({
+			accountId: "A",
+			apiToken: "T",
+			fetchImpl,
+			baseUrl: "https://stub",
+		});
+		await expect(client.createR2Bucket("taken")).rejects.toThrow(/another account/);
+	});
+
 	it("listWorkers returns the unwrapped result array", async () => {
 		const fetchImpl = vi.fn().mockResolvedValue(
 			mockResponse(200, {

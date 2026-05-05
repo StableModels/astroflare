@@ -31,7 +31,16 @@ const result = await build({
 	platform: "neutral",
 	target: "es2022",
 	// `cloudflare:workers` resolves inside workerd at runtime; never bundle.
-	external: ["cloudflare:workers"],
+	// The other names below are reachable only through
+	// `@astroflare/build`'s dynamic `import("@astroflare/compiler")`
+	// chain — but deploy-host-ref serves prebuilt R2 snapshots and
+	// never compiles, so those branches are dead code at runtime.
+	// Marking them external stops esbuild's static analysis from
+	// trying to resolve them (sucrase / style-to-js publish CJS-only
+	// `main` fields that the `neutral` platform's empty `mainFields`
+	// can't see, which would otherwise fail the build). This mirrors
+	// how PR #10 treated `esbuild-wasm` before sucrase replaced it.
+	external: ["cloudflare:workers", "sucrase", "style-to-js"],
 	conditions: ["workerd"],
 	metafile: true,
 	outfile: OUTFILE,

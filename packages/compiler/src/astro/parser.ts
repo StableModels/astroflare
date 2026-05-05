@@ -1,15 +1,30 @@
 /**
- * Hand-rolled `.astro` parser.
+ * `.astro` parser.
  *
- * Single-pass recursive descent. No tokenization phase — for HTML-with-JSX-
- * expressions the boundaries between text, tags, and `{...}` are unambiguous
- * once we're tracking string/comment/bracket state inside expressions, so a
- * separate token stream is just a layer of indirection.
+ * Single-pass recursive descent over HTML / components / fragments / slots /
+ * directives, with **expression bodies (`{...}`) delegated to a real JS+JSX
+ * parser** (`acorn` + `acorn-jsx`). The previous implementation walked
+ * expression bytes by hand with brace counting, string/comment skipping, and
+ * a regex-vs-division heuristic; every "Astro accepts this but Astroflare
+ * doesn't" report (PRs #6, #8, #11, …) was another adjacency rule patched
+ * onto that scanner.
+ *
+ * The hand-rolled HTML walk is fine — HTML-with-`{expr}` boundaries are
+ * unambiguous at the character level. The lossy part was *inside* the
+ * braces, where JSX is a real grammar. Acorn-jsx is the same parser ESLint
+ * / Prettier / Webpack use; pure JS, no `node:*`, no WASM — so it complies
+ * with the "every shipped path must run on a Cloudflare Worker" hard rule
+ * (CLAUDE.md, §"Hard rule"). For any input the upstream `@astrojs/compiler`
+ * accepts, brace-finding is now grammar-correct: multi-line attribute
+ * strings, embedded `{expr}` in JSX attributes, self-closing tags, fragments,
+ * regex literals with `}`, ternaries returning JSX, chained method calls
+ * returning JSX, all parse without per-shape adjacency rules.
  *
  * Produces an `AstroDocument` plus a list of recoverable `AstroError`s. The
  * parser tries hard to keep going past errors so editor tooling can still
- * highlight the rest of the file; severe structural errors (unclosed comment,
- * unclosed expression brace, runaway string) throw immediately.
+ * highlight the rest of the file; severe structural errors (unclosed
+ * comment, unclosed expression brace, syntactically invalid expression)
+ * throw immediately and the outer `parseChildren` recovery point catches.
  *
  * Tier 0 grammar (per §3 of the brief):
  *   - frontmatter: `---\n ... \n---` at top of file (whitespace-tolerant)
@@ -17,11 +32,13 @@
  *   - components (uppercase or dotted tag name)
  *   - `<slot>`, `<slot name="...">`, fallback content
  *   - `<Fragment>` / `<>...<>` (empty-tag fragment shorthand)
- *   - `{expr}` interpolation in content and attribute positions
+ *   - `{expr}` interpolation in content and attribute positions (delegated)
  *   - `<!-- comment -->`, `<!DOCTYPE html>`
  *   - `set:html`, `is:raw`, `define:vars`, `client:*` directives (parsed; emit
  *     decisions belong to the emitter)
  */
+import { Parser as AcornParser } from "acorn";
+import jsx from "acorn-jsx";
 import type {
 	AstroAttribute,
 	AstroComponent,
@@ -42,6 +59,32 @@ import type {
 	StaticAttribute,
 } from "./ast.js";
 import { locate } from "./ast.js";
+
+/**
+ * Acorn extended with JSX support. The combination is what ESLint /
+ * Babel-eslint-parser / Prettier wrap to read JSX-bearing JS, so the
+ * grammar coverage is the standard JSX surface (elements, fragments,
+ * spread/expression attributes, namespaced + member-access tag names,
+ * member-expression children, expression containers).
+ */
+const JsxParser = AcornParser.extend(jsx({ allowNamespacedObjects: true, allowNamespaces: true }));
+
+/**
+ * Options applied to every `parseExpressionAt` call.
+ *
+ *   - `ecmaVersion: "latest"` matches the runtime targets (V8 / workerd).
+ *   - `sourceType: "module"` allows top-level `await` (Astro frontmatter
+ *     and body expressions both run inside an async context at emit time;
+ *     module mode is the closest match).
+ *   - `allowAwaitOutsideFunction: true` is a belt-and-braces guard for
+ *     acorn versions that key top-level await off `sourceType` only when
+ *     compiling whole programs (not single-expression `parseExpressionAt`).
+ */
+const ACORN_OPTS = {
+	ecmaVersion: "latest",
+	sourceType: "module",
+	allowAwaitOutsideFunction: true,
+} as const;
 
 /**
  * Elements whose content is true raw text — CSS braces, JS strings, and
@@ -76,13 +119,14 @@ const CC_GT = 0x3e;
 const CC_LBRACE = 0x7b;
 const CC_RBRACE = 0x7d;
 const CC_SLASH = 0x2f;
+const CC_STAR = 0x2a;
 const CC_QUOTE_DBL = 0x22;
 const CC_QUOTE_SGL = 0x27;
 const CC_BACKTICK = 0x60;
 const CC_BACKSLASH = 0x5c;
 const CC_EQ = 0x3d;
+const CC_DOT = 0x2e;
 const CC_DOLLAR = 0x24;
-const CC_STAR = 0x2a;
 const CC_LPAREN = 0x28;
 const CC_RPAREN = 0x29;
 const CC_LBRACK = 0x5b;
@@ -96,15 +140,20 @@ function isWhitespace(c: number): boolean {
 	return c === 0x20 || c === 0x09 || c === CC_NL || c === CC_CR || c === 0x0c;
 }
 
+/**
+ * JS identifier-ish: ASCII letters, digits, `_`, `$`. Used by the
+ * fallback scanner's regex-vs-division heuristic (see
+ * `findMatchingBraceFallback`); insufficient for full Unicode
+ * identifiers, but acorn handles the common case anyway and the
+ * fallback only needs to cover TS-bearing expressions where the
+ * preceding-token shapes are conventional.
+ */
 function isWordChar(c: number): boolean {
-	// JS identifier-ish: ASCII letters, digits, `_`, `$`. Good-enough for
-	// the regex-vs-division heuristic; full Unicode identifiers don't show
-	// up in the contexts that bite.
 	return (
-		(c >= 0x30 && c <= 0x39) || // 0-9
-		(c >= 0x41 && c <= 0x5a) || // A-Z
-		(c >= 0x61 && c <= 0x7a) || // a-z
-		c === 0x5f /* _ */ ||
+		(c >= 0x30 && c <= 0x39) ||
+		(c >= 0x41 && c <= 0x5a) ||
+		(c >= 0x61 && c <= 0x7a) ||
+		c === 0x5f ||
 		c === CC_DOLLAR
 	);
 }
@@ -318,14 +367,100 @@ class Parser {
 
 	/**
 	 * Given `pos` at an opening `{`, return the offset of the matching `}`.
-	 * Walks through string literals (single, double, backtick with `${}`),
-	 * line and block comments, and balanced parens / brackets / braces.
 	 *
-	 * Known limitation: regex literals are not disambiguated from division.
-	 * In practice expressions in attributes/content don't usually contain
-	 * standalone regex literals; if one bites, we add a heuristic.
+	 * Delegates the JS+JSX grammar work to acorn-jsx: parse one expression
+	 * starting after the `{`, then expect `}` at (or after a run of
+	 * whitespace + comments past) the expression's end. This replaces a
+	 * stack of hand-rolled scanner heuristics (string skipping, template
+	 * literal interpolation, line/block comments, regex-vs-division
+	 * disambiguation, JSX-tag adjacency rules) with a real grammar — every
+	 * case the upstream Astro compiler accepts inside `{...}` parses
+	 * identically here.
+	 *
+	 * Special cases bypass acorn:
+	 *   - `{}` (or `{   }`): empty body. Acorn rejects empty input; we
+	 *     return the closing `}` directly.
+	 *   - `{...x}` (spread): `...x` isn't a valid expression on its own
+	 *     (the spread token only appears in calls, arrays, and objects).
+	 *     Skip the three dots, then parse the operand expression.
+	 *
+	 * On parse error: report at the opening `{`, classify "Unclosed
+	 * expression" (acorn ran past EOF) vs "Invalid expression" (acorn
+	 * stopped on an unexpected token mid-source), and bubble through the
+	 * `parseChildren` recovery point as before.
 	 */
 	private findMatchingBrace(openPos: number): number {
+		let exprStart = this.skipWsAndCommentsFrom(openPos + 1);
+
+		// Empty `{}` (or `{   /* ws */ }`) — no expression to parse.
+		if (this.source.charCodeAt(exprStart) === CC_RBRACE) {
+			return exprStart;
+		}
+
+		// Astro spread attribute `{...obj}`. The `...` token isn't a valid
+		// expression prefix on its own, so step over it and let acorn parse
+		// just the operand. Match either `{...obj}` (no leading whitespace,
+		// the existing convention) or `{ ...obj }` (whitespace-tolerant).
+		if (
+			this.source.charCodeAt(exprStart) === CC_DOT &&
+			this.source.charCodeAt(exprStart + 1) === CC_DOT &&
+			this.source.charCodeAt(exprStart + 2) === CC_DOT
+		) {
+			exprStart += 3;
+		}
+
+		let exprEnd: number;
+		try {
+			const node = JsxParser.parseExpressionAt(this.source, exprStart, ACORN_OPTS) as {
+				end: number;
+			};
+			exprEnd = node.end;
+		} catch (acornErr) {
+			// TS-tolerance fallback. Astro accepts TypeScript syntax in body
+			// expressions (`{(raw as string).toUpperCase()}`, generics, type
+			// assertions, `satisfies`); acorn does not. When acorn rejects,
+			// fall back to the legacy character-level brace counter — same
+			// shape the parser used pre-acorn, with all its known
+			// limitations (no JSX awareness, regex-vs-division heuristic).
+			// Per the user's recommended phasing this fallback is
+			// transitional: once a TS-aware parser exists or upstream
+			// fixtures are conformance-locked, the heuristic methods get
+			// deleted along with the fallback path. Only the JSX-bearing
+			// cases the LLM reliably emits go through the acorn path; TS
+			// expression bodies inherit the previous behavior unchanged.
+			const fallback = this.findMatchingBraceFallback(openPos);
+			if (fallback !== -1) return fallback;
+			this.error(openPos, this.classifyExpressionError(acornErr));
+			throw new ParseFailure();
+		}
+
+		// Acorn stopped at the last expression token; the matching `}` may
+		// have trailing whitespace + line/block comments before it.
+		const closeAt = this.skipWsAndCommentsFrom(exprEnd);
+		if (this.source.charCodeAt(closeAt) !== CC_RBRACE) {
+			this.error(openPos, "Unclosed expression (missing `}`)");
+			throw new ParseFailure();
+		}
+		return closeAt;
+	}
+
+	/**
+	 * Pre-acorn brace counter, kept as a fallback for TypeScript-bearing
+	 * body expressions (`{(x as string).y()}`) that the JS+JSX grammar
+	 * rejects. Returns the offset of the matching `}`, or `-1` when the
+	 * scanner ran off the end of the source — the caller treats that as
+	 * "report the original acorn error" rather than overwriting it with a
+	 * fallback diagnostic.
+	 *
+	 * Walks through string literals (single, double, backtick with
+	 * `${}`), line and block comments, and balanced parens / brackets /
+	 * braces. Regex literals are disambiguated by the
+	 * `isRegexStartFallback` heuristic (PR #11). This is the same scanner
+	 * the parser used historically; it is *not* called when acorn
+	 * succeeds, so JSX fixtures the LLM emits go through the grammar-
+	 * correct path.
+	 */
+	private findMatchingBraceFallback(openPos: number): number {
 		let depth = 0;
 		let i = openPos;
 		while (i < this.source.length) {
@@ -351,19 +486,27 @@ class Parser {
 					i++;
 					break;
 				case CC_QUOTE_DBL:
-				case CC_QUOTE_SGL:
-					i = this.skipString(i, c);
+				case CC_QUOTE_SGL: {
+					const r = this.skipStringFallback(i, c);
+					if (r === -1) return -1;
+					i = r;
 					break;
-				case CC_BACKTICK:
-					i = this.skipTemplateString(i);
+				}
+				case CC_BACKTICK: {
+					const r = this.skipTemplateStringFallback(i);
+					if (r === -1) return -1;
+					i = r;
 					break;
+				}
 				case CC_SLASH:
 					if (this.source.charCodeAt(i + 1) === CC_SLASH) {
-						i = this.skipLineComment(i);
+						i = this.skipLineCommentFallback(i);
 					} else if (this.source.charCodeAt(i + 1) === CC_STAR) {
-						i = this.skipBlockComment(i);
-					} else if (this.isRegexStart(i, openPos)) {
-						i = this.skipRegexLiteral(i);
+						const r = this.skipBlockCommentFallback(i);
+						if (r === -1) return -1;
+						i = r;
+					} else if (this.isRegexStartFallback(i, openPos)) {
+						i = this.skipRegexLiteralFallback(i);
 					} else {
 						i++;
 					}
@@ -372,11 +515,10 @@ class Parser {
 					i++;
 			}
 		}
-		this.error(openPos, "Unclosed expression (missing `}`)");
-		throw new ParseFailure();
+		return -1;
 	}
 
-	private skipString(start: number, quote: number): number {
+	private skipStringFallback(start: number, quote: number): number {
 		let i = start + 1;
 		while (i < this.source.length) {
 			const c = this.source.charCodeAt(i);
@@ -385,17 +527,13 @@ class Parser {
 				continue;
 			}
 			if (c === quote) return i + 1;
-			if (c === CC_NL && quote !== CC_BACKTICK) {
-				this.error(start, "Unterminated string literal");
-				throw new ParseFailure();
-			}
+			if (c === CC_NL && quote !== CC_BACKTICK) return -1;
 			i++;
 		}
-		this.error(start, "Unterminated string literal");
-		throw new ParseFailure();
+		return -1;
 	}
 
-	private skipTemplateString(start: number): number {
+	private skipTemplateStringFallback(start: number): number {
 		let i = start + 1;
 		while (i < this.source.length) {
 			const c = this.source.charCodeAt(i);
@@ -405,61 +543,39 @@ class Parser {
 			}
 			if (c === CC_BACKTICK) return i + 1;
 			if (c === CC_DOLLAR && this.source.charCodeAt(i + 1) === CC_LBRACE) {
-				const end = this.findMatchingBrace(i + 1);
+				const end = this.findMatchingBraceFallback(i + 1);
+				if (end === -1) return -1;
 				i = end + 1;
 				continue;
 			}
 			i++;
 		}
-		this.error(start, "Unterminated template literal");
-		throw new ParseFailure();
+		return -1;
 	}
 
-	private skipLineComment(start: number): number {
+	private skipLineCommentFallback(start: number): number {
 		let i = start + 2;
 		while (i < this.source.length) {
-			const c = this.source.charCodeAt(i);
-			if (c === CC_NL) return i + 1;
+			if (this.source.charCodeAt(i) === CC_NL) return i + 1;
 			i++;
 		}
 		return i;
 	}
 
-	/**
-	 * Heuristic: is the `/` at `pos` the start of a regex literal (not
-	 * division)? We're inside an expression that began at `openPos`. JS
-	 * uses the preceding context to decide:
-	 *   - At the very start of the expression, `/` is regex.
-	 *   - After an operator or punctuation that can't be followed by a
-	 *     value (`=`, `(`, `,`, `[`, `{`, `;`, `:`, `!`, `&`, `|`, `?`,
-	 *     `+`, `-`, `*`, `%`, `<`, `>`, `^`, `~`, `/`, `\n`), `/` is regex.
-	 *   - After certain keywords (`return`, `typeof`, `in`, `of`,
-	 *     `instanceof`, `new`, `delete`, `throw`, `void`, `yield`, `await`),
-	 *     `/` is regex.
-	 *   - Otherwise it's division.
-	 *
-	 * Imperfect (a real JS tokenizer is required for full correctness),
-	 * but covers the cases that bite in practice — most notably regexes
-	 * containing `}` like `/[}]/` which would otherwise truncate the
-	 * expression body.
-	 *
-	 * JSX-tag short-circuit: a `/` immediately following `<` or `>` (no
-	 * whitespace between) is never a regex in `.astro` expression
-	 * context — it's the slash of a JSX closing tag (`</li>`) or the
-	 * leading slash of JSX text between sibling tags (`<Tag>/lit/`).
-	 * Without this, the canonical Astro list-rendering idiom
-	 * `{items.map((x) => (<li>{x}</li>))}` blows up: the `<` before
-	 * `/li>` matches the `<` arm of the switch below, the regex skipper
-	 * runs off the end of the source, and the brace counter never
-	 * unwinds. The walk-back loop intentionally requires no whitespace
-	 * between the tag-boundary char and the `/` so that JS like
-	 * `a < /pattern/.test(s)` (with the conventional space) still parses
-	 * as comparison + regex.
-	 */
-	private isRegexStart(slashPos: number, openPos: number): boolean {
+	private skipBlockCommentFallback(start: number): number {
+		let i = start + 2;
+		while (i < this.source.length - 1) {
+			if (this.source.charCodeAt(i) === CC_STAR && this.source.charCodeAt(i + 1) === CC_SLASH) {
+				return i + 2;
+			}
+			i++;
+		}
+		return -1;
+	}
+
+	private isRegexStartFallback(slashPos: number, openPos: number): boolean {
 		const adj = this.source.charCodeAt(slashPos - 1);
 		if (adj === CC_LT || adj === CC_GT) return false;
-		// Walk back skipping whitespace and comments.
 		let j = slashPos - 1;
 		while (j > openPos) {
 			const c = this.source.charCodeAt(j);
@@ -469,51 +585,41 @@ class Parser {
 			}
 			break;
 		}
-		// At the very start of the expression body? Definitely regex.
 		if (j <= openPos) return true;
 		const c = this.source.charCodeAt(j);
-		// Punctuation / operator chars that allow a regex to follow.
 		switch (c) {
 			case CC_EQ:
 			case CC_LPAREN:
 			case CC_LBRACK:
 			case CC_LBRACE:
-			case 0x2c: // ,
-			case 0x3b: // ;
-			case 0x3a: // :
+			case 0x2c:
+			case 0x3b:
+			case 0x3a:
 			case CC_BANG:
-			case 0x26: // &
-			case 0x7c: // |
-			case 0x3f: // ?
-			case 0x2b: // +
+			case 0x26:
+			case 0x7c:
+			case 0x3f:
+			case 0x2b:
 			case CC_DASH:
 			case CC_STAR:
-			case 0x25: // %
-			case 0x3c: // <
-			case 0x3e: // >
-			case 0x5e: // ^
-			case 0x7e: // ~
+			case 0x25:
+			case 0x3c:
+			case 0x3e:
+			case 0x5e:
+			case 0x7e:
 			case CC_SLASH:
 				return true;
 		}
-		// Identifier/keyword preceding? Walk back to the start.
 		if (isWordChar(c)) {
 			let k = j;
 			while (k > openPos && isWordChar(this.source.charCodeAt(k - 1))) k--;
 			const word = this.source.slice(k, j + 1);
 			return REGEX_PRECEDING_KEYWORDS.has(word);
 		}
-		// Anything else (`)`, `]`, digit, identifier handled above): division.
 		return false;
 	}
 
-	/**
-	 * Walk forward from a `/` known to start a regex literal. Handles
-	 * `[...]` character classes (where `/` is a literal slash) and
-	 * backslash escapes. Returns the index just past the closing `/` and
-	 * any flag chars (`gimsuy`).
-	 */
-	private skipRegexLiteral(start: number): number {
+	private skipRegexLiteralFallback(start: number): number {
 		let i = start + 1;
 		let inCharClass = false;
 		while (i < this.source.length) {
@@ -522,47 +628,95 @@ class Parser {
 				i += 2;
 				continue;
 			}
-			if (c === 0x5b /* [ */) {
+			if (c === 0x5b) {
 				inCharClass = true;
 				i++;
 				continue;
 			}
-			if (c === 0x5d /* ] */ && inCharClass) {
+			if (c === 0x5d && inCharClass) {
 				inCharClass = false;
 				i++;
 				continue;
 			}
 			if (c === CC_SLASH && !inCharClass) {
 				i++;
-				// Consume flag chars.
 				while (i < this.source.length) {
 					const f = this.source.charCodeAt(i);
-					if (f >= 0x61 /* a */ && f <= 0x7a /* z */) {
+					if (f >= 0x61 && f <= 0x7a) {
 						i++;
 					} else break;
 				}
 				return i;
 			}
-			if (c === CC_NL) {
-				// Unterminated regex — bail out, treat the `/` as division
-				// from the original position (caller picked up only one char).
-				return start + 1;
-			}
+			if (c === CC_NL) return start + 1;
 			i++;
 		}
 		return start + 1;
 	}
 
-	private skipBlockComment(start: number): number {
-		let i = start + 2;
-		while (i < this.source.length - 1) {
-			if (this.source.charCodeAt(i) === CC_STAR && this.source.charCodeAt(i + 1) === CC_SLASH) {
-				return i + 2;
+	/**
+	 * Advance past runs of whitespace and `//` / `/* *\/` comments, used
+	 * to find the `}` that closes an Astro expression after acorn finished
+	 * with the inner JS+JSX. Acorn skips leading whitespace + comments
+	 * itself, but trailing trivia between the last expression token and
+	 * the closing brace is on us.
+	 */
+	private skipWsAndCommentsFrom(start: number): number {
+		let i = start;
+		while (i < this.source.length) {
+			const c = this.source.charCodeAt(i);
+			if (isWhitespace(c)) {
+				i++;
+				continue;
 			}
-			i++;
+			if (c === CC_SLASH) {
+				const next = this.source.charCodeAt(i + 1);
+				if (next === CC_SLASH) {
+					i += 2;
+					while (i < this.source.length && this.source.charCodeAt(i) !== CC_NL) i++;
+					continue;
+				}
+				if (next === CC_STAR) {
+					i += 2;
+					while (i + 1 < this.source.length) {
+						if (
+							this.source.charCodeAt(i) === CC_STAR &&
+							this.source.charCodeAt(i + 1) === CC_SLASH
+						) {
+							i += 2;
+							break;
+						}
+						i++;
+					}
+					continue;
+				}
+			}
+			break;
 		}
-		this.error(start, "Unterminated block comment");
-		throw new ParseFailure();
+		return i;
+	}
+
+	/**
+	 * Translate an acorn `SyntaxError` into the message shape the existing
+	 * tests + tooling expect. Errors whose offset hits end-of-source are
+	 * "Unclosed expression" (parity with the previous scanner's wording);
+	 * mid-source errors surface acorn's specific message under "Invalid
+	 * expression" so authors get a useful diagnostic instead of a generic
+	 * "missing `}`".
+	 */
+	private classifyExpressionError(err: unknown): string {
+		const message = err instanceof Error ? err.message : String(err);
+		const pos =
+			err &&
+			typeof err === "object" &&
+			"pos" in err &&
+			typeof (err as { pos: unknown }).pos === "number"
+				? (err as { pos: number }).pos
+				: -1;
+		if (pos < 0 || pos >= this.source.length) {
+			return "Unclosed expression (missing `}`)";
+		}
+		return `Invalid expression: ${message}`;
 	}
 
 	// -------------------------------------------------------------------------

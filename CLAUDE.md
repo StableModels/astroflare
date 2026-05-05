@@ -66,7 +66,9 @@ opt-in. Concretely:
   CLI / CI use.
 - **No native bindings, no Vite, no `esbuild` native.** Bundling and
   syntax stripping use pure-JS primitives only — `sucrase` for the
-  compiler's TS-strip pass (`packages/compiler/src/ts.ts`), Shiki's
+  compiler's TS-strip pass (`packages/compiler/src/ts.ts`),
+  `acorn` + `acorn-jsx` for the `.astro` body-expression brace
+  finder (`packages/compiler/src/astro/parser.ts`), Shiki's
   pure-JS regex engine for highlighting. (`§10` of the founding spec.)
   `esbuild-wasm` is forbidden in any Worker-loaded path: it calls
   `WebAssembly.instantiate()` at `initialize()` time, which Workers
@@ -199,6 +201,7 @@ Run everything: `pnpm test`. Run one project: `pnpm vitest run --project <name>`
 | A — Node | `packages/*/src/*.test.ts` | node | Pure framework logic. Fast (~ms). |
 | B — workerd | `tests/workerd/` + per-package `host-cloudflare` | workerd via `@cloudflare/vitest-pool-workers` | Code that depends on the workerd runtime. |
 | D — e2e | `tests/e2e/` | node | **Real Cloudflare.** Provisions both modes per run via the `af` CLI library, deploys fixtures, asserts live behaviour. Skips when `CLOUDFLARE_*` env vars are absent. |
+| Conformance | `tests/conformance/astro-syntax/` | node | Real-world Astro source patterns the framework must accept. Each `.astro` fixture parses without errors. Runs at parser level today; emit-side render-equivalence is the next layer (see test-suite preamble). |
 
 The Phase-15-era Layer C (Miniflare integration project) was retired
 with Phase 26b's hard-cut — those tests exercised the deleted DOs.
@@ -213,6 +216,65 @@ the Mode A reference host (preview-host-ref) and uploads
 lands at `tests/e2e/.state/<sha7>/runtime.json` for spec workers to
 read. Teardown destroys both. Stale state from a credential-less
 run is wiped automatically.
+
+### Running the e2e suite locally
+
+The e2e project self-skips when `CLOUDFLARE_ACCOUNT_ID` and
+`CLOUDFLARE_API_TOKEN` aren't reachable. To make it actually run:
+
+1. **Build the host bundles first.** The provisioner needs both
+   `tests/e2e/fixtures/deploy-host-ref/dist/worker.bundle.js` and
+   `tests/e2e/fixtures/preview-host-ref/dist/worker.bundle.js` to
+   exist; `pnpm test` does *not* trigger the build automatically.
+   Run `node tests/e2e/fixtures/deploy-host-ref/build.mjs` and
+   `node tests/e2e/fixtures/preview-host-ref/build.mjs` once after
+   each pull / dep change.
+
+2. **Provide the credentials.** `tests/e2e/global-setup.ts` reads
+   `process.env.CLOUDFLARE_ACCOUNT_ID` and
+   `process.env.CLOUDFLARE_API_TOKEN`. Three sources, in
+   precedence order:
+
+   - **Already in the environment** — wins. CI workflows set both
+     via the job `env:` block; shells with explicit `export`s win
+     over everything else.
+   - **`.envrc` (account ID)** — exports the project's hard-coded
+     non-secret account. Loaded by direnv on `cd` for interactive
+     shells, and replicated by globalSetup for non-direnv callers.
+   - **`.dev.vars` (API token)** — git-crypt-encrypted on disk;
+     plaintext after `./scripts/setup` runs `git-crypt unlock`.
+     Loaded by direnv via `dotenv_if_exists`, and replicated by
+     globalSetup the same way. The replicated loader skips the
+     file silently if it's still encrypted (NUL-byte sniff).
+
+   Net effect: any environment that has `git-crypt unlock`-ed
+   `.dev.vars` available will pick the creds up automatically,
+   even without direnv. CI just sets the secret directly via the
+   workflow `env:` block; `.dev.vars` isn't checked out there.
+
+3. **Skip the no-creds short-circuit.** With both vars present
+   `pnpm vitest run --project e2e` provisions a stack, deploys the
+   fixtures, runs the specs, and tears down. Re-running back-to-
+   back is fine — provisioning is idempotent on the per-sha worker
+   name; teardown wipes `runtime.json` so a subsequent no-creds
+   run self-skips cleanly.
+
+Stack-isolation note: the suite intentionally provisions *two*
+stacks per run — `aflare-stack-e2e-<sha7>` (globalSetup, owns
+`basics` + `minimal`) and `aflare-stack-e2e-ceremony-<sha7>`
+(deploy-ceremony.spec.ts owns it via `beforeAll`/`afterAll`).
+The split exists so ceremony's redeploys don't flip the shared
+`current` pointer underneath the basics/minimal specs while
+Vitest runs spec files in parallel. Both stacks tear down on
+suite exit; orphans get swept by the next run.
+
+Orphan-resource note: `createR2Bucket` is idempotent — a 409 with
+the `you own it` suffix (Cloudflare error code 10004) is swallowed
+and the existing bucket is adopted. Teardown drops local state
+unconditionally (so a partial-failed `deleteR2Bucket` doesn't leave
+the worker holding a stale state file), and the next provision
+re-adopts the bucket via the idempotent path. Same shape as
+`deleteWorker` treating 404 as success.
 
 ## Cloudflare CLI (`af`)
 

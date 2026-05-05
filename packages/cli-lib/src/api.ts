@@ -192,10 +192,27 @@ export function makeCloudflareClient(opts: CloudflareClientOptions): CloudflareC
 			await callApi("DELETE", `/workers/scripts/${encodeURIComponent(name)}`);
 		},
 		async createR2Bucket(name) {
-			await callApi("POST", "/r2/buckets", {
-				headers: { "content-type": "application/json" },
-				body: JSON.stringify({ name }),
-			});
+			try {
+				await callApi("POST", "/r2/buckets", {
+					headers: { "content-type": "application/json" },
+					body: JSON.stringify({ name }),
+				});
+			} catch (err) {
+				// Adopt-existing semantics. A previous run's `deleteR2Bucket`
+				// can partial-fail (transient API errors, R2-side propagation,
+				// etc.) while `destroyPreviewHost` / `destroyStack` still drop
+				// the local state file unconditionally. The next provision
+				// then has no `readPreviewState` / `readStackState` short-
+				// circuit, falls into `createR2Bucket`, and 409s on the orphan.
+				// Treat that 409 as success — the bucket is ours, empty
+				// (R2-side or by the next `emptyR2Bucket` call), and reusable.
+				// Cloudflare returns the same 10004 code when the name is
+				// taken by *another* account; the "you own it" suffix
+				// distinguishes ours from theirs.
+				const message = err instanceof Error ? err.message : String(err);
+				if (message.includes("→ 409") && message.includes("you own it")) return;
+				throw err;
+			}
 		},
 		async deleteR2Bucket(name) {
 			await callApi("DELETE", `/r2/buckets/${encodeURIComponent(name)}`);
