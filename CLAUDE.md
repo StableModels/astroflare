@@ -217,6 +217,60 @@ lands at `tests/e2e/.state/<sha7>/runtime.json` for spec workers to
 read. Teardown destroys both. Stale state from a credential-less
 run is wiped automatically.
 
+### Running the e2e suite locally
+
+The e2e project self-skips when `CLOUDFLARE_ACCOUNT_ID` and
+`CLOUDFLARE_API_TOKEN` aren't reachable. To make it actually run:
+
+1. **Build the host bundles first.** The provisioner needs both
+   `tests/e2e/fixtures/deploy-host-ref/dist/worker.bundle.js` and
+   `tests/e2e/fixtures/preview-host-ref/dist/worker.bundle.js` to
+   exist; `pnpm test` does *not* trigger the build automatically.
+   Run `node tests/e2e/fixtures/deploy-host-ref/build.mjs` and
+   `node tests/e2e/fixtures/preview-host-ref/build.mjs` once after
+   each pull / dep change.
+
+2. **Provide the credentials.** `tests/e2e/global-setup.ts` reads
+   `process.env.CLOUDFLARE_ACCOUNT_ID` and
+   `process.env.CLOUDFLARE_API_TOKEN`. Three sources, in
+   precedence order:
+
+   - **Already in the environment** — wins. CI workflows set both
+     via the job `env:` block; shells with explicit `export`s win
+     over everything else.
+   - **`.envrc` (account ID)** — exports the project's hard-coded
+     non-secret account. Loaded by direnv on `cd` for interactive
+     shells, and replicated by globalSetup for non-direnv callers.
+   - **`.dev.vars` (API token)** — git-crypt-encrypted on disk;
+     plaintext after `./scripts/setup` runs `git-crypt unlock`.
+     Loaded by direnv via `dotenv_if_exists`, and replicated by
+     globalSetup the same way. The replicated loader skips the
+     file silently if it's still encrypted (NUL-byte sniff).
+
+   Net effect: any environment that has `git-crypt unlock`-ed
+   `.dev.vars` available will pick the creds up automatically,
+   even without direnv. CI just sets the secret directly via the
+   workflow `env:` block; `.dev.vars` isn't checked out there.
+
+3. **Skip the no-creds short-circuit.** With both vars present
+   `pnpm vitest run --project e2e` provisions a stack, deploys the
+   fixtures, runs the specs, and tears down. Re-running back-to-
+   back is fine — provisioning is idempotent on the per-sha worker
+   name; teardown wipes `runtime.json` so a subsequent no-creds
+   run self-skips cleanly.
+
+Known sharp edges as of this writing:
+- The R2 bucket creation step returns 409 if a previous run's
+  preview-host bucket survived teardown (`/r2/buckets → 409: bucket
+  already exists`). The setup catches it and continues with
+  `previewHostUrl = null`; preview-host specs self-skip. To clear,
+  delete the bucket via the Cloudflare dashboard or `af destroy`.
+- 3 specs (`basics/about`, `minimal/`, parity 404) fail with HTTP
+  404 against the snapshot handler. The fixture deploys cleanly
+  (the deploy log lists the routes in the snapshot manifest), but
+  the routing-key lookup misses sub-routes — only the index works.
+  Pre-existing on `main`, unrelated to the parser pipeline.
+
 ## Cloudflare CLI (`af`)
 
 The `@astroflare/cli` package exposes `af`. The same library
