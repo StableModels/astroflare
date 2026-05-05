@@ -265,11 +265,30 @@ Known sharp edges as of this writing:
   already exists`). The setup catches it and continues with
   `previewHostUrl = null`; preview-host specs self-skip. To clear,
   delete the bucket via the Cloudflare dashboard or `af destroy`.
-- 3 specs (`basics/about`, `minimal/`, parity 404) fail with HTTP
-  404 against the snapshot handler. The fixture deploys cleanly
-  (the deploy log lists the routes in the snapshot manifest), but
-  the routing-key lookup misses sub-routes — only the index works.
-  Pre-existing on `main`, unrelated to the parser pipeline.
+- 2 specs (`basics/about`, `minimal/`) fail with HTTP 404 against
+  the deployed stack. **This is a test-isolation race, not a
+  routing bug.** The snapshot handler reads `current` → fetches
+  `<current>/_meta.json` → looks up the route key. globalSetup
+  deploys `[basics, minimal]` and flips `current` to that snapshot.
+  Vitest then runs spec files in parallel, and
+  `tests/e2e/deploy-ceremony.spec.ts` issues *additional* deploys
+  (`phase23-det`, `phase23-flip` fixtures) against the same shared
+  stack — each call flips `current` to a new snapshot whose
+  `_meta.json` only contains the ceremony's own route keys, not
+  `basics/about` or `minimal`. By the time the basics/minimal
+  specs fetch, `current` is pointing at a snapshot that doesn't
+  have those entries, and the handler returns 404 from the
+  `meta.entries[key]` miss in `R2Snapshots.read`. The
+  `/basics/` index test passes because it races at the right
+  moment (or because `R2Snapshots.read("/basics/")` keys to
+  `basics`, which one of the ceremony's deploys may incidentally
+  write). Reproducible by running e2e against
+  `tests/e2e/_diag-routing` (single-deploy, no concurrent
+  ceremony) — all routes return 200. Fix would be either
+  serialising the e2e project (`pool-options.threads.singleThread`)
+  or having deploy-ceremony restore the globalSetup snapshot in
+  an `afterAll`. Out of scope for the parser-swap PR; flagged here
+  so a future investigator doesn't chase it as a snapshot-key bug.
 
 ## Cloudflare CLI (`af`)
 
