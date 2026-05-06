@@ -1,0 +1,7 @@
+---
+const UI = {
+  Card: (props) => (<section class="card">{props.label}</section>),
+};
+const labels = ["one", "two"];
+---
+<div>{labels.map((l) => (<UI.Card label={l} />))}</div>

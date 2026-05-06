@@ -159,6 +159,19 @@ build cleanly into deployable bundles.
   via `ModuleGraph` (re-exported from `@astroflare/preview/module-graph`)
   so layouts, shared components, and `.md`/`.mdx` deps end up in the
   bundle alongside the route.
+- **JSX-in-expression bodies render end-to-end.** PR #12 swapped the
+  `.astro` body brace-finder to a real JS+JSX grammar (acorn +
+  acorn-jsx); PR #13 wired sucrase's classic JSX transform with the
+  custom pragmas `$$jsx` / `$$Fragment` so `<li>{x}</li>` inside an
+  expression body lowers to `$$jsx("li", null, x)` against runtime
+  primitives in `packages/runtime/src/jsx-runtime.ts`. The compile
+  pipeline is grammar-correct against the upstream Astro syntax for
+  the entire `tests/conformance/astro-syntax/` corpus — the suite
+  asserts render-level structural equivalence (parses ✕ executes ✕
+  produces the expected HTML), not parser-only acceptance. Same path
+  runs through the workers-runtime `buildSite` → `R2Snapshots` →
+  `createSnapshotHandler` round-trip (`tests/workerd/build-site-workerd.test.ts`),
+  so preview and publish stay in lock-step.
 
 Phase plans:
 [`docs/phases/phase-26-host-driven-preview.md`](docs/phases/phase-26-host-driven-preview.md),

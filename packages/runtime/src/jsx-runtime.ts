@@ -1,18 +1,26 @@
 /**
- * JSX runtime — what `@mdx-js/mdx`-compiled `.mdx` files import against.
+ * JSX runtime — two callers:
  *
- * MDX (with `jsxImportSource: "@astroflare/runtime"`) compiles to:
+ *   1. `@mdx-js/mdx`-compiled `.mdx` files (automatic-runtime shape).
+ *      MDX (with `jsxImportSource: "@astroflare/runtime"`) compiles to:
  *
- *   import {jsx as _jsx, jsxs as _jsxs, Fragment as _Fragment}
- *     from "@astroflare/runtime/jsx-runtime";
+ *        import {jsx as _jsx, jsxs as _jsxs, Fragment as _Fragment}
+ *          from "@astroflare/runtime/jsx-runtime";
  *
- *   function _createMdxContent(props) {
- *     return _jsxs("h1", { children: "Hello" });
- *   }
+ *        function _createMdxContent(props) {
+ *          return _jsxs("h1", { children: "Hello" });
+ *        }
  *
- * This module supplies `jsx`, `jsxs`, `jsxDEV`, and `Fragment` such that the
- * MDX tree resolves to a `RawHtml` marker — the same shape the rest of the
- * runtime uses. The result composes naturally with `$render` and other
+ *   2. JSX-in-expression bodies inside `.astro` files (classic-runtime
+ *      shape via the `$$jsx` / `$$Fragment` pragmas). The compiler
+ *      emitter dumps the user's expression source verbatim into a
+ *      `$render` template literal interpolation; sucrase's classic JSX
+ *      transform then lowers any JSX tags it encounters to
+ *      `$$jsx(type, props, ...children)` calls. See
+ *      `packages/compiler/src/ts.ts`.
+ *
+ * Both shapes resolve to a `RawHtml` marker — the same shape the rest of
+ * the runtime uses — so they compose naturally with `$render` and other
  * RawHtml-aware sites without double-escaping.
  *
  * Three element-type cases:
@@ -129,6 +137,40 @@ export const jsxs = jsx;
 
 /** `jsxDEV` — the dev-mode variant MDX emits when `development: true`. */
 export const jsxDEV = jsx;
+
+/**
+ * Classic-runtime JSX entrypoint, used by the `.astro` compile pipeline
+ * for JSX inside expression bodies. Sucrase's classic transform lowers
+ * `<li>{x}</li>` to `$$jsx("li", null, x)` — children are varargs, not
+ * a `props.children` field. We reshape to the automatic-runtime call
+ * convention and delegate to `jsx`, which already handles every element
+ * type case (Fragment, string, function component, Astroflare component,
+ * RawHtml, primitives, arrays, promises).
+ *
+ * Children handling parallels React.createElement: zero children → no
+ * `children` prop, one child → scalar `children`, many → array. The
+ * downstream `renderChildren` flatten handles both shapes.
+ */
+export async function $$jsx(
+	type: typeof Fragment | string | ComponentLike,
+	props: Record<string, unknown> | null | undefined,
+	...children: unknown[]
+): Promise<RawHtml> {
+	const merged: JsxProps = { ...(props ?? {}) };
+	if (children.length === 1) {
+		merged.children = children[0];
+	} else if (children.length > 1) {
+		merged.children = children;
+	}
+	return jsx(type, merged);
+}
+
+/**
+ * Fragment sentinel for the classic JSX runtime. Same identity as the
+ * automatic-runtime `Fragment`, so the renderer doesn't need to track
+ * which transform produced a given tree.
+ */
+export const $$Fragment = Fragment;
 
 async function invokeAstroComponent(type: AstroComponentLike, props: JsxProps): Promise<RawHtml> {
 	const { children, ...rest } = props;

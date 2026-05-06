@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { $component, $render, isRawHtml } from "./internal.js";
-import { Fragment, jsx, jsxs } from "./jsx-runtime.js";
+import { $$Fragment, $$jsx, Fragment, jsx, jsxs } from "./jsx-runtime.js";
 
 async function html(value: unknown): Promise<string> {
 	if (value == null) return "";
@@ -113,5 +113,62 @@ describe("jsx-runtime: components", () => {
 			children: await jsx("p", { children: "inside" }),
 		});
 		expect(await html(out)).toBe("<section><p>inside</p></section>");
+	});
+});
+
+describe("jsx-runtime: classic-runtime $$jsx pragma", () => {
+	it("renders an HTML element with no children", async () => {
+		expect(await html(await $$jsx("br", null))).toBe("<br />");
+	});
+
+	it("renders an HTML element with a single child", async () => {
+		expect(await html(await $$jsx("p", null, "x"))).toBe("<p>x</p>");
+	});
+
+	it("renders an HTML element with many children (varargs)", async () => {
+		const out = await $$jsx("ul", null, await $$jsx("li", null, "a"), await $$jsx("li", null, "b"));
+		expect(await html(out)).toBe("<ul><li>a</li><li>b</li></ul>");
+	});
+
+	it("preserves attributes literally (no className remap)", async () => {
+		const out = await $$jsx("a", { href: "/x", class: "link" }, "go");
+		expect(await html(out)).toBe('<a href="/x" class="link">go</a>');
+	});
+
+	it("forwards spread props", async () => {
+		const out = await $$jsx("div", { ...{ class: "card", id: "x" } }, "hi");
+		expect(await html(out)).toBe('<div class="card" id="x">hi</div>');
+	});
+
+	it("$$Fragment passes children through", async () => {
+		const out = await $$jsx($$Fragment, null, await $$jsx("strong", null, "x"), ": ok");
+		expect(await html(out)).toBe("<strong>x</strong>: ok");
+	});
+
+	it("$$Fragment is identical to the automatic-runtime Fragment", () => {
+		expect($$Fragment).toBe(Fragment);
+	});
+
+	it("invokes a member-expression component", async () => {
+		const UI = {
+			Card: (props: { children?: unknown }) =>
+				jsx("section", { class: "card", children: props.children }),
+		};
+		const out = await $$jsx(UI.Card, null, "hello");
+		expect(await html(out)).toBe('<section class="card">hello</section>');
+	});
+
+	it("invokes an Astroflare $component", async () => {
+		const Card = $component<{ Astro: unknown; title: string }>(
+			async (props) => $render`<article>${props.title}</article>`,
+		);
+		const out = await $$jsx(Card, { title: "Foo" });
+		expect(await html(out)).toBe("<article>Foo</article>");
+	});
+
+	it("conditional rendering works (false branch yields nothing)", async () => {
+		const open = false;
+		const out = open ? await $$jsx("details", null, "open") : null;
+		expect(out).toBeNull();
 	});
 });

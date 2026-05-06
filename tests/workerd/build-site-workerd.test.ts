@@ -220,4 +220,48 @@ describe("buildSite + R2 round-trip inside workerd", () => {
 		const html = await indexRes.text();
 		expect(html).toContain("hello workerd");
 	});
+
+	// Lock-step parity with `createPreviewHandler` (Mode A) for the JSX-
+	// in-expression body shape that PR #12's parser swap and PR #13's
+	// emitter wiring (sucrase JSX transform → `$$jsx` runtime pragma)
+	// added end-to-end. If the workers-runtime `buildSite` path doesn't
+	// also lower `<li>{x}</li>` correctly, preview and publish render
+	// different HTML — exactly the regression Ember reported in round 8.
+	it("renders JSX-in-expression bodies in the workers-runtime buildSite path", async () => {
+		const ws = makeMockWorkspace();
+		const sql = makeMockSql();
+		const site = new WorkspaceSite({ workspace: ws, sql });
+
+		await site.write(
+			"/src/pages/index.astro",
+			enc('---\nconst items = ["a", "b"];\n---\n<ul>{items.map((x) => (<li>{x}</li>))}</ul>'),
+		);
+
+		const executor = createWorkerdExecutor({
+			loader: env.LOADER,
+			compatibilityDate: "2025-09-01",
+			compatibilityFlags: ["nodejs_compat"],
+			runtime: RUNTIME_MODULES,
+		});
+
+		const sink = new R2SnapshotSink({ bucket: env.SITE_R2, prefix: "sites/jsx/" });
+		const hash = "jsx-snap-1";
+		const produced: SnapshotEntry[] = [];
+		for await (const entry of buildSite({ site, executor })) {
+			produced.push(entry);
+			await sink.put(hash, entry);
+		}
+		await sink.commit(hash);
+
+		expect(produced).toHaveLength(1);
+
+		const snapshots = new R2Snapshots({ bucket: env.SITE_R2, prefix: "sites/jsx/" });
+		const handler = createSnapshotHandler({ snapshots });
+		const res = await handler.fetch(new Request("https://x/"));
+		expect(res.status).toBe(200);
+		const html = await res.text();
+		expect(html).toContain("<ul>");
+		expect(html).toContain("<li>a</li>");
+		expect(html).toContain("<li>b</li>");
+	});
 });
