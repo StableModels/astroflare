@@ -526,4 +526,78 @@ if (mode === "boom") throw new Error("render boom");
 			/compile failed for \/src\/pages\/bad-compile\.astro/,
 		);
 	});
+
+	it("populates structured location/snippet/codeFrame/diagnostics for compile failures", async () => {
+		const site = new MemorySite();
+		// Same fixture as the Node version's structured-error test — see
+		// build-site.test.ts for the line/column/offset reasoning.
+		site.write("/src/pages/bad-compile.astro", enc(["---", "---", "<h1>{unclosed"].join("\n")));
+		const executor = makeExecutor();
+		const out = await collect(buildSite({ site, executor, continueOnError: true }));
+		const errors = out.filter(
+			(x): x is SnapshotError => "kind" in x && (x as SnapshotError).kind === "error",
+		);
+		expect(errors).toHaveLength(1);
+		const err = errors[0];
+		if (!err) throw new Error("expected one error");
+
+		expect(err.location).toBeDefined();
+		expect(err.location?.line).toBe(3);
+		expect(err.location?.column).toBe(5);
+		expect(err.location?.offset).toBe(12);
+
+		expect(err.detail).toMatch(/Unclosed expression/i);
+		expect(err.codeFrame).toBeDefined();
+		expect(err.codeFrame?.highlightLine).toBe(3);
+		expect(err.codeFrame?.text).toContain("<h1>{unclosed");
+		expect(err.codeFrame?.text).toMatch(/\^/);
+		expect(err.diagnostics).toBeDefined();
+		expect((err.diagnostics ?? []).length).toBeGreaterThanOrEqual(1);
+		expect(err.diagnostics?.[0].location.line).toBe(3);
+	});
+
+	it("forwards the underlying stack on render failures so consumers can trace user code", async () => {
+		const site = new MemorySite();
+		site.write(
+			"/src/pages/bad-render/[slug].astro",
+			enc(`---
+export async function getStaticPaths() {
+	return [{ params: { slug: "boom" }, props: {} }];
+}
+throw new Error("render boom for " + Astro.params.slug);
+---
+<h1>unused</h1>`),
+		);
+		const executor = makeExecutor();
+		const out = await collect(buildSite({ site, executor, continueOnError: true }));
+		const err = out.find(
+			(x): x is SnapshotError => "kind" in x && (x as SnapshotError).kind === "error",
+		);
+		if (!err) throw new Error("expected a render error");
+		expect(err.phase).toBe("render");
+		expect(err.detail).toMatch(/render boom/);
+		expect(err.stack).toBeDefined();
+		expect(err.stack).toContain("render boom");
+	});
+
+	it("forwards the underlying stack on getStaticPaths failures", async () => {
+		const site = new MemorySite();
+		site.write(
+			"/src/pages/bad-paths/[slug].astro",
+			enc(`---
+export async function getStaticPaths() { throw new Error("paths boom"); }
+---
+<h1>unused</h1>`),
+		);
+		const executor = makeExecutor();
+		const out = await collect(buildSite({ site, executor, continueOnError: true }));
+		const err = out.find(
+			(x): x is SnapshotError => "kind" in x && (x as SnapshotError).kind === "error",
+		);
+		if (!err) throw new Error("expected a getStaticPaths error");
+		expect(err.phase).toBe("getStaticPaths");
+		expect(err.detail).toMatch(/paths boom/);
+		expect(err.stack).toBeDefined();
+		expect(err.stack).toContain("paths boom");
+	});
 });

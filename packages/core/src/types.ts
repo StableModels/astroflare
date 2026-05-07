@@ -107,6 +107,13 @@ export interface SnapshotEntry {
  *   - `render` failures are localised — one error per failing
  *     `{ params, props }` entry; sibling entries from the same
  *     `getStaticPaths` may render fine.
+ *
+ * Carries structured location + source-context fields so downstream tools
+ * (LLM agents, IDE error overlays, CI annotators) can target a fix instead
+ * of guessing from a string. The pre-formatted `message` is preserved for
+ * straight-to-stderr printing; the structured fields below are populated
+ * from the same underlying diagnostic so consumers can pick whichever
+ * shape is useful.
  */
 export interface SnapshotError {
 	/** Discriminator — distinguishes from `SnapshotEntry`. */
@@ -119,10 +126,101 @@ export interface SnapshotError {
 	params?: Record<string, string>;
 	/** Phase that surfaced the failure. */
 	phase: "compile" | "getStaticPaths" | "render";
-	/** Human-readable message — already prefixed with phase + sourcePath. */
+	/**
+	 * Pre-formatted, human-readable message — already prefixed with phase
+	 * + `sourcePath` and (for compile failures) line:column. Suitable for
+	 * direct printing; keep `detail`/`location` for programmatic use.
+	 */
 	message: string;
+	/**
+	 * The underlying error message without the framework's `buildSite: …
+	 * for <path>:` prefix or location suffix. Useful when the consumer
+	 * wants to render its own message shape.
+	 */
+	detail?: string;
+	/**
+	 * 1-based line + column + 0-based byte offset in `sourcePath` where
+	 * the error originates. Set for compile failures (sourced from the
+	 * compiler's own diagnostics). Render / getStaticPaths failures don't
+	 * carry one yet — the underlying JS stack frame points at the
+	 * compiled module, not the user's `.astro`, and source-map
+	 * remapping is a follow-up.
+	 */
+	location?: SnapshotErrorLocation;
+	/**
+	 * The specific source text the compiler flagged — `source.slice(offset,
+	 * end.offset)` — trimmed at the first newline so multi-line spans
+	 * don't dump half the file into the field. `null`/absent when the
+	 * underlying diagnostic didn't include an `end` location.
+	 */
+	snippet?: string;
+	/**
+	 * Pre-formatted multi-line excerpt of the source surrounding `location`
+	 * with line numbers and a caret pointer at the offending column.
+	 * Mirrors the `babel-code-frame` / `tsc` output shape so agents and
+	 * IDEs can either print it as-is or parse it back via the structured
+	 * fields. Absent when no `location` is available.
+	 */
+	codeFrame?: SnapshotErrorCodeFrame;
+	/**
+	 * Stack trace from the underlying JS error. Set for render and
+	 * `getStaticPaths` failures (the user-supplied function threw); the
+	 * frames reference the compiled module, not the original `.astro`,
+	 * but the message + module path narrow the cause.
+	 */
+	stack?: string;
+	/**
+	 * Every diagnostic the parser produced for this page. Compile errors
+	 * commonly surface multiple issues in one pass (e.g. one unclosed
+	 * expression that confuses the rest of the file); the canonical
+	 * `message` / `location` reflect the first, but consumers that want to
+	 * fix all of them in one go iterate this list.
+	 */
+	diagnostics?: readonly SnapshotErrorDiagnostic[];
 	/** Original error for richer diagnostics; opt-in for consumers. */
 	cause?: unknown;
+}
+
+/** 1-based line + column + 0-based byte offset, with optional span end. */
+export interface SnapshotErrorLocation {
+	line: number;
+	column: number;
+	offset: number;
+	end?: {
+		line: number;
+		column: number;
+		offset: number;
+	};
+}
+
+/**
+ * Pre-formatted code excerpt around an error location.
+ *
+ * `text` is the printable multi-line excerpt with line numbers and a caret
+ * line under the offending column. The structured fields (`startLine` /
+ * `endLine` / `highlightLine` / `highlightColumn` / `highlightLength`) let
+ * tools render their own framing if the canned text doesn't fit.
+ */
+export interface SnapshotErrorCodeFrame {
+	text: string;
+	startLine: number;
+	endLine: number;
+	highlightLine: number;
+	highlightColumn: number;
+	highlightLength: number;
+}
+
+/**
+ * One parser/compiler diagnostic. The first entry's fields are duplicated
+ * onto the `SnapshotError` itself for consumers that only care about the
+ * primary cause; the array carries the full set so multi-error fixes can
+ * batch.
+ */
+export interface SnapshotErrorDiagnostic {
+	message: string;
+	location: SnapshotErrorLocation;
+	snippet?: string;
+	codeFrame?: SnapshotErrorCodeFrame;
 }
 
 /**

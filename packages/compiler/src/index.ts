@@ -10,5 +10,6 @@
 export * from "./astro/index.js";
 export * from "./markdown/index.js";
 export * from "./mdx/index.js";
+export * from "./compile-error.js";
 
 export const COMPILER_VERSION = "0.0.0";
