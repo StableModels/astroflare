@@ -35,6 +35,7 @@
  *     `node:url` / `node:module` imports
  */
 
+import { isCompileError } from "@astroflare/compiler";
 import type {
 	BuildSiteOutput,
 	Cache,
@@ -44,9 +45,11 @@ import type {
 	Site,
 	SnapshotEntry,
 	SnapshotError,
+	SnapshotErrorDiagnostic,
+	SnapshotErrorLocation,
 	TaskBundle,
 } from "@astroflare/core";
-import { sha256Hex } from "@astroflare/core";
+import { buildCodeFrame, sha256Hex, snippetFor } from "@astroflare/core";
 import { inlineBundle } from "@astroflare/preview/bundle";
 import { type MarkdownOptions, ModuleGraph } from "@astroflare/preview/module-graph";
 import {
@@ -273,6 +276,19 @@ async function* buildSiteImpl(opts: WorkersBuildSiteOptions): AsyncIterable<Buil
 	}
 }
 
+/**
+ * Construct a `SnapshotError` with as many structured fields populated as
+ * the cause allows. Mirrors the Node `build-site.ts` helper of the same
+ * name; see that file for the field-by-field rationale.
+ *
+ *   - `CompileError` → `location`, `snippet`, `codeFrame`, `diagnostics`
+ *     (sourced from the compiler's own per-error ranges + the original
+ *     `.astro`/`.md`/`.mdx` text the compiler saw).
+ *   - any other `Error` with a `.stack` → `stack` is forwarded so render
+ *     and getStaticPaths failures bring through a real trace pointing at
+ *     the user's code.
+ *   - all errors → `detail` carries the original (un-prefixed) message.
+ */
 function buildError(args: {
 	sourcePath: string;
 	phase: SnapshotError["phase"];
@@ -280,16 +296,62 @@ function buildError(args: {
 	route?: string;
 	params?: Record<string, string>;
 }): SnapshotError {
+	const cause = args.cause;
+	const wrappedMessage = (cause as Error)?.message ?? String(cause);
 	const out: SnapshotError = {
 		kind: "error",
 		sourcePath: args.sourcePath,
 		phase: args.phase,
-		message: (args.cause as Error)?.message ?? String(args.cause),
-		cause: args.cause,
+		message: wrappedMessage,
+		cause,
 	};
 	if (args.route !== undefined) out.route = args.route;
 	if (args.params !== undefined) out.params = args.params;
+
+	const inner = unwrapWrappedCause(cause);
+	const innerMessage = (inner as Error)?.message ?? String(inner);
+	out.detail = innerMessage;
+
+	if (isCompileError(inner)) {
+		const source = inner.source;
+		const diagnostics: SnapshotErrorDiagnostic[] = inner.diagnostics.map((d) => {
+			const location: SnapshotErrorLocation = {
+				line: d.start.line,
+				column: d.start.column,
+				offset: d.start.offset,
+				...(d.end ? { end: { line: d.end.line, column: d.end.column, offset: d.end.offset } } : {}),
+			};
+			const diag: SnapshotErrorDiagnostic = { message: d.message, location };
+			const snippet = snippetFor(source, location);
+			if (snippet) diag.snippet = snippet;
+			const frame = buildCodeFrame(source, location);
+			if (frame) diag.codeFrame = frame;
+			return diag;
+		});
+		const primary = diagnostics[0];
+		if (primary) {
+			out.location = primary.location;
+			if (primary.snippet) out.snippet = primary.snippet;
+			if (primary.codeFrame) out.codeFrame = primary.codeFrame;
+			out.detail = primary.message;
+		}
+		out.diagnostics = diagnostics;
+	}
+
+	const stack = (inner as { stack?: unknown })?.stack;
+	if (typeof stack === "string" && stack.length > 0) {
+		out.stack = stack;
+	}
+
 	return out;
+}
+
+function unwrapWrappedCause(err: unknown): unknown {
+	if (err && typeof err === "object" && "cause" in err) {
+		const c = (err as { cause?: unknown }).cause;
+		if (c) return c;
+	}
+	return err;
 }
 
 /**
@@ -370,7 +432,7 @@ async function compileClosure(
 			path: sourcePath,
 			message: (err as Error).message,
 		});
-		throw new Error(`buildSite: compile failed for ${sourcePath}: ${(err as Error).message}`);
+		throw wrapBuildPhaseError(`buildSite: compile failed for ${sourcePath}`, err);
 	}
 }
 
@@ -388,9 +450,7 @@ async function fetchStaticPaths(
 			path: sourcePath,
 			message: (err as Error).message,
 		});
-		throw new Error(
-			`buildSite: getStaticPaths failed for ${sourcePath}: ${(err as Error).message}`,
-		);
+		throw wrapBuildPhaseError(`buildSite: getStaticPaths failed for ${sourcePath}`, err);
 	}
 }
 
@@ -420,11 +480,24 @@ async function renderRoute(
 			route,
 			message: (err as Error).message,
 		});
-		throw new Error(`buildSite: render failed for ${sourcePath}: ${(err as Error).message}`);
+		throw wrapBuildPhaseError(`buildSite: render failed for ${sourcePath}`, err);
 	}
 
 	if (result.kind === "html") return result.html;
 	throw new Error(`buildSite: ${sourcePath} returned non-HTML render result (kind=${result.kind})`);
+}
+
+/**
+ * Wrap the underlying error in a phase-prefixed `Error` while preserving
+ * the original under `.cause` so downstream error reporting can still see
+ * the structured `CompileError` (or runtime stack). Same shape the Node
+ * `build-site` uses (`prefixCompileMessage` / `prefixRenderMessage`).
+ */
+function wrapBuildPhaseError(prefix: string, cause: unknown): Error {
+	const message = (cause as Error)?.message ?? String(cause);
+	const wrapped = new Error(`${prefix}: ${message}`);
+	(wrapped as Error & { cause?: unknown }).cause = cause;
+	return wrapped;
 }
 
 function createNoopCache(): Cache {

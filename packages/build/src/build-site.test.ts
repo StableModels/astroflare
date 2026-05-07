@@ -67,4 +67,58 @@ describe("buildSite (node) — continueOnError", () => {
 			/compile failed for \/src\/pages\/bad-compile\.astro/,
 		);
 	});
+
+	it("populates structured location/snippet/codeFrame/diagnostics for compile failures", async () => {
+		const site = new MemorySite();
+		// Source: line 1 `---`, line 2 `---`, line 3 `<h1>{unclosed` (EOF).
+		// Acorn runs off the end → parser reports "Unclosed expression
+		// (missing `}`)" pinned at the opening `{` on line 3, column 5.
+		site.write("/src/pages/bad-compile.astro", enc(["---", "---", "<h1>{unclosed"].join("\n")));
+
+		const out = await collect(buildSite({ site, continueOnError: true }));
+		const errors = out.filter(
+			(x): x is SnapshotError => "kind" in x && (x as SnapshotError).kind === "error",
+		);
+		expect(errors).toHaveLength(1);
+		const err = errors[0];
+		if (!err) throw new Error("expected one error");
+
+		// Structured location: the `{` on line 3, column 5 (offset 12).
+		expect(err.location).toBeDefined();
+		expect(err.location?.line).toBe(3);
+		expect(err.location?.column).toBe(5);
+		expect(err.location?.offset).toBe(12);
+
+		// Detail is the raw parser message, not the framework's prefix.
+		expect(err.detail).toMatch(/Unclosed expression/i);
+
+		// Code frame is multi-line and includes a caret on the highlight line.
+		expect(err.codeFrame).toBeDefined();
+		expect(err.codeFrame?.highlightLine).toBe(3);
+		expect(err.codeFrame?.text).toContain("<h1>{unclosed");
+		expect(err.codeFrame?.text).toMatch(/\^/);
+
+		// Diagnostics array includes the same primary entry (and any siblings
+		// the parser flagged on the same pass).
+		expect(err.diagnostics).toBeDefined();
+		expect((err.diagnostics ?? []).length).toBeGreaterThanOrEqual(1);
+		expect(err.diagnostics?.[0].location.line).toBe(3);
+	});
+
+	it("forwards the underlying stack on render failures so consumers can trace user code", async () => {
+		const site = new MemorySite();
+		site.write(
+			"/src/pages/bad-render.astro",
+			enc(["---", 'throw new Error("render boom");', "---", "<h1>x</h1>"].join("\n")),
+		);
+		const out = await collect(buildSite({ site, continueOnError: true }));
+		const err = out.find(
+			(x): x is SnapshotError => "kind" in x && (x as SnapshotError).kind === "error",
+		);
+		if (!err) throw new Error("expected a render error");
+		expect(err.phase).toBe("render");
+		expect(err.detail).toMatch(/render boom/);
+		expect(err.stack).toBeDefined();
+		expect(err.stack).toContain("render boom");
+	});
 });

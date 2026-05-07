@@ -110,3 +110,4 @@ function defineFromEnv(
 export * from "./ast.js";
 export * from "./parser.js";
 export * from "./emitter.js";
+export { CompileError, isCompileError, type CompileErrorInit } from "../compile-error.js";

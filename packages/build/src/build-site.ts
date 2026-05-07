@@ -17,13 +17,17 @@ import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join, posix } from "node:path";
 import { pathToFileURL } from "node:url";
+import { CompileError, isCompileError } from "@astroflare/compiler";
 import type {
 	BuildSiteOutput,
 	Site,
 	SnapshotEntry,
 	SnapshotError,
+	SnapshotErrorDiagnostic,
+	SnapshotErrorLocation,
 	SnapshotSink,
 } from "@astroflare/core";
+import { buildCodeFrame, snippetFor } from "@astroflare/core";
 
 const require_ = createRequire(import.meta.url);
 
@@ -123,6 +127,7 @@ async function* buildSiteImpl(opts: BuildSiteOptions): AsyncIterable<BuildSiteOu
 					sourcePath,
 					phase: "compile",
 					cause: wrapped,
+					sourceText,
 				});
 				continue;
 			}
@@ -138,6 +143,7 @@ async function* buildSiteImpl(opts: BuildSiteOptions): AsyncIterable<BuildSiteOu
 					route,
 					phase: "render",
 					cause: wrapped,
+					sourceText,
 				});
 				continue;
 			}
@@ -156,23 +162,118 @@ async function* buildSiteImpl(opts: BuildSiteOptions): AsyncIterable<BuildSiteOu
 	}
 }
 
+/**
+ * Construct a `SnapshotError` with as many structured fields populated as
+ * the cause + (optional) sourceText allow:
+ *
+ *   - `CompileError` (or our compile-error duck-type after a `prefix*`
+ *     wrap) → `location`, `snippet`, `codeFrame`, plus a full `diagnostics`
+ *     array for the compiler's other findings.
+ *   - any other `Error` with a `.stack` → `stack` is forwarded so render /
+ *     getStaticPaths failures bring the user a real trace.
+ *   - all errors → `detail` carries the original (unprefixed) message so
+ *     consumers can format their own headlines.
+ */
 function buildError(args: {
 	sourcePath: string;
 	phase: SnapshotError["phase"];
 	cause: unknown;
 	route?: string;
 	params?: Record<string, string>;
+	sourceText?: string;
 }): SnapshotError {
+	const cause = args.cause;
+	const wrappedMessage = (cause as Error)?.message ?? String(cause);
 	const out: SnapshotError = {
 		kind: "error",
 		sourcePath: args.sourcePath,
 		phase: args.phase,
-		message: (args.cause as Error)?.message ?? String(args.cause),
-		cause: args.cause,
+		message: wrappedMessage,
+		cause,
 	};
 	if (args.route !== undefined) out.route = args.route;
 	if (args.params !== undefined) out.params = args.params;
+
+	// Unwrap the framework's `buildSite: <phase> failed for <path>: <inner>`
+	// shape so `detail` is the parser/runtime's own message and the
+	// CompileError underneath is reachable via `.cause`.
+	const inner = unwrapWrappedCause(cause);
+	const innerMessage = (inner as Error)?.message ?? String(inner);
+	if (innerMessage && innerMessage !== wrappedMessage) {
+		out.detail = innerMessage;
+	} else {
+		out.detail = innerMessage;
+	}
+
+	if (isCompileError(inner)) {
+		const source = inner.source;
+		const diagnostics: SnapshotErrorDiagnostic[] = inner.diagnostics.map((d) => {
+			const location: SnapshotErrorLocation = {
+				line: d.start.line,
+				column: d.start.column,
+				offset: d.start.offset,
+				...(d.end ? { end: { line: d.end.line, column: d.end.column, offset: d.end.offset } } : {}),
+			};
+			const diag: SnapshotErrorDiagnostic = { message: d.message, location };
+			const snippet = snippetFor(source, location);
+			if (snippet) diag.snippet = snippet;
+			const frame = buildCodeFrame(source, location);
+			if (frame) diag.codeFrame = frame;
+			return diag;
+		});
+		const primary = diagnostics[0];
+		if (primary) {
+			out.location = primary.location;
+			if (primary.snippet) out.snippet = primary.snippet;
+			if (primary.codeFrame) out.codeFrame = primary.codeFrame;
+			// The first diagnostic's message is the "real" cause; the
+			// CompileError's outer message is the prefixed shape.
+			out.detail = primary.message;
+		}
+		out.diagnostics = diagnostics;
+	} else if (args.sourceText && (inner as { pos?: unknown })?.pos !== undefined) {
+		// Acorn-style errors carry `.pos` (offset) but no `.start`. Cheap
+		// upgrade: synthesise a location from the offset and build a
+		// frame off the read-side source text.
+		const pos = (inner as { pos: number }).pos;
+		if (typeof pos === "number" && pos >= 0 && pos <= args.sourceText.length) {
+			const location = locateInSource(args.sourceText, pos);
+			out.location = location;
+			const frame = buildCodeFrame(args.sourceText, location);
+			if (frame) out.codeFrame = frame;
+		}
+	}
+
+	const stack = (inner as { stack?: unknown })?.stack;
+	if (typeof stack === "string" && stack.length > 0) {
+		out.stack = stack;
+	}
+
 	return out;
+}
+
+function locateInSource(source: string, offset: number): SnapshotErrorLocation {
+	let line = 1;
+	let column = 1;
+	const max = Math.min(offset, source.length);
+	for (let i = 0; i < max; i++) {
+		if (source.charCodeAt(i) === 10 /* \n */) {
+			line += 1;
+			column = 1;
+		} else {
+			column += 1;
+		}
+	}
+	return { offset, line, column };
+}
+
+/** Strip the framework's outer prefix wrapper to get at the original error. */
+function unwrapWrappedCause(err: unknown): unknown {
+	if (err && typeof err === "object" && "cause" in err) {
+		const c = (err as { cause?: unknown }).cause;
+		if (c) return c;
+	}
+	return err;
 }
 
 function prefixCompileMessage(sourcePath: string, err: unknown): Error {
@@ -268,13 +369,17 @@ async function compilePage(
 		runtimeImport,
 	});
 	if (compiled.errors.length > 0) {
-		const first = compiled.errors[0];
 		// Same shape `module-graph` uses for the workers-runtime path —
 		// surfaced as a clean compile error rather than letting the
 		// recovered code crash at render time with an opaque message.
-		throw new Error(
-			`compile error in ${sourcePath} at ${first?.start.line}:${first?.start.column}: ${first?.message}`,
-		);
+		// `CompileError` carries the source text + every diagnostic so
+		// `buildError()` can stamp `location`/`snippet`/`codeFrame` onto
+		// the SnapshotError downstream.
+		throw new CompileError({
+			filename: sourcePath,
+			source,
+			diagnostics: compiled.errors,
+		});
 	}
 	const moduleName = `aflare-${createHash("sha256")
 		.update(source + route)

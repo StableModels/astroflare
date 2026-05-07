@@ -34,7 +34,13 @@
  *     `.css`, etc.) are not compiled or bundled — Phase 6/8 work.
  */
 
-import { COMPILER_VERSION, compileAstro, compileMarkdown, compileMdx } from "@astroflare/compiler";
+import {
+	COMPILER_VERSION,
+	CompileError,
+	compileAstro,
+	compileMarkdown,
+	compileMdx,
+} from "@astroflare/compiler";
 import {
 	type Cache,
 	type ImageMetadata,
@@ -207,10 +213,11 @@ export class ModuleGraph {
 			env: this.#opts.env,
 		});
 		if (result.errors.length > 0) {
-			const first = result.errors[0];
-			throw new Error(
-				`compile error in ${path} at ${first?.start.line}:${first?.start.column}: ${first?.message}`,
-			);
+			throw new CompileError({
+				filename: path,
+				source: preprocessed,
+				diagnostics: result.errors,
+			});
 		}
 		return result.code;
 	}
