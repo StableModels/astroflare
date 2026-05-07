@@ -16,6 +16,7 @@
  *     render, errors and missing exports surfaced with the source path
  *   - missing pages glob → no entries (graceful empty-site case)
  */
+import type { BuildSiteOutput, SnapshotEntry, SnapshotError } from "@astroflare/core";
 import { sha256Hex } from "@astroflare/core";
 import { InProcessExecutor, MemorySite } from "@astroflare/test-utils";
 import { afterEach, describe, expect, it } from "vitest";
@@ -341,3 +342,188 @@ async function collect<T>(iter: AsyncIterable<T>): Promise<T[]> {
 	for await (const x of iter) out.push(x);
 	return out;
 }
+
+describe("buildSite (workers-runtime) — continueOnError", () => {
+	it("yields a SnapshotError for a compile failure and keeps iterating", async () => {
+		const site = new MemorySite();
+		site.write("/src/pages/good.astro", enc("---\n---\n<h1>good</h1>"));
+		// `<p>{unclosed` is the same shape `module-graph.test.ts` uses to
+		// force a parser error — the brace-finder fails to match a
+		// closing `}` and the closure compile rejects.
+		site.write("/src/pages/bad-compile.astro", enc("<p>{unclosed"));
+
+		const executor = makeExecutor();
+		const out = await collect(buildSite({ site, executor, continueOnError: true }));
+
+		const entries = out.filter((x): x is SnapshotEntry => "bytes" in x);
+		const errors = out.filter(
+			(x): x is SnapshotError => "kind" in x && (x as SnapshotError).kind === "error",
+		);
+
+		expect(entries.map((e) => e.route).sort()).toEqual(["/good"]);
+		expect(errors).toHaveLength(1);
+		const err = errors[0];
+		if (!err) throw new Error("expected one error");
+		expect(err.sourcePath).toBe("/src/pages/bad-compile.astro");
+		expect(err.phase).toBe("compile");
+		expect(err.route).toBeUndefined();
+		expect(err.message).toMatch(/compile failed for \/src\/pages\/bad-compile\.astro/);
+		expect(err.cause).toBeInstanceOf(Error);
+	});
+
+	it("yields a SnapshotError when getStaticPaths throws and skips the dynamic route", async () => {
+		const site = new MemorySite();
+		site.write("/src/pages/good.astro", enc("---\n---\n<h1>good</h1>"));
+		site.write(
+			"/src/pages/bad-paths/[slug].astro",
+			enc(`---
+export async function getStaticPaths() { throw new Error("boom"); }
+---
+<h1>unused</h1>`),
+		);
+
+		const executor = makeExecutor();
+		const out = await collect(buildSite({ site, executor, continueOnError: true }));
+
+		const entries = out.filter((x): x is SnapshotEntry => "bytes" in x);
+		const errors = out.filter(
+			(x): x is SnapshotError => "kind" in x && (x as SnapshotError).kind === "error",
+		);
+
+		expect(entries.map((e) => e.route).sort()).toEqual(["/good"]);
+		expect(errors).toHaveLength(1);
+		const err = errors[0];
+		if (!err) throw new Error("expected one error");
+		expect(err.sourcePath).toBe("/src/pages/bad-paths/[slug].astro");
+		expect(err.phase).toBe("getStaticPaths");
+		expect(err.message).toMatch(/getStaticPaths failed.*boom/);
+	});
+
+	it("yields a SnapshotError when a dynamic route is missing getStaticPaths", async () => {
+		const site = new MemorySite();
+		site.write("/src/pages/posts/[slug].astro", enc("---\n---\n<h1>post</h1>"));
+
+		const executor = makeExecutor();
+		const out = await collect(buildSite({ site, executor, continueOnError: true }));
+
+		expect(out).toHaveLength(1);
+		const err = out[0] as SnapshotError;
+		expect(err.kind).toBe("error");
+		expect(err.sourcePath).toBe("/src/pages/posts/[slug].astro");
+		expect(err.phase).toBe("getStaticPaths");
+		expect(err.message).toMatch(/has no getStaticPaths export/);
+		// No `cause` for the missing-export case — it's a framework-emitted error.
+		expect(err.cause).toBeUndefined();
+	});
+
+	it("emits per-entry render errors for dynamic routes and keeps emitting siblings", async () => {
+		const site = new MemorySite();
+		// Three entries; the middle one's render references an undefined
+		// identifier so its render fails. The other two should still
+		// produce SnapshotEntries.
+		site.write(
+			"/src/pages/bad-render/[slug].astro",
+			enc(`---
+export async function getStaticPaths() {
+	return [
+		{ params: { slug: "one" }, props: { mode: "ok" } },
+		{ params: { slug: "two" }, props: { mode: "boom" } },
+		{ params: { slug: "three" }, props: { mode: "ok" } },
+	];
+}
+const { mode } = Astro.props;
+const { slug } = Astro.params;
+if (mode === "boom") {
+	throw new Error("render boom for " + slug);
+}
+---
+<h1>{slug}</h1>`),
+		);
+
+		const executor = makeExecutor();
+		const out: BuildSiteOutput[] = await collect(
+			buildSite({ site, executor, continueOnError: true }),
+		);
+
+		const entries = out.filter((x): x is SnapshotEntry => "bytes" in x);
+		const errors = out.filter(
+			(x): x is SnapshotError => "kind" in x && (x as SnapshotError).kind === "error",
+		);
+
+		expect(entries.map((e) => e.route).sort()).toEqual(["/bad-render/one", "/bad-render/three"]);
+		expect(errors).toHaveLength(1);
+		const err = errors[0];
+		if (!err) throw new Error("expected one render error");
+		expect(err.sourcePath).toBe("/src/pages/bad-render/[slug].astro");
+		expect(err.phase).toBe("render");
+		expect(err.route).toBe("/bad-render/two");
+		expect(err.params).toEqual({ slug: "two" });
+		expect(err.message).toMatch(/render failed.*render boom for two/);
+	});
+
+	it("collects every category of failure in one pass", async () => {
+		const site = new MemorySite();
+		site.write("/src/pages/good.astro", enc("---\n---\n<h1>good</h1>"));
+		site.write("/src/pages/bad-compile.astro", enc("<p>{unclosed"));
+		site.write(
+			"/src/pages/bad-paths/[slug].astro",
+			enc(`---
+export async function getStaticPaths() { throw new Error("paths boom"); }
+---
+<h1>unused</h1>`),
+		);
+		site.write(
+			"/src/pages/bad-render/[slug].astro",
+			enc(`---
+export async function getStaticPaths() {
+	return [
+		{ params: { slug: "ok-1" }, props: { mode: "ok" } },
+		{ params: { slug: "boom" }, props: { mode: "boom" } },
+		{ params: { slug: "ok-2" }, props: { mode: "ok" } },
+	];
+}
+const { mode } = Astro.props;
+const { slug } = Astro.params;
+if (mode === "boom") throw new Error("render boom");
+---
+<p>{slug}</p>`),
+		);
+
+		const executor = makeExecutor();
+		const out = await collect(buildSite({ site, executor, continueOnError: true }));
+
+		const entries = out.filter((x): x is SnapshotEntry => "bytes" in x);
+		const errors = out.filter(
+			(x): x is SnapshotError => "kind" in x && (x as SnapshotError).kind === "error",
+		);
+
+		expect(entries.map((e) => e.route).sort()).toEqual([
+			"/bad-render/ok-1",
+			"/bad-render/ok-2",
+			"/good",
+		]);
+		expect(errors).toHaveLength(3);
+
+		const phases = errors.map((e) => e.phase).sort();
+		expect(phases).toEqual(["compile", "getStaticPaths", "render"]);
+
+		const compileErr = errors.find((e) => e.phase === "compile");
+		expect(compileErr?.sourcePath).toBe("/src/pages/bad-compile.astro");
+		const pathsErr = errors.find((e) => e.phase === "getStaticPaths");
+		expect(pathsErr?.sourcePath).toBe("/src/pages/bad-paths/[slug].astro");
+		const renderErr = errors.find((e) => e.phase === "render");
+		expect(renderErr?.sourcePath).toBe("/src/pages/bad-render/[slug].astro");
+		expect(renderErr?.params?.slug).toBe("boom");
+	});
+
+	it("throws on first error when continueOnError is unset (default)", async () => {
+		const site = new MemorySite();
+		site.write("/src/pages/good.astro", enc("---\n---\n<h1>good</h1>"));
+		site.write("/src/pages/bad-compile.astro", enc("<p>{unclosed"));
+
+		const executor = makeExecutor();
+		await expect(collect(buildSite({ site, executor }))).rejects.toThrow(
+			/compile failed for \/src\/pages\/bad-compile\.astro/,
+		);
+	});
+});

@@ -32,6 +32,8 @@ export {
 	type WorkersBuildSiteOptions,
 } from "./build-site-workers.js";
 
+export type { BuildSiteOutput, SnapshotError } from "@astroflare/core";
+
 export {
 	buildRenderTask,
 	buildClosureRenderTask,

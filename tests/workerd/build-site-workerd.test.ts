@@ -21,7 +21,7 @@
 
 import { env } from "cloudflare:test";
 import { buildSite, createSnapshotHandler } from "@astroflare/build";
-import type { SnapshotEntry } from "@astroflare/core";
+import type { BuildSiteOutput, SnapshotEntry, SnapshotError } from "@astroflare/core";
 import {
 	R2SnapshotSink,
 	R2Snapshots,
@@ -263,5 +263,106 @@ describe("buildSite + R2 round-trip inside workerd", () => {
 		expect(html).toContain("<ul>");
 		expect(html).toContain("<li>a</li>");
 		expect(html).toContain("<li>b</li>");
+	});
+
+	// `continueOnError` is the agent-facing diagnostic mode: instead of
+	// aborting on the first broken page, the build yields a
+	// `SnapshotError` for each failure and keeps going. Same pipeline,
+	// same executor, same workerd runtime — just a different consumer
+	// shape. Lets a host's "check_site" tool collect every error in one
+	// pass so the LLM can fix them all in a single round-trip.
+	it("yields SnapshotErrors for broken pages and SnapshotEntries for healthy ones in a single pass", async () => {
+		const ws = makeMockWorkspace();
+		const sql = makeMockSql();
+		const site = new WorkspaceSite({ workspace: ws, sql });
+
+		// One healthy page + three broken-in-different-ways pages.
+		await site.write("/src/pages/index.astro", enc("---\n---\n<h1>good</h1>"));
+		await site.write("/src/pages/bad-compile.astro", enc("<p>{unclosed"));
+		await site.write(
+			"/src/pages/bad-paths/[slug].astro",
+			enc(`---
+export async function getStaticPaths() { throw new Error("paths boom"); }
+---
+<h1>x</h1>`),
+		);
+		await site.write(
+			"/src/pages/bad-render/[slug].astro",
+			enc(`---
+export async function getStaticPaths() {
+	return [
+		{ params: { slug: "ok" }, props: { mode: "ok" } },
+		{ params: { slug: "boom" }, props: { mode: "boom" } },
+	];
+}
+const { mode } = Astro.props;
+const { slug } = Astro.params;
+if (mode === "boom") throw new Error("render boom");
+---
+<p>{slug}</p>`),
+		);
+
+		const executor = createWorkerdExecutor({
+			loader: env.LOADER,
+			compatibilityDate: "2025-09-01",
+			compatibilityFlags: ["nodejs_compat"],
+			runtime: RUNTIME_MODULES,
+		});
+
+		const out: BuildSiteOutput[] = [];
+		for await (const x of buildSite({ site, executor, continueOnError: true })) {
+			out.push(x);
+		}
+
+		const entries = out.filter((x): x is SnapshotEntry => "bytes" in x);
+		const errors = out.filter(
+			(x): x is SnapshotError => "kind" in x && (x as SnapshotError).kind === "error",
+		);
+
+		// /index + /bad-render/ok render fine.
+		expect(entries.map((e) => e.route).sort()).toEqual(["/", "/bad-render/ok"]);
+		// One per broken page, plus one per failed dynamic-route entry.
+		expect(errors).toHaveLength(3);
+
+		const phases = errors.map((e) => e.phase).sort();
+		expect(phases).toEqual(["compile", "getStaticPaths", "render"]);
+
+		const compileErr = errors.find((e) => e.phase === "compile");
+		expect(compileErr?.sourcePath).toBe("/src/pages/bad-compile.astro");
+
+		const pathsErr = errors.find((e) => e.phase === "getStaticPaths");
+		expect(pathsErr?.sourcePath).toBe("/src/pages/bad-paths/[slug].astro");
+		expect(pathsErr?.message).toMatch(/getStaticPaths failed.*paths boom/);
+
+		const renderErr = errors.find((e) => e.phase === "render");
+		expect(renderErr?.sourcePath).toBe("/src/pages/bad-render/[slug].astro");
+		expect(renderErr?.route).toBe("/bad-render/boom");
+		expect(renderErr?.params).toEqual({ slug: "boom" });
+	});
+
+	// Default mode (no continueOnError flag) keeps the existing
+	// throw-on-first-error semantics — the publish pipelines that pipe
+	// `buildSite` straight into a `R2SnapshotSink` rely on this.
+	it("aborts on first error when continueOnError is unset", async () => {
+		const ws = makeMockWorkspace();
+		const sql = makeMockSql();
+		const site = new WorkspaceSite({ workspace: ws, sql });
+
+		await site.write("/src/pages/bad.astro", enc("<p>{unclosed"));
+
+		const executor = createWorkerdExecutor({
+			loader: env.LOADER,
+			compatibilityDate: "2025-09-01",
+			compatibilityFlags: ["nodejs_compat"],
+			runtime: RUNTIME_MODULES,
+		});
+
+		await expect(
+			(async () => {
+				for await (const _ of buildSite({ site, executor })) {
+					/* drain */
+				}
+			})(),
+		).rejects.toThrow(/compile failed for \/src\/pages\/bad\.astro/);
 	});
 });

@@ -36,12 +36,14 @@
  */
 
 import type {
+	BuildSiteOutput,
 	Cache,
 	Executor,
 	Logger,
 	RenderResult,
 	Site,
 	SnapshotEntry,
+	SnapshotError,
 	TaskBundle,
 } from "@astroflare/core";
 import { sha256Hex } from "@astroflare/core";
@@ -88,6 +90,20 @@ export interface WorkersBuildSiteOptions {
 	markdown?: MarkdownOptions;
 	/** Optional structured logger; unused if absent. */
 	logger?: Logger;
+	/**
+	 * When `true`, per-page failures are yielded as `SnapshotError` entries
+	 * instead of thrown, and iteration continues to the next page. Default
+	 * `false` — same throw-on-first-error semantics existing pipelines (e.g.
+	 * `R2SnapshotSink` publish loops) rely on.
+	 *
+	 * Use this from agent-facing build loops where you want every broken
+	 * page surfaced in one pass. `compile` failures skip the whole page;
+	 * `getStaticPaths` failures skip the whole dynamic route; `render`
+	 * failures are localised to the failing entry. Successful pages still
+	 * yield `SnapshotEntry`s — narrow with `"bytes" in out` (or
+	 * `out.kind === "error"`) at the consumer.
+	 */
+	continueOnError?: boolean;
 }
 
 /**
@@ -105,9 +121,18 @@ export interface WorkersBuildSiteOptions {
  * pair. The same machinery `createPreviewHandler` runs at request
  * time, so the snapshot agrees with what preview serves.
  */
-export async function* buildSite(opts: WorkersBuildSiteOptions): AsyncIterable<SnapshotEntry> {
+export function buildSite(
+	opts: WorkersBuildSiteOptions & { continueOnError: true },
+): AsyncIterable<BuildSiteOutput>;
+export function buildSite(opts: WorkersBuildSiteOptions): AsyncIterable<SnapshotEntry>;
+export function buildSite(opts: WorkersBuildSiteOptions): AsyncIterable<BuildSiteOutput> {
+	return buildSiteImpl(opts);
+}
+
+async function* buildSiteImpl(opts: WorkersBuildSiteOptions): AsyncIterable<BuildSiteOutput> {
 	const enc = new TextEncoder();
 	const cache = opts.cache ?? createNoopCache();
+	const continueOnError = opts.continueOnError === true;
 	const moduleGraph = new ModuleGraph(
 		{ site: opts.site, cache, logger: opts.logger },
 		{
@@ -135,7 +160,19 @@ export async function* buildSite(opts: WorkersBuildSiteOptions): AsyncIterable<S
 	pages.sort();
 
 	for (const sourcePath of pages) {
-		const closure = await compileClosure(moduleGraph, sourcePath, opts.logger);
+		let closure: Awaited<ReturnType<ModuleGraph["closure"]>>;
+		try {
+			closure = await compileClosure(moduleGraph, sourcePath, opts.logger);
+		} catch (err) {
+			if (!continueOnError) throw err;
+			yield buildError({
+				sourcePath,
+				phase: "compile",
+				cause: err,
+			});
+			continue;
+		}
+
 		const taskFactory = () => {
 			const code = inlineBundle(closure.modules, DEFAULT_RUNTIME_IMPORT);
 			return buildClosureRenderTask({ bundleCode: code });
@@ -145,54 +182,114 @@ export async function* buildSite(opts: WorkersBuildSiteOptions): AsyncIterable<S
 		if (localRoute !== null) {
 			// Static route — single render with empty params/props.
 			const route = prefixRoute(opts.prefix ?? "", localRoute);
-			const html = await renderRoute(
-				opts.executor,
-				closure.bundleKey,
-				taskFactory,
-				sourcePath,
-				route,
-				{},
-				{},
-				opts.logger,
-			);
-			const bytes = enc.encode(html);
-			const hash = await sha256Hex(bytes);
-			yield { route, bytes, contentType: "text/html;charset=utf-8", hash };
+			try {
+				const html = await renderRoute(
+					opts.executor,
+					closure.bundleKey,
+					taskFactory,
+					sourcePath,
+					route,
+					{},
+					{},
+					opts.logger,
+				);
+				const bytes = enc.encode(html);
+				const hash = await sha256Hex(bytes);
+				yield { route, bytes, contentType: "text/html;charset=utf-8", hash };
+			} catch (err) {
+				if (!continueOnError) throw err;
+				yield buildError({
+					sourcePath,
+					route,
+					phase: "render",
+					cause: err,
+				});
+			}
 			continue;
 		}
 
 		// Dynamic route — enumerate through getStaticPaths.
-		const staticPaths = await fetchStaticPaths(
-			opts.executor,
-			closure.bundleKey,
-			taskFactory,
-			sourcePath,
-			opts.logger,
-		);
-		if (staticPaths === null) {
-			throw new Error(
-				`buildSite: dynamic route ${sourcePath} has no getStaticPaths export — every \`[param]\` page must export one`,
-			);
-		}
-		for (const entry of staticPaths) {
-			const params = stringifyParams(entry.params);
-			const localUrl = dynamicRoute(sourcePath, params);
-			const route = prefixRoute(opts.prefix ?? "", localUrl);
-			const html = await renderRoute(
+		let staticPaths: StaticPathsResult;
+		try {
+			staticPaths = await fetchStaticPaths(
 				opts.executor,
 				closure.bundleKey,
 				taskFactory,
 				sourcePath,
-				route,
-				params,
-				entry.props ?? {},
 				opts.logger,
 			);
-			const bytes = enc.encode(html);
-			const hash = await sha256Hex(bytes);
-			yield { route, bytes, contentType: "text/html;charset=utf-8", hash };
+		} catch (err) {
+			if (!continueOnError) throw err;
+			yield buildError({
+				sourcePath,
+				phase: "getStaticPaths",
+				cause: err,
+			});
+			continue;
+		}
+
+		if (staticPaths === null) {
+			const message = `buildSite: dynamic route ${sourcePath} has no getStaticPaths export — every \`[param]\` page must export one`;
+			if (!continueOnError) throw new Error(message);
+			yield {
+				kind: "error",
+				sourcePath,
+				phase: "getStaticPaths",
+				message,
+			};
+			continue;
+		}
+
+		for (const entry of staticPaths) {
+			const params = stringifyParams(entry.params);
+			const localUrl = dynamicRoute(sourcePath, params);
+			const route = prefixRoute(opts.prefix ?? "", localUrl);
+			try {
+				const html = await renderRoute(
+					opts.executor,
+					closure.bundleKey,
+					taskFactory,
+					sourcePath,
+					route,
+					params,
+					entry.props ?? {},
+					opts.logger,
+				);
+				const bytes = enc.encode(html);
+				const hash = await sha256Hex(bytes);
+				yield { route, bytes, contentType: "text/html;charset=utf-8", hash };
+			} catch (err) {
+				if (!continueOnError) throw err;
+				yield buildError({
+					sourcePath,
+					route,
+					params,
+					phase: "render",
+					cause: err,
+				});
+				// per-entry render failures are localised — keep iterating
+			}
 		}
 	}
+}
+
+function buildError(args: {
+	sourcePath: string;
+	phase: SnapshotError["phase"];
+	cause: unknown;
+	route?: string;
+	params?: Record<string, string>;
+}): SnapshotError {
+	const out: SnapshotError = {
+		kind: "error",
+		sourcePath: args.sourcePath,
+		phase: args.phase,
+		message: (args.cause as Error)?.message ?? String(args.cause),
+		cause: args.cause,
+	};
+	if (args.route !== undefined) out.route = args.route;
+	if (args.params !== undefined) out.params = args.params;
+	return out;
 }
 
 /**
