@@ -96,6 +96,44 @@ export interface SnapshotEntry {
 }
 
 /**
+ * Per-page failure surfaced by `buildSite({ continueOnError: true })` in
+ * place of the throw the default mode performs. Lets agent-facing build
+ * loops collect every broken page in one pass instead of re-running the
+ * build after each fix.
+ *
+ *   - `compile` failures skip the whole page (one error per source path).
+ *   - `getStaticPaths` failures skip the whole dynamic route (we can't
+ *     enumerate inner entries when the enumerator itself didn't run).
+ *   - `render` failures are localised — one error per failing
+ *     `{ params, props }` entry; sibling entries from the same
+ *     `getStaticPaths` may render fine.
+ */
+export interface SnapshotError {
+	/** Discriminator — distinguishes from `SnapshotEntry`. */
+	kind: "error";
+	/** Workspace path of the page that failed. Always set. */
+	sourcePath: string;
+	/** Resolved route URL, when known (set for render failures, not for compile). */
+	route?: string;
+	/** Per-getStaticPaths-entry params, when known (set for dynamic-route render failures). */
+	params?: Record<string, string>;
+	/** Phase that surfaced the failure. */
+	phase: "compile" | "getStaticPaths" | "render";
+	/** Human-readable message — already prefixed with phase + sourcePath. */
+	message: string;
+	/** Original error for richer diagnostics; opt-in for consumers. */
+	cause?: unknown;
+}
+
+/**
+ * Discriminated union yielded by `buildSite({ continueOnError: true })`.
+ * Default-mode callers (no flag) keep the existing
+ * `AsyncIterable<SnapshotEntry>` shape — narrow on `"bytes" in out` (or
+ * `out.kind === "error"`) when consuming the diagnostic mode.
+ */
+export type BuildSiteOutput = SnapshotEntry | SnapshotError;
+
+/**
  * Read-only view of stored snapshots — what the serve handler talks to.
  * Concrete implementations: `R2Snapshots` (host-cloudflare),
  * `LocalSnapshots` (Node-side helper for tests / CLI), `MemorySnapshots`

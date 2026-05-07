@@ -14,3 +14,5 @@ export {
 	type DeploySiteOptions,
 	type DeploySiteResult,
 } from "./build-site.js";
+
+export type { BuildSiteOutput, SnapshotError } from "@astroflare/core";

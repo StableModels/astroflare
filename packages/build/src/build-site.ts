@@ -17,7 +17,13 @@ import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join, posix } from "node:path";
 import { pathToFileURL } from "node:url";
-import type { Site, SnapshotEntry, SnapshotSink } from "@astroflare/core";
+import type {
+	BuildSiteOutput,
+	Site,
+	SnapshotEntry,
+	SnapshotError,
+	SnapshotSink,
+} from "@astroflare/core";
 
 const require_ = createRequire(import.meta.url);
 
@@ -34,6 +40,16 @@ export interface BuildSiteOptions {
 	 * Defaults to a fresh tmpdir created per build call.
 	 */
 	tmpDir?: string;
+	/**
+	 * When `true`, per-page failures are yielded as `SnapshotError` entries
+	 * instead of thrown, and iteration continues to the next page. Default
+	 * `false` — same throw-on-first-error semantics existing pipelines
+	 * (e.g. `deploySite`) rely on.
+	 *
+	 * Mirrors the workers-runtime entry's flag — see
+	 * `WorkersBuildSiteOptions.continueOnError`.
+	 */
+	continueOnError?: boolean;
 }
 
 /**
@@ -45,9 +61,18 @@ export interface BuildSiteOptions {
  * Static-only for Phase 26b. Dynamic routes (`[slug].astro`) require
  * `getStaticPaths` enumeration — not yet supported here.
  */
-export async function* buildSite(opts: BuildSiteOptions): AsyncIterable<SnapshotEntry> {
+export function buildSite(
+	opts: BuildSiteOptions & { continueOnError: true },
+): AsyncIterable<BuildSiteOutput>;
+export function buildSite(opts: BuildSiteOptions): AsyncIterable<SnapshotEntry>;
+export function buildSite(opts: BuildSiteOptions): AsyncIterable<BuildSiteOutput> {
+	return buildSiteImpl(opts);
+}
+
+async function* buildSiteImpl(opts: BuildSiteOptions): AsyncIterable<BuildSiteOutput> {
 	const tmpDir = opts.tmpDir ?? (await mkdtemp(join(tmpdir(), "aflare-build-")));
 	const created = !opts.tmpDir;
+	const continueOnError = opts.continueOnError === true;
 	try {
 		const enc = new TextEncoder();
 		const pagesGlob = "/src/pages/**/*.astro";
@@ -63,21 +88,60 @@ export async function* buildSite(opts: BuildSiteOptions): AsyncIterable<Snapshot
 		for (const sourcePath of pages) {
 			const localRoute = pageRoute(sourcePath);
 			if (localRoute === null) {
-				throw new Error(
-					`buildSite: dynamic routes (${sourcePath}) need getStaticPaths to enumerate; not yet supported`,
-				);
+				const message = `buildSite: dynamic routes (${sourcePath}) need getStaticPaths to enumerate; not yet supported`;
+				if (!continueOnError) throw new Error(message);
+				yield {
+					kind: "error",
+					sourcePath,
+					phase: "getStaticPaths",
+					message,
+				};
+				continue;
 			}
 			const route = prefixRoute(opts.prefix ?? "", localRoute);
-			const sourceBytes = await opts.site.readFile(sourcePath);
-			if (!sourceBytes) {
-				throw new Error(`buildSite: missing source bytes for ${sourcePath}`);
+
+			let sourceText: string;
+			try {
+				const sourceBytes = await opts.site.readFile(sourcePath);
+				if (!sourceBytes) {
+					throw new Error(`buildSite: missing source bytes for ${sourcePath}`);
+				}
+				sourceText = new TextDecoder().decode(sourceBytes);
+			} catch (err) {
+				if (!continueOnError) throw err;
+				yield buildError({ sourcePath, phase: "compile", cause: err });
+				continue;
 			}
-			const html = await compileAndRender(
-				sourcePath,
-				new TextDecoder().decode(sourceBytes),
-				route,
-				tmpDir,
-			);
+
+			let compiledModulePath: string;
+			try {
+				compiledModulePath = await compilePage(sourcePath, sourceText, route, tmpDir);
+			} catch (err) {
+				const wrapped = prefixCompileMessage(sourcePath, err);
+				if (!continueOnError) throw wrapped;
+				yield buildError({
+					sourcePath,
+					phase: "compile",
+					cause: wrapped,
+				});
+				continue;
+			}
+
+			let html: string;
+			try {
+				html = await renderCompiled(sourcePath, compiledModulePath, route);
+			} catch (err) {
+				const wrapped = prefixRenderMessage(sourcePath, err);
+				if (!continueOnError) throw wrapped;
+				yield buildError({
+					sourcePath,
+					route,
+					phase: "render",
+					cause: wrapped,
+				});
+				continue;
+			}
+
 			const bytes = enc.encode(html);
 			const hash = createHash("sha256").update(bytes).digest("hex");
 			yield {
@@ -90,6 +154,39 @@ export async function* buildSite(opts: BuildSiteOptions): AsyncIterable<Snapshot
 	} finally {
 		if (created) await rm(tmpDir, { recursive: true, force: true });
 	}
+}
+
+function buildError(args: {
+	sourcePath: string;
+	phase: SnapshotError["phase"];
+	cause: unknown;
+	route?: string;
+	params?: Record<string, string>;
+}): SnapshotError {
+	const out: SnapshotError = {
+		kind: "error",
+		sourcePath: args.sourcePath,
+		phase: args.phase,
+		message: (args.cause as Error)?.message ?? String(args.cause),
+		cause: args.cause,
+	};
+	if (args.route !== undefined) out.route = args.route;
+	if (args.params !== undefined) out.params = args.params;
+	return out;
+}
+
+function prefixCompileMessage(sourcePath: string, err: unknown): Error {
+	const message = (err as Error)?.message ?? String(err);
+	const wrapped = new Error(`buildSite: compile failed for ${sourcePath}: ${message}`);
+	(wrapped as Error & { cause?: unknown }).cause = err;
+	return wrapped;
+}
+
+function prefixRenderMessage(sourcePath: string, err: unknown): Error {
+	const message = (err as Error)?.message ?? String(err);
+	const wrapped = new Error(`buildSite: render failed for ${sourcePath}: ${message}`);
+	(wrapped as Error & { cause?: unknown }).cause = err;
+	return wrapped;
 }
 
 export interface DeploySiteOptions extends BuildSiteOptions {
@@ -111,7 +208,9 @@ export interface DeploySiteResult {
  */
 export async function deploySite(opts: DeploySiteOptions): Promise<DeploySiteResult> {
 	const collected: SnapshotEntry[] = [];
-	for await (const entry of buildSite(opts)) {
+	// Force throw-on-first-error: a partial snapshot must never get committed.
+	const buildOpts: BuildSiteOptions = { ...opts, continueOnError: false };
+	for await (const entry of buildSite(buildOpts)) {
 		collected.push(entry);
 	}
 	collected.sort((a, b) => a.route.localeCompare(b.route));
@@ -151,14 +250,13 @@ function prefixRoute(prefix: string, route: string): string {
 	return `/${cleaned}${route}`;
 }
 
-async function compileAndRender(
+async function compilePage(
 	sourcePath: string,
 	source: string,
 	route: string,
 	tmpDir: string,
 ): Promise<string> {
 	const { compileAstro } = await import("@astroflare/compiler/astro");
-	const { render } = await import("@astroflare/runtime");
 
 	// The compiled module imports framework runtime symbols from
 	// `runtimeImport`; point that at the absolute file:// URL of the
@@ -169,6 +267,15 @@ async function compileAndRender(
 		filename: sourcePath,
 		runtimeImport,
 	});
+	if (compiled.errors.length > 0) {
+		const first = compiled.errors[0];
+		// Same shape `module-graph` uses for the workers-runtime path —
+		// surfaced as a clean compile error rather than letting the
+		// recovered code crash at render time with an opaque message.
+		throw new Error(
+			`compile error in ${sourcePath} at ${first?.start.line}:${first?.start.column}: ${first?.message}`,
+		);
+	}
 	const moduleName = `aflare-${createHash("sha256")
 		.update(source + route)
 		.digest("hex")
@@ -176,6 +283,15 @@ async function compileAndRender(
 	const modulePath = join(tmpDir, moduleName);
 	await mkdir(dirname(modulePath), { recursive: true });
 	await writeFile(modulePath, compiled.code, "utf8");
+	return modulePath;
+}
+
+async function renderCompiled(
+	sourcePath: string,
+	modulePath: string,
+	route: string,
+): Promise<string> {
+	const { render } = await import("@astroflare/runtime");
 	const moduleUrl = pathToFileURL(modulePath).href;
 	const mod = (await import(/* @vite-ignore */ moduleUrl)) as { default: unknown };
 
