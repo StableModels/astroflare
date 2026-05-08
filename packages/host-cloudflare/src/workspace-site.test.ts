@@ -130,6 +130,85 @@ describe("WorkspaceSite", () => {
 		expect(await site.statFile("/x.txt")).toBeNull();
 	});
 
+	it("recordExternalWrite hashes bytes the host already wrote and emits a write event", async () => {
+		const ws = makeMockWorkspace();
+		const sql = makeMockSql();
+		const site = new WorkspaceSite({ workspace: ws, sql });
+
+		// Simulate an external write path: the host wrote directly,
+		// without going through `WorkspaceSite.write`.
+		await ws.writeFileBytes("/agent.astro", new TextEncoder().encode("v1"));
+		const first = await site.recordExternalWrite("/agent.astro");
+		expect(first).not.toBeNull();
+		expect(first?.event).toEqual({ kind: "write", path: "/agent.astro", hash: first?.hash });
+		expect(first?.hash).toMatch(/^[0-9a-f]{64}$/);
+
+		// Hash sidecar is now in sync with the bytes — statFile reads
+		// the same hash without recomputing.
+		const stat = await site.statFile("/agent.astro");
+		expect(stat?.hash).toBe(first?.hash);
+
+		// Subsequent external write with new bytes refreshes the
+		// sidecar; the new hash differs from the old one.
+		await ws.writeFileBytes("/agent.astro", new TextEncoder().encode("v2"));
+		const second = await site.recordExternalWrite("/agent.astro");
+		expect(second?.hash).not.toBe(first?.hash);
+		const stat2 = await site.statFile("/agent.astro");
+		expect(stat2?.hash).toBe(second?.hash);
+	});
+
+	it("recordExternalWrite returns null when the file is no longer present", async () => {
+		const ws = makeMockWorkspace();
+		const sql = makeMockSql();
+		const site = new WorkspaceSite({ workspace: ws, sql });
+		// File never existed — race against a concurrent delete on the
+		// host's side.
+		expect(await site.recordExternalWrite("/missing.astro")).toBeNull();
+	});
+
+	it("recordExternalWrite does not double-write to the workspace", async () => {
+		const ws = makeMockWorkspace();
+		const sql = makeMockSql();
+		const site = new WorkspaceSite({ workspace: ws, sql });
+
+		const original = new TextEncoder().encode("original");
+		await ws.writeFileBytes("/x.astro", original);
+		// Replace the workspace's writeFileBytes with a spy that
+		// fails the test if the helper writes back.
+		const before = ws.writeFileBytes;
+		let called = 0;
+		ws.writeFileBytes = (async (path, bytes, mime) => {
+			called++;
+			return before.call(ws, path, bytes, mime);
+		}) as typeof ws.writeFileBytes;
+
+		await site.recordExternalWrite("/x.astro");
+		expect(called).toBe(0);
+		// And the bytes weren't replaced.
+		expect(new TextDecoder().decode(ws.files.get("/x.astro") as Uint8Array)).toBe("original");
+	});
+
+	it("recordExternalDelete drops the hash and emits a delete event", async () => {
+		const ws = makeMockWorkspace();
+		const sql = makeMockSql();
+		const site = new WorkspaceSite({ workspace: ws, sql });
+		await site.write("/y.txt", new TextEncoder().encode("y"));
+		// Host already deleted the file out-of-band; we just record it.
+		await ws.deleteFile("/y.txt");
+
+		const { event } = await site.recordExternalDelete("/y.txt");
+		expect(event).toEqual({ kind: "delete", path: "/y.txt" });
+		expect(await site.statFile("/y.txt")).toBeNull();
+	});
+
+	it("recordExternalDelete is idempotent for unknown paths", async () => {
+		const ws = makeMockWorkspace();
+		const sql = makeMockSql();
+		const site = new WorkspaceSite({ workspace: ws, sql });
+		const { event } = await site.recordExternalDelete("/never-existed.txt");
+		expect(event).toEqual({ kind: "delete", path: "/never-existed.txt" });
+	});
+
 	it("glob yields workspace paths", async () => {
 		const ws = makeMockWorkspace();
 		const sql = makeMockSql();

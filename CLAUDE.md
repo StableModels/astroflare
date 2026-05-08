@@ -172,6 +172,39 @@ build cleanly into deployable bundles.
   runs through the workers-runtime `buildSite` → `R2Snapshots` →
   `createSnapshotHandler` round-trip (`tests/workerd/build-site-workerd.test.ts`),
   so preview and publish stay in lock-step.
+- **Cross-DO host integration ergonomics.** Hosts whose workspace
+  lives in a different DO than the Astroflare pipeline (the Ember
+  shape: workspace DO + pipeline DO + agent DO) can satisfy
+  `WorkspaceLike` with a stub-forwarding proxy. The change-pipeline
+  helpers `WorkspaceSite.recordExternalWrite(path)` /
+  `recordExternalDelete(path)` keep the `aflare_hash` sidecar in
+  step when the host's write path bypasses `WorkspaceSite.write`
+  (without them, `notifyChanged` fires but the closure cache key
+  drifts and preview renders serve stale compiled output). Two
+  diagnostic methods on the coordinator —
+  `recentHmrEvents(limit?)` (best-effort ring buffer of recent HMR
+  fan-outs) and `simulateChange(event)` (intent-readable alias for
+  `notifyChanged` in tests) — let operator tools verify the change
+  pipeline fired without spinning up a browser. Wiring guide:
+  [`docs/host-integration-cookbook.md`](docs/host-integration-cookbook.md)
+  (single-DO / two-DO / three-DO worked examples).
+- **`createPreviewHandler` is the canonical complete preview surface.**
+  The worker preview path is feature-equivalent to the Node CLI
+  preview server modulo single-vs-multi-tenant deployment. Two
+  defaults landed to close the gap: HMR client `<script>` injection
+  on every HTML response (default-on, opt out with `hmr: false`,
+  customise the WebSocket path with `hmr: { socketPath }` for hosts
+  that mount preview at a non-root prefix), and `/public/*` static
+  asset serving as a fallback when no route matches (default-on, opt
+  out with `publicAssets: false`). `buildSite` (both Node and
+  workers-runtime entries) emits matching `SnapshotEntry`s for
+  `/public/**` so what preview serves and what the snapshot
+  publishes stay in lock-step. `mimeForPath(pathOrExt)` ships from
+  `@astroflare/core` as the shared extension → MIME-type mapping;
+  `buildHmrClientSource({ socketPath })` from `@astroflare/runtime`
+  is the new flexible builder backing the per-handler HMR-script
+  injection (the legacy `HMR_CLIENT_SOURCE` const stays as a
+  zero-argument call for back-compat).
 
 Phase plans:
 [`docs/phases/phase-26-host-driven-preview.md`](docs/phases/phase-26-host-driven-preview.md),

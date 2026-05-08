@@ -21,6 +21,10 @@
     "./router": {
       "types": "./src/router.ts",
       "default": "./src/router.ts"
+    },
+    "./inject-hmr": {
+      "types": "./src/inject-hmr.ts",
+      "default": "./src/inject-hmr.ts"
     }
   },
   "scripts": {

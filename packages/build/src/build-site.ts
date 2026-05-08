@@ -27,7 +27,7 @@ import type {
 	SnapshotErrorLocation,
 	SnapshotSink,
 } from "@astroflare/core";
-import { buildCodeFrame, snippetFor } from "@astroflare/core";
+import { buildCodeFrame, mimeForPath, snippetFor } from "@astroflare/core";
 
 const require_ = createRequire(import.meta.url);
 
@@ -54,6 +54,15 @@ export interface BuildSiteOptions {
 	 * `WorkersBuildSiteOptions.continueOnError`.
 	 */
 	continueOnError?: boolean;
+	/**
+	 * Emit one `SnapshotEntry` per file under `/public/**`, mirroring
+	 * standard Astro's `public/` convention. Default: `true`.
+	 *
+	 * Mirrors `WorkersBuildSiteOptions.publicAssets` — pairs with the
+	 * preview handler's `publicAssets` option so what preview serves
+	 * and what the snapshot publishes stay in lock-step.
+	 */
+	publicAssets?: boolean;
 }
 
 /**
@@ -156,6 +165,51 @@ async function* buildSiteImpl(opts: BuildSiteOptions): AsyncIterable<BuildSiteOu
 				contentType: "text/html;charset=utf-8",
 				hash,
 			};
+		}
+
+		// `/public/**` — copy verbatim under the site root with
+		// extension-derived content-types. Mirrors standard Astro's
+		// `public/` convention; preview's `createPreviewHandler` falls
+		// back to the same files at request time so the snapshot
+		// agrees with what preview serves.
+		if (opts.publicAssets !== false) {
+			const publicPaths: string[] = [];
+			for await (const path of opts.site.glob("/public/**")) {
+				if (!path.startsWith("/public/")) continue;
+				publicPaths.push(path);
+			}
+			publicPaths.sort();
+
+			for (const sourcePath of publicPaths) {
+				const route = prefixRoute(opts.prefix ?? "", sourcePath.slice("/public".length));
+				let bytes: Uint8Array | null;
+				try {
+					bytes = await opts.site.readFile(sourcePath);
+				} catch (err) {
+					if (!continueOnError) throw err;
+					yield buildError({ sourcePath, route, phase: "render", cause: err });
+					continue;
+				}
+				if (!bytes) {
+					const message = `buildSite: public asset ${sourcePath} disappeared during build`;
+					if (!continueOnError) throw new Error(message);
+					yield {
+						kind: "error",
+						sourcePath,
+						route,
+						phase: "render",
+						message,
+					};
+					continue;
+				}
+				const hash = createHash("sha256").update(bytes).digest("hex");
+				yield {
+					route,
+					bytes,
+					contentType: mimeForPath(sourcePath),
+					hash,
+				};
+			}
 		}
 	} finally {
 		if (created) await rm(tmpDir, { recursive: true, force: true });

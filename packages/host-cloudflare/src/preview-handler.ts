@@ -59,13 +59,19 @@ import type {
 	Site,
 	Subscription,
 } from "@astroflare/core";
+import { mimeForPath } from "@astroflare/core";
 import { inlineBundle } from "@astroflare/preview/bundle";
+import { injectHmrScript } from "@astroflare/preview/inject-hmr";
 import { type MarkdownOptions, ModuleGraph } from "@astroflare/preview/module-graph";
 import { Router } from "@astroflare/preview/router";
+import { buildHmrClientSource } from "@astroflare/runtime";
 import type { AstroflareCoordinator } from "./coordinator.js";
 
 /** Subpath of the workspace where Astroflare looks up routes. */
 const PAGES_PREFIX = "/src/pages";
+
+/** Subpath of the workspace where the public-asset fallback looks up files. */
+const PUBLIC_PREFIX = "/public";
 
 /**
  * Module specifier the compiled `.astro`/`.md`/`.mdx` modules import the
@@ -73,6 +79,18 @@ const PAGES_PREFIX = "/src/pages";
  * with `runtimeModules`) supplies the matching module map.
  */
 const RUNTIME_IMPORT = "./runtime/index.js";
+
+export interface HmrClientOptions {
+	/**
+	 * WebSocket path the injected HMR client opens. Default
+	 * `/_aflare/hmr` — matches the path Astroflare's host helpers
+	 * advertise. Hosts that mount the preview at a non-root prefix
+	 * (e.g. `/s/<siteId>/...`) should set this to the prefixed path
+	 * so the client connects against the per-site DO instead of
+	 * landing at the host's origin.
+	 */
+	socketPath?: string;
+}
 
 export interface CreatePreviewHandlerOptions {
 	site: Site;
@@ -99,6 +117,29 @@ export interface CreatePreviewHandlerOptions {
 	 * happy path stays minimal.
 	 */
 	markdown?: MarkdownOptions;
+	/**
+	 * Inject the HMR client `<script type="module">…</script>` into
+	 * rendered HTML responses (matching what the Node CLI preview
+	 * server does). Default: `true`.
+	 *
+	 * Pass `false` for hosts that serve rendered pages outside an
+	 * iframe context where HMR isn't useful (e.g. a static-snapshot
+	 * preview). Pass an object to customise the WebSocket path the
+	 * injected client opens — useful when the preview is mounted at
+	 * a non-root prefix.
+	 */
+	hmr?: boolean | HmrClientOptions;
+	/**
+	 * Serve `/public/*` assets directly from the workspace as a
+	 * fallback when no route matches. Mirrors standard Astro's
+	 * convention — files under `/public/logo.png` become reachable at
+	 * `/logo.png`. Default: `true`.
+	 *
+	 * `buildSite` (workers-runtime) emits matching `SnapshotEntry`s so
+	 * the published snapshot agrees with what preview serves; see
+	 * `WorkersBuildSiteOptions.publicAssets`.
+	 */
+	publicAssets?: boolean;
 	/** Optional structured logger; unused if absent. */
 	logger?: Logger;
 }
@@ -123,6 +164,14 @@ interface RouteResolution {
 
 export function createPreviewHandler(opts: CreatePreviewHandlerOptions): PreviewHandler {
 	const cache = opts.cache ?? createNoopCache();
+	const hmrEnabled = opts.hmr !== false;
+	// Build the inline-client source once at handler-construction time —
+	// the path doesn't change across requests, and the cost of
+	// rebuilding per-request is wasted work.
+	const hmrClientSource = hmrEnabled
+		? buildHmrClientSource(typeof opts.hmr === "object" ? opts.hmr : {})
+		: null;
+	const publicAssetsEnabled = opts.publicAssets !== false;
 	const moduleGraph = new ModuleGraph(
 		{
 			site: opts.site,
@@ -200,6 +249,10 @@ export function createPreviewHandler(opts: CreatePreviewHandlerOptions): Preview
 			const url = new URL(req.url);
 			const resolution = await resolve(url.pathname);
 			if (!resolution) {
+				if (publicAssetsEnabled) {
+					const asset = await tryServePublicAsset(opts.site, url.pathname);
+					if (asset) return asset;
+				}
 				return notFound();
 			}
 			// Endpoints (`.js` / `.ts` under `/src/pages/`) aren't part of
@@ -208,9 +261,43 @@ export function createPreviewHandler(opts: CreatePreviewHandlerOptions): Preview
 			if (resolution.kind === "endpoint") {
 				return notFound();
 			}
-			return renderRoute(opts, moduleGraph, staticPathsCache, resolution, req);
+			return renderRoute(opts, moduleGraph, staticPathsCache, resolution, req, hmrClientSource);
 		},
 	};
+}
+
+/**
+ * Serve a file under `/public/<path>` from the workspace as a static
+ * asset, with an extension-derived content-type. Returns `null` when
+ * the file is absent so the caller can fall through to a 404.
+ *
+ * Mirrors standard Astro's `public/` convention: a request for
+ * `/logo.png` resolves to `/public/logo.png` in the workspace, and
+ * the bytes are served verbatim with `image/png`. Hosts that don't
+ * want this behaviour pass `publicAssets: false` to opt out.
+ */
+async function tryServePublicAsset(site: Site, requestPath: string): Promise<Response | null> {
+	if (!requestPath.startsWith("/")) return null;
+	// Reject path-traversal attempts up front — we're going to stat
+	// `/public${requestPath}`, which would otherwise let `..` escape
+	// the public directory.
+	if (requestPath.includes("..")) return null;
+	const assetPath = `${PUBLIC_PREFIX}${requestPath}`;
+	const stat = await site.statFile(assetPath);
+	if (!stat) return null;
+	const bytes = await site.readFile(assetPath);
+	if (!bytes) return null;
+	// Copy into a fresh ArrayBuffer to satisfy `BodyInit`.
+	const copy = new Uint8Array(bytes.byteLength);
+	copy.set(bytes);
+	return new Response(copy.buffer, {
+		status: 200,
+		headers: {
+			"content-type": mimeForPath(requestPath),
+			etag: `"${stat.hash}"`,
+			"cache-control": "public, max-age=0, must-revalidate",
+		},
+	});
 }
 
 /**
@@ -273,6 +360,7 @@ async function renderRoute(
 	staticPathsCache: Map<string, Promise<StaticPathsResult>>,
 	resolution: RouteResolution,
 	request: Request,
+	hmrClientSource: string | null,
 ): Promise<Response> {
 	const { sourcePath, isDynamic } = resolution;
 	let { params } = resolution;
@@ -369,11 +457,27 @@ async function renderRoute(
 	if (result.kind === "response") {
 		const headers = new Headers(result.headers);
 		for (const cookie of result.cookies) headers.append("set-cookie", cookie);
+		// Only inject HMR into HTML responses produced by user code
+		// (e.g. `Astro.redirect` keeps redirecting; a JSON 200 stays
+		// JSON). The Node preview server applies the same gate.
+		const contentType = headers.get("content-type") ?? "";
+		if (
+			hmrClientSource &&
+			result.body !== null &&
+			result.status === 200 &&
+			contentType.toLowerCase().startsWith("text/html")
+		) {
+			return new Response(injectHmrScript(result.body, hmrClientSource), {
+				status: result.status,
+				headers,
+			});
+		}
 		return new Response(result.body, { status: result.status, headers });
 	}
 	const headers = new Headers({ "content-type": "text/html;charset=utf-8" });
 	for (const cookie of result.cookies) headers.append("set-cookie", cookie);
-	return new Response(result.html, { status: 200, headers });
+	const html = hmrClientSource ? injectHmrScript(result.html, hmrClientSource) : result.html;
+	return new Response(html, { status: 200, headers });
 }
 
 function notFound(): Response {

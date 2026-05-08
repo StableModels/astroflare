@@ -249,6 +249,123 @@ const { title } = Astro.props;
 		expect(html).toContain("Third post");
 	});
 
+	it("injects the HMR client script by default", async () => {
+		const { handler } = bootHarness();
+		const res = await handler.fetch(new Request("https://app/"));
+		expect(res.status).toBe(200);
+		const html = await res.text();
+		// Default-on injection lands a <script type="module"> with the
+		// stock `/_aflare/hmr` path baked in.
+		expect(html).toContain('<script type="module">');
+		expect(html).toContain("/_aflare/hmr");
+		expect(html).toContain("WebSocket");
+	});
+
+	it("respects a custom hmr.socketPath", async () => {
+		const site = new MemorySite();
+		for (const [path, bytes] of Object.entries(getStarterFiles())) site.write(`/${path}`, bytes);
+		const cache = new MemoryCache();
+		const sql = makeMockSql();
+		const coordinator = createCoordinator({ sql });
+		const executor = createWorkerdExecutor({
+			loader: env.LOADER,
+			compatibilityDate: "2025-09-01",
+			compatibilityFlags: ["nodejs_compat"],
+			runtime: runtimeModules,
+		});
+		const handler = createPreviewHandler({
+			site,
+			coordinator,
+			executor,
+			cache,
+			hmr: { socketPath: "/s/site-abc/_aflare/hmr" },
+		});
+
+		const res = await handler.fetch(new Request("https://app/"));
+		expect(res.status).toBe(200);
+		const html = await res.text();
+		expect(html).toContain("/s/site-abc/_aflare/hmr");
+		// The default path is no longer present in the injected script.
+		expect(html).not.toMatch(/"\/_aflare\/hmr"/);
+	});
+
+	it("does not inject HMR when hmr: false", async () => {
+		const site = new MemorySite();
+		for (const [path, bytes] of Object.entries(getStarterFiles())) site.write(`/${path}`, bytes);
+		const cache = new MemoryCache();
+		const sql = makeMockSql();
+		const coordinator = createCoordinator({ sql });
+		const executor = createWorkerdExecutor({
+			loader: env.LOADER,
+			compatibilityDate: "2025-09-01",
+			compatibilityFlags: ["nodejs_compat"],
+			runtime: runtimeModules,
+		});
+		const handler = createPreviewHandler({ site, coordinator, executor, cache, hmr: false });
+
+		const res = await handler.fetch(new Request("https://app/"));
+		expect(res.status).toBe(200);
+		const html = await res.text();
+		expect(html).not.toContain("/_aflare/hmr");
+	});
+
+	it("serves /public/* assets with extension-derived content-types", async () => {
+		const { site, handler } = bootHarness();
+		const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3, 4]);
+		site.write("/public/logo.png", png);
+		site.write("/public/css/site.css", new TextEncoder().encode("body{}"));
+
+		const res = await handler.fetch(new Request("https://app/logo.png"));
+		expect(res.status).toBe(200);
+		expect(res.headers.get("content-type")).toBe("image/png");
+		const body = new Uint8Array(await res.arrayBuffer());
+		expect(Array.from(body)).toEqual(Array.from(png));
+
+		const css = await handler.fetch(new Request("https://app/css/site.css"));
+		expect(css.status).toBe(200);
+		expect(css.headers.get("content-type")).toBe("text/css;charset=utf-8");
+		expect(await css.text()).toBe("body{}");
+	});
+
+	it("public-asset fallback rejects path traversal", async () => {
+		const { handler } = bootHarness();
+		const res = await handler.fetch(new Request("https://app/../package.json"));
+		// `..` is rejected up front; the path neither matches a route
+		// nor a public asset, so we 404.
+		expect(res.status).toBe(404);
+	});
+
+	it("returns 404 for unknown routes when there's no matching public asset", async () => {
+		const { handler } = bootHarness();
+		const res = await handler.fetch(new Request("https://app/missing.png"));
+		expect(res.status).toBe(404);
+	});
+
+	it("publicAssets: false disables the fallback", async () => {
+		const site = new MemorySite();
+		for (const [path, bytes] of Object.entries(getStarterFiles())) site.write(`/${path}`, bytes);
+		site.write("/public/logo.png", new Uint8Array([1, 2, 3]));
+		const cache = new MemoryCache();
+		const sql = makeMockSql();
+		const coordinator = createCoordinator({ sql });
+		const executor = createWorkerdExecutor({
+			loader: env.LOADER,
+			compatibilityDate: "2025-09-01",
+			compatibilityFlags: ["nodejs_compat"],
+			runtime: runtimeModules,
+		});
+		const handler = createPreviewHandler({
+			site,
+			coordinator,
+			executor,
+			cache,
+			publicAssets: false,
+		});
+
+		const res = await handler.fetch(new Request("https://app/logo.png"));
+		expect(res.status).toBe(404);
+	});
+
 	it("picks up layout edits after coordinator.notifyChanged", async () => {
 		const { site, coordinator, handler } = bootHarness();
 

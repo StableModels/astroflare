@@ -49,7 +49,7 @@ import type {
 	SnapshotErrorLocation,
 	TaskBundle,
 } from "@astroflare/core";
-import { buildCodeFrame, sha256Hex, snippetFor } from "@astroflare/core";
+import { buildCodeFrame, mimeForPath, sha256Hex, snippetFor } from "@astroflare/core";
 import { inlineBundle } from "@astroflare/preview/bundle";
 import { type MarkdownOptions, ModuleGraph } from "@astroflare/preview/module-graph";
 import {
@@ -107,6 +107,17 @@ export interface WorkersBuildSiteOptions {
 	 * `out.kind === "error"`) at the consumer.
 	 */
 	continueOnError?: boolean;
+	/**
+	 * Emit one `SnapshotEntry` per file under `/public/**`, mirroring
+	 * standard Astro's `public/` convention — the bytes serve at the
+	 * site root with extension-derived content-types. Default: `true`.
+	 *
+	 * Pairs with the preview handler's `publicAssets` option so what
+	 * preview serves and what the snapshot publishes stay in lock-step.
+	 * Pass `false` for hosts that ship public assets through a separate
+	 * pipeline (e.g. a CDN bucket).
+	 */
+	publicAssets?: boolean;
 }
 
 /**
@@ -272,6 +283,51 @@ async function* buildSiteImpl(opts: WorkersBuildSiteOptions): AsyncIterable<Buil
 				});
 				// per-entry render failures are localised — keep iterating
 			}
+		}
+	}
+
+	// `/public/**` — copied verbatim under the site root. Mirrors
+	// standard Astro's convention; preview serves these through the
+	// fallback in `createPreviewHandler`. Skipped on `publicAssets:
+	// false` (hosts shipping public assets through a side-channel).
+	if (opts.publicAssets !== false) {
+		const publicPaths: string[] = [];
+		const publicSeen = new Set<string>();
+		for await (const path of opts.site.glob("/public/**")) {
+			if (!path.startsWith("/public/")) continue;
+			if (publicSeen.has(path)) continue;
+			publicSeen.add(path);
+			publicPaths.push(path);
+		}
+		publicPaths.sort();
+
+		for (const sourcePath of publicPaths) {
+			const route = prefixRoute(opts.prefix ?? "", sourcePath.slice("/public".length));
+			let bytes: Uint8Array | null;
+			try {
+				bytes = await opts.site.readFile(sourcePath);
+			} catch (err) {
+				if (!continueOnError) throw err;
+				yield buildError({ sourcePath, route, phase: "render", cause: err });
+				continue;
+			}
+			if (!bytes) {
+				// Glob found it but readFile returned null — the file
+				// disappeared mid-build. Surface as a render-phase error
+				// (no compile/getStaticPaths step for assets).
+				const message = `buildSite: public asset ${sourcePath} disappeared during build`;
+				if (!continueOnError) throw new Error(message);
+				yield {
+					kind: "error",
+					sourcePath,
+					route,
+					phase: "render",
+					message,
+				};
+				continue;
+			}
+			const hash = await sha256Hex(bytes);
+			yield { route, bytes, contentType: mimeForPath(sourcePath), hash };
 		}
 	}
 }

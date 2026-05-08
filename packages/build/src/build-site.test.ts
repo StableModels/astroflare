@@ -122,3 +122,31 @@ describe("buildSite (node) — continueOnError", () => {
 		expect(err.stack).toContain("render boom");
 	});
 });
+
+describe("buildSite (node) — public assets", () => {
+	it("emits one entry per /public/* file with extension-derived content-type", async () => {
+		const site = new MemorySite();
+		site.write("/src/pages/index.astro", enc("---\n---\n<h1>home</h1>"));
+		const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0, 1, 2, 3]);
+		site.write("/public/logo.png", png);
+		site.write("/public/css/site.css", enc("body{}"));
+
+		const entries: SnapshotEntry[] = [];
+		for await (const e of buildSite({ site })) entries.push(e);
+
+		const byRoute = new Map(entries.map((e) => [e.route, e]));
+		expect([...byRoute.keys()].sort()).toEqual(["/", "/css/site.css", "/logo.png"]);
+		expect(byRoute.get("/logo.png")?.contentType).toBe("image/png");
+		expect(byRoute.get("/css/site.css")?.contentType).toBe("text/css;charset=utf-8");
+	});
+
+	it("publicAssets: false skips /public/* enumeration", async () => {
+		const site = new MemorySite();
+		site.write("/src/pages/index.astro", enc("---\n---\n<h1>home</h1>"));
+		site.write("/public/logo.png", new Uint8Array([1, 2, 3]));
+
+		const entries: SnapshotEntry[] = [];
+		for await (const e of buildSite({ site, publicAssets: false })) entries.push(e);
+		expect(entries.map((e) => e.route)).toEqual(["/"]);
+	});
+});

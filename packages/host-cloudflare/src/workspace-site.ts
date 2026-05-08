@@ -31,6 +31,19 @@ import type { SqlBackend } from "./sql-cache.js";
  * caller pass any compatible shape keeps tests independent of the
  * `cloudflare:workers` runtime context that `@cloudflare/shell`
  * needs to instantiate.
+ *
+ * **Cross-DO use is supported.** `WorkspaceLike` is structurally
+ * typed; hosts whose workspace lives in a different Durable Object
+ * than the Astroflare pipeline can satisfy this interface with a
+ * stub-forwarding proxy whose methods round-trip into the workspace
+ * DO via RPC. In that topology the host's write path is *not*
+ * `WorkspaceSite.write` — it's whatever cross-DO write the host
+ * already has — so the framework can no longer maintain
+ * `aflare_hash` automatically. Use {@link WorkspaceSite.recordExternalWrite}
+ * / {@link WorkspaceSite.recordExternalDelete} on every external
+ * write to keep the sidecar consistent; without them, the closure
+ * cache key drifts and preview renders serve stale compiled output
+ * even though the HMR socket fires.
  */
 export interface WorkspaceLike {
 	readFileBytes(path: string): Promise<Uint8Array | null>;
@@ -125,6 +138,59 @@ export class WorkspaceSite implements Site {
 		const existed = await this.#ws.deleteFile(path);
 		this.#sql.exec("DELETE FROM aflare_hash WHERE path = ?", path);
 		return { existed, event: { kind: "delete", path } };
+	}
+
+	/**
+	 * Record that the workspace was written externally (by a path
+	 * other than {@link WorkspaceSite.write}). Reads the new bytes
+	 * back through the workspace, computes the SHA-256, refreshes
+	 * `aflare_hash`, and returns a {@link SiteChangeEvent} ready for
+	 * `coordinator.notifyChanged`.
+	 *
+	 * **Why this exists.** The hash sidecar (`aflare_hash`) is the
+	 * load-bearing key for the closure-aware compile cache. The
+	 * preview handler walks the import closure and looks up each
+	 * module by its hash; if the sidecar is stale, the cache returns
+	 * the old compiled bytes even after the source changed and the
+	 * HMR socket fired. `WorkspaceSite.write` keeps the sidecar in
+	 * step automatically — but hosts whose write path bypasses it
+	 * (cross-DO writes, agent-driven writes through the workspace
+	 * DO, externally-mounted filesystems) need to refresh the hash
+	 * out-of-band. That's this method.
+	 *
+	 * **Cross-DO use.** When the workspace lives in DO A and the
+	 * Astroflare pipeline lives in DO B, the canonical wiring is:
+	 *
+	 *   1. The host writes through DO A (no `WorkspaceSite.write`).
+	 *   2. DO A forwards the change into DO B via RPC.
+	 *   3. DO B calls `site.recordExternalWrite(path)` followed by
+	 *      `coordinator.notifyChanged(event)`.
+	 *
+	 * Returns `null` if the file is no longer present in the
+	 * workspace at the moment of the call (race against a concurrent
+	 * delete) — the caller should drop the change in that case.
+	 */
+	async recordExternalWrite(
+		path: string,
+	): Promise<{ hash: string; event: SiteChangeEvent } | null> {
+		this.#ensure();
+		const bytes = await this.#ws.readFileBytes(path);
+		if (!bytes) return null;
+		const hash = await sha256Hex(bytes);
+		this.#sql.exec("INSERT OR REPLACE INTO aflare_hash (path, hash) VALUES (?, ?)", path, hash);
+		return { hash, event: { kind: "write", path, hash } };
+	}
+
+	/**
+	 * Mirror of {@link recordExternalWrite} for deletes. Drops the
+	 * `aflare_hash` row and returns a {@link SiteChangeEvent} ready
+	 * for `coordinator.notifyChanged`. Idempotent — safe to call for
+	 * paths that were never tracked.
+	 */
+	async recordExternalDelete(path: string): Promise<{ event: SiteChangeEvent }> {
+		this.#ensure();
+		this.#sql.exec("DELETE FROM aflare_hash WHERE path = ?", path);
+		return { event: { kind: "delete", path } };
 	}
 }
 
