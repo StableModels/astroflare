@@ -5,3 +5,4 @@ export * from "./hash.js";
 export * from "./glob.js";
 export * from "./path.js";
 export * from "./code-frame.js";
+export * from "./mime.js";

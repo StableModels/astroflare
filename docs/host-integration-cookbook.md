@@ -86,15 +86,20 @@ sockets accumulate until the DO is evicted.
 ### Path-prefixing the HMR client
 
 The HMR client connects to an absolute path: `/_aflare/hmr`. Hosts that
-mount preview at a non-root prefix (e.g. `/s/:siteId/`) must either:
+mount preview at a non-root prefix (e.g. `/s/:siteId/`) have two options:
 
-- Proxy `/_aflare/hmr` at the same origin, so the absolute path resolves; or
-- Wrap the preview handler in a shim that rewrites `/_aflare/hmr` requests
-  into the SiteDO at the same site identity the rest of the path serves.
+- Proxy `/_aflare/hmr` at the same origin, so the absolute path resolves
+  to the matching SiteDO; or
+- Pass `hmr: { socketPath: "/s/<siteId>/_aflare/hmr" }` to
+  `createPreviewHandler` so the injected client opens its WebSocket
+  against the prefixed path. This is the simpler shape when the site
+  identity is part of the URL path.
 
-There's no per-request HMR endpoint base path knob today — the simplest
-shape is to keep `/_aflare/*` rooted at the host's origin and route every
-hit through to the matching SiteDO.
+`createPreviewHandler` injects the HMR client by default — there's no
+extra wiring on the host's side beyond exposing the WS endpoint at
+whatever path the client expects. Pass `hmr: false` to skip injection
+entirely (useful for static-snapshot previews that don't need live
+reload).
 
 ## Example 1 — Single-DO host
 
@@ -423,6 +428,57 @@ the bytes.** As long as every write source funnels through `Workspace`,
 DO A's `onChange` is the single integration point. The agent stays
 decoupled; the cookbook layout for DO A and DO B doesn't change as you
 add more write sources.
+
+## What `createPreviewHandler` does for you
+
+The worker preview handler is the canonical complete preview surface for
+hosts running on `@astroflare/host-cloudflare`. Two defaults that hosts
+usually shouldn't have to rebuild:
+
+### HMR client injection (`hmr` option)
+
+Every HTML response gets a `<script type="module">` block with the
+browser-side HMR client inlined. The client opens a WebSocket against
+`/_aflare/hmr` (default) and reloads the page on any `update` / `prune`
+/ `full-reload` message. Hosts that mount preview at a non-root prefix
+should pass a `hmr.socketPath` so the WS URL is rooted at the right
+place:
+
+```ts
+createPreviewHandler({
+  site,
+  coordinator,
+  executor,
+  cache,
+  hmr: { socketPath: `/s/${siteId}/_aflare/hmr` },
+});
+```
+
+Pass `hmr: false` to skip injection entirely (e.g. when serving rendered
+pages outside an iframe context where HMR isn't useful). The injected
+script is the same client `installHmrClient` exports for direct use; the
+underlying source builder is `buildHmrClientSource({ socketPath })` from
+`@astroflare/runtime` — useful when a host wants to ship the script at
+its own URL instead of inlining.
+
+### `/public/*` static assets (`publicAssets` option)
+
+Mirrors standard Astro's
+[`public/`](https://docs.astro.build/en/basics/project-structure/#public)
+convention. A request for `/logo.png` falls through to
+`/public/logo.png` in the workspace if no route matches; the bytes are
+served verbatim with an extension-derived content-type. Path traversal
+(`..`) is rejected up front so the fallback can't escape `/public/`.
+
+`buildSite` (both Node and workers-runtime entries) emits matching
+`SnapshotEntry`s under the same routes, so the published snapshot has
+the same set of bytes preview serves. Pass `publicAssets: false` on
+either side to opt out (for hosts shipping public assets through a
+separate CDN pipeline).
+
+The `mimeForPath(pathOrExt)` helper that backs both the preview
+fallback and the snapshot walk is exported from `@astroflare/core` for
+hosts that want to use the same content-type mapping in their own code.
 
 ## Verifying your wiring
 

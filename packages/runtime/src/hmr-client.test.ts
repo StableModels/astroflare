@@ -1,6 +1,6 @@
 import type { HmrMessage } from "@astroflare/core";
 import { describe, expect, it, vi } from "vitest";
-import { HMR_CLIENT_SOURCE, installHmrClient } from "./hmr-client.js";
+import { HMR_CLIENT_SOURCE, buildHmrClientSource, installHmrClient } from "./hmr-client.js";
 
 /**
  * Fake `WebSocket` for tests. We don't need a real socket — `installHmrClient`
@@ -144,5 +144,29 @@ describe("HMR_CLIENT_SOURCE constant", () => {
 
 	it("stays lean (under 3 KB per the brief target)", () => {
 		expect(HMR_CLIENT_SOURCE.length).toBeLessThan(3072);
+	});
+
+	it("equals buildHmrClientSource() with default options", () => {
+		expect(HMR_CLIENT_SOURCE).toBe(buildHmrClientSource());
+	});
+});
+
+describe("buildHmrClientSource", () => {
+	it("substitutes a custom socketPath into the WebSocket URL", () => {
+		const src = buildHmrClientSource({ socketPath: "/s/site-abc/_aflare/hmr" });
+		expect(src).toContain('"/s/site-abc/_aflare/hmr"');
+		expect(src).not.toContain('"/_aflare/hmr"');
+	});
+
+	it("rejects relative socketPaths", () => {
+		expect(() => buildHmrClientSource({ socketPath: "_aflare/hmr" })).toThrow(/must start with/);
+	});
+
+	it("safely escapes the socketPath as a JS literal", () => {
+		// Pathological but valid path component — JSON.stringify keeps the
+		// embedded quote escaped so the script doesn't get re-parsed by the
+		// browser as a closing literal.
+		const src = buildHmrClientSource({ socketPath: '/weird"path' });
+		expect(src).toContain('"/weird\\"path"');
 	});
 });

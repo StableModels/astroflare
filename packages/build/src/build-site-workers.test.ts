@@ -291,6 +291,61 @@ const { title } = Astro.props;
 		expect(entries).toEqual([]);
 	});
 
+	it("emits one entry per /public/* file with extension-derived content-type", async () => {
+		const site = new MemorySite();
+		site.write("/src/pages/index.astro", enc("---\n---\n<h1>home</h1>"));
+		const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3]);
+		site.write("/public/logo.png", png);
+		site.write("/public/css/site.css", enc("body{}"));
+
+		const executor = makeExecutor();
+		const entries: SnapshotEntry[] = [];
+		for await (const entry of buildSite({ site, executor })) {
+			entries.push(entry);
+		}
+
+		// Page first (in glob order), then public assets sorted by source path.
+		const byRoute = new Map(entries.map((e) => [e.route, e]));
+		expect([...byRoute.keys()].sort()).toEqual(["/", "/css/site.css", "/logo.png"]);
+
+		const logo = byRoute.get("/logo.png");
+		expect(logo?.contentType).toBe("image/png");
+		expect(Array.from(logo?.bytes ?? [])).toEqual(Array.from(png));
+		expect(logo?.hash).toBe(await sha256Hex(png));
+
+		const css = byRoute.get("/css/site.css");
+		expect(css?.contentType).toBe("text/css;charset=utf-8");
+		expect(dec(css?.bytes ?? new Uint8Array())).toBe("body{}");
+	});
+
+	it("publicAssets: false skips /public/* enumeration", async () => {
+		const site = new MemorySite();
+		site.write("/src/pages/index.astro", enc("---\n---\n<h1>home</h1>"));
+		site.write("/public/logo.png", new Uint8Array([1, 2, 3]));
+
+		const executor = makeExecutor();
+		const entries: SnapshotEntry[] = [];
+		for await (const entry of buildSite({ site, executor, publicAssets: false })) {
+			entries.push(entry);
+		}
+		expect(entries.map((e) => e.route)).toEqual(["/"]);
+	});
+
+	it("public-asset prefix mirrors the page prefix option", async () => {
+		const site = new MemorySite();
+		site.write("/src/pages/index.astro", enc("---\n---\n<h1>home</h1>"));
+		site.write("/public/logo.png", new Uint8Array([1, 2, 3]));
+
+		const executor = makeExecutor();
+		const entries: SnapshotEntry[] = [];
+		for await (const entry of buildSite({ site, executor, prefix: "minimal" })) {
+			entries.push(entry);
+		}
+		const routes = entries.map((e) => e.route);
+		expect(routes).toContain("/minimal/");
+		expect(routes).toContain("/minimal/logo.png");
+	});
+
 	it("hashes are deterministic for the same source", async () => {
 		const site1 = new MemorySite();
 		const site2 = new MemorySite();
