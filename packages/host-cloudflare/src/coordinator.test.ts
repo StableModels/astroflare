@@ -148,6 +148,69 @@ describe("createCoordinator", () => {
 		expect(b?.hash).toBe("new");
 	});
 
+	it("recentHmrEvents records published events oldest → newest", async () => {
+		const c = createCoordinator({ sql: makeMockSql() });
+		expect(c.recentHmrEvents()).toEqual([]);
+
+		await c.graphPut({ path: "/a.astro", hash: "h1", imports: [], importedBy: [] });
+		await c.graphPut({ path: "/b.astro", hash: "h2", imports: [], importedBy: [] });
+
+		const t0 = Date.now();
+		await c.notifyChanged({ kind: "write", path: "/a.astro", hash: "h1b" });
+		await c.notifyChanged({ kind: "write", path: "/b.astro", hash: "h2b" });
+
+		const events = c.recentHmrEvents();
+		expect(events).toHaveLength(2);
+		expect(events[0]?.message).toMatchObject({ type: "update", trigger: "/a.astro" });
+		expect(events[1]?.message).toMatchObject({ type: "update", trigger: "/b.astro" });
+		// Timestamps are non-decreasing and within reach of `now`.
+		expect(events[0]?.at).toBeGreaterThanOrEqual(t0);
+		expect(events[1]?.at).toBeGreaterThanOrEqual(events[0]?.at ?? 0);
+
+		// `limit` returns the most recent N entries.
+		expect(c.recentHmrEvents(1)).toHaveLength(1);
+		expect(c.recentHmrEvents(1)[0]?.message).toMatchObject({ trigger: "/b.astro" });
+		expect(c.recentHmrEvents(0)).toEqual([]);
+	});
+
+	it("recentHmrEvents caps at the ring size and drops oldest entries", async () => {
+		const c = createCoordinator({ sql: makeMockSql() });
+		// Ring cap is 32; push 40 events and assert we keep the
+		// most-recent 32 in oldest → newest order.
+		for (let i = 0; i < 40; i++) {
+			await c.graphPut({ path: `/m${i}.astro`, hash: `h${i}`, imports: [], importedBy: [] });
+			await c.notifyChanged({ kind: "write", path: `/m${i}.astro`, hash: `h${i}n` });
+		}
+		const events = c.recentHmrEvents();
+		expect(events).toHaveLength(32);
+		// The first kept event was `m8` (40 - 32); last is `m39`.
+		expect(events[0]?.message).toMatchObject({ trigger: "/m8.astro" });
+		expect(events.at(-1)?.message).toMatchObject({ trigger: "/m39.astro" });
+	});
+
+	it("simulateChange drives the same pipeline as notifyChanged", async () => {
+		const c = createCoordinator({ sql: makeMockSql() });
+		await c.graphPut({ path: "/b.astro", hash: "old", imports: [], importedBy: [] });
+		await c.graphPut({ path: "/a.astro", hash: "h1", imports: ["/b.astro"], importedBy: [] });
+
+		const seen: unknown[] = [];
+		c.subscribe("hmr", (m) => seen.push(m));
+
+		await c.simulateChange({ kind: "write", path: "/b.astro", hash: "new" });
+
+		expect(seen).toHaveLength(1);
+		expect(seen[0]).toMatchObject({
+			type: "update",
+			trigger: "/b.astro",
+			updates: expect.arrayContaining([
+				expect.objectContaining({ path: "/b.astro", hash: "new" }),
+				expect.objectContaining({ path: "/a.astro" }),
+			]),
+		});
+		// And the ring buffer recorded the same event.
+		expect(c.recentHmrEvents()).toHaveLength(1);
+	});
+
 	it("notifyRemoved publishes hmr prune and removes the node", async () => {
 		const c = createCoordinator({ sql: makeMockSql() });
 		await c.graphPut({ path: "/b.astro", hash: "h2", imports: [], importedBy: [] });

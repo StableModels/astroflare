@@ -90,6 +90,22 @@ export interface CreateCoordinatorOptions {
 	ctx?: CoordinatorContext;
 }
 
+/**
+ * Recently-published HMR event, oldest → newest. Returned by
+ * {@link AstroflareCoordinator.recentHmrEvents}. Best-effort across
+ * DO eviction — the buffer lives in in-isolate JS state and resets
+ * on hibernation.
+ */
+export interface HmrEventRecord {
+	/** Wall-clock timestamp (`Date.now()`) when the event was published. */
+	at: number;
+	/** The exact `HmrMessage` that was broadcast on the `"hmr"` channel. */
+	message: HmrMessage;
+}
+
+/** Default cap for the recent-HMR-events ring buffer. */
+const HMR_RING_CAP = 32;
+
 export interface AstroflareCoordinator {
 	// Change pipeline
 	notifyChanged(event: SiteChangeEvent): Promise<void>;
@@ -113,6 +129,27 @@ export interface AstroflareCoordinator {
 
 	// Diagnostic helper: number of currently-attached HMR sockets.
 	hmrConnectionCount(): number;
+
+	/**
+	 * Recently-published HMR messages, oldest → newest. Capped to
+	 * `limit` (default 32). Lets operator-side health checks verify
+	 * the change pipeline is firing without spinning up a browser.
+	 *
+	 * Best-effort across DO eviction — the underlying buffer is in-
+	 * isolate JS state, lost on hibernation. Returns `[]` if no HMR
+	 * events have been published since the isolate started.
+	 */
+	recentHmrEvents(limit?: number): readonly HmrEventRecord[];
+
+	/**
+	 * Test helper: synthesize a {@link SiteChangeEvent} and drive it
+	 * through {@link notifyChanged} without going through
+	 * `Workspace.onChange`. Equivalent to calling `notifyChanged`
+	 * directly — exists as a named entry point so test setup reads
+	 * intent-first ("simulate a change to /x.astro") instead of
+	 * mechanism-first ("call the change pipeline with this event").
+	 */
+	simulateChange(event: SiteChangeEvent): Promise<void>;
 }
 
 export function createCoordinator(opts: CreateCoordinatorOptions): AstroflareCoordinator {
@@ -120,6 +157,12 @@ export function createCoordinator(opts: CreateCoordinatorOptions): AstroflareCoo
 	const ctx = opts.ctx;
 	let initialized = false;
 	const subs = new Map<string, Set<(m: HmrMessage) => void>>();
+	// Ring buffer of recent HMR events. In-isolate state — resets on
+	// DO eviction. Capped to `HMR_RING_CAP`; index points at the next
+	// write slot.
+	const hmrRing: (HmrEventRecord | undefined)[] = new Array(HMR_RING_CAP);
+	let hmrRingNext = 0;
+	let hmrRingCount = 0;
 
 	function ensure(): void {
 		if (initialized) return;
@@ -272,10 +315,36 @@ export function createCoordinator(opts: CreateCoordinatorOptions): AstroflareCoo
 				}
 			}
 		}
-		// Fan out HMR messages to attached browser sockets.
-		if (channel === "hmr" && ctx) {
-			broadcastHmrToSockets(message);
+		// Fan out HMR messages to attached browser sockets and stash
+		// the event in the diagnostic ring so operator tools can
+		// verify the pipeline fired.
+		if (channel === "hmr") {
+			recordHmrEvent(message);
+			if (ctx) broadcastHmrToSockets(message);
 		}
+	}
+
+	function recordHmrEvent(message: HmrMessage): void {
+		hmrRing[hmrRingNext] = { at: Date.now(), message };
+		hmrRingNext = (hmrRingNext + 1) % HMR_RING_CAP;
+		if (hmrRingCount < HMR_RING_CAP) hmrRingCount++;
+	}
+
+	function recentHmrEvents(limit?: number): readonly HmrEventRecord[] {
+		const cap = limit === undefined ? hmrRingCount : Math.max(0, Math.min(limit, hmrRingCount));
+		if (cap === 0) return [];
+		// Walk oldest → newest. Oldest sits `hmrRingCount` slots
+		// behind `hmrRingNext` once the buffer wraps; before that,
+		// it's at index 0.
+		const start = (hmrRingNext - hmrRingCount + HMR_RING_CAP) % HMR_RING_CAP;
+		const out: HmrEventRecord[] = [];
+		const skip = hmrRingCount - cap;
+		for (let i = 0; i < hmrRingCount; i++) {
+			if (i < skip) continue;
+			const slot = hmrRing[(start + i) % HMR_RING_CAP];
+			if (slot) out.push(slot);
+		}
+		return out;
 	}
 
 	function subscribe(channel: string, handler: (m: HmrMessage) => void): Subscription {
@@ -361,6 +430,10 @@ export function createCoordinator(opts: CreateCoordinatorOptions): AstroflareCoo
 		return ctx.getWebSockets(HMR_TAG).length;
 	}
 
+	async function simulateChange(event: SiteChangeEvent): Promise<void> {
+		await notifyChanged(event);
+	}
+
 	return {
 		notifyChanged,
 		notifyRemoved,
@@ -375,5 +448,7 @@ export function createCoordinator(opts: CreateCoordinatorOptions): AstroflareCoo
 		webSocketMessage,
 		webSocketClose,
 		hmrConnectionCount,
+		recentHmrEvents,
+		simulateChange,
 	};
 }

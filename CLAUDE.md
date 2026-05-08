@@ -172,6 +172,22 @@ build cleanly into deployable bundles.
   runs through the workers-runtime `buildSite` → `R2Snapshots` →
   `createSnapshotHandler` round-trip (`tests/workerd/build-site-workerd.test.ts`),
   so preview and publish stay in lock-step.
+- **Cross-DO host integration ergonomics.** Hosts whose workspace
+  lives in a different DO than the Astroflare pipeline (the Ember
+  shape: workspace DO + pipeline DO + agent DO) can satisfy
+  `WorkspaceLike` with a stub-forwarding proxy. The change-pipeline
+  helpers `WorkspaceSite.recordExternalWrite(path)` /
+  `recordExternalDelete(path)` keep the `aflare_hash` sidecar in
+  step when the host's write path bypasses `WorkspaceSite.write`
+  (without them, `notifyChanged` fires but the closure cache key
+  drifts and preview renders serve stale compiled output). Two
+  diagnostic methods on the coordinator —
+  `recentHmrEvents(limit?)` (best-effort ring buffer of recent HMR
+  fan-outs) and `simulateChange(event)` (intent-readable alias for
+  `notifyChanged` in tests) — let operator tools verify the change
+  pipeline fired without spinning up a browser. Wiring guide:
+  [`docs/host-integration-cookbook.md`](docs/host-integration-cookbook.md)
+  (single-DO / two-DO / three-DO worked examples).
 
 Phase plans:
 [`docs/phases/phase-26-host-driven-preview.md`](docs/phases/phase-26-host-driven-preview.md),
