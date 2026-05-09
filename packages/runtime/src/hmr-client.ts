@@ -24,6 +24,11 @@
  */
 
 import type { HmrMessage } from "@astroflare/core";
+import {
+	ERROR_OVERLAY_CLIENT_SOURCE,
+	dismissAstroflareError,
+	showAstroflareError,
+} from "./error-overlay.js";
 
 export interface HmrClientOptions {
 	/** Where to connect. Default: `ws(s)://<location.host>/_aflare/hmr`. */
@@ -41,6 +46,18 @@ export interface HmrClientOptions {
 	 * Reload action. Default: `location.reload()`. Tests inject a spy.
 	 */
 	reload?: () => void;
+	/**
+	 * Show a modal error overlay when an `error` message arrives.
+	 * Default: invoke {@link showAstroflareError} so the iframe surfaces
+	 * the compile failure on top of the previous good render. Tests
+	 * supply a spy.
+	 */
+	showError?: (error: HmrMessage & { type: "error" }) => void;
+	/**
+	 * Dismiss the error overlay when the next clean `update`/`prune`
+	 * arrives. Default: {@link dismissAstroflareError}. Tests supply a spy.
+	 */
+	dismissError?: () => void;
 }
 
 export interface HmrClient {
@@ -61,6 +78,8 @@ export function installHmrClient(options: HmrClientOptions = {}): HmrClient {
 	}
 	const url = options.url ?? defaultHmrUrl();
 	const reload = options.reload ?? (() => globalThis.location?.reload?.());
+	const showError = options.showError ?? defaultShowError;
+	const dismissError = options.dismissError ?? dismissAstroflareError;
 	const ws = new Ctor(url);
 
 	ws.addEventListener("message", (ev: MessageEvent) => {
@@ -74,10 +93,16 @@ export function installHmrClient(options: HmrClientOptions = {}): HmrClient {
 		switch (msg.type) {
 			case "update":
 			case "prune":
+				// A successful change supersedes any displayed compile error
+				// — drop the overlay before the page reloads (the new render
+				// would otherwise come up clean with an inherited modal on
+				// top of it).
+				dismissError();
 				options.onReload?.("update");
 				reload();
 				return;
 			case "full-reload":
+				dismissError();
 				options.onReload?.(msg.reason);
 				reload();
 				return;
@@ -86,6 +111,7 @@ export function installHmrClient(options: HmrClientOptions = {}): HmrClient {
 				console.error(
 					`[astroflare hmr] ${msg.error.message}${msg.error.path ? ` (${msg.error.path})` : ""}`,
 				);
+				showError(msg);
 				return;
 		}
 	});
@@ -105,6 +131,37 @@ function defaultHmrUrl(): string {
 	if (!loc) return "/_aflare/hmr";
 	const protocol = loc.protocol === "https:" ? "wss:" : "ws:";
 	return `${protocol}//${loc.host}/_aflare/hmr`;
+}
+
+/**
+ * Render an HMR error onto the dev overlay. Composes the structured
+ * `codeFrame` / `snippet` / `diagnostics` fields into the overlay's
+ * single-paragraph `detail` slot — when the framework supplies a
+ * code frame, it dominates; otherwise we fall back to the message
+ * (and an annotated line:column when those are present).
+ */
+function defaultShowError(msg: HmrMessage & { type: "error" }): void {
+	const err = msg.error;
+	const where = err.path ? err.path : "compile";
+	const title = err.message;
+	const detailParts: string[] = [];
+	if (err.codeFrame?.text) {
+		detailParts.push(err.codeFrame.text);
+	} else if (err.snippet) {
+		detailParts.push(err.snippet);
+	}
+	if (err.diagnostics && err.diagnostics.length > 1) {
+		const more = err.diagnostics.length - 1;
+		detailParts.push(`(+${more} more diagnostic${more === 1 ? "" : "s"})`);
+	}
+	const sourceWithLine =
+		err.line !== undefined
+			? `${where}:${err.line}${err.column !== undefined ? `:${err.column}` : ""}`
+			: err.path;
+	const report: { title: string; detail?: string; source?: string } = { title };
+	if (sourceWithLine) report.source = sourceWithLine;
+	if (detailParts.length > 0) report.detail = detailParts.join("\n\n");
+	showAstroflareError(report);
 }
 
 /**
@@ -146,19 +203,49 @@ export function buildHmrClientSource(opts: BuildHmrClientSourceOptions = {}): st
 	// for the path subset we accept, but stringify keeps quotes / unicode
 	// correct regardless).
 	const pathLiteral = JSON.stringify(socketPath);
-	return `// astroflare hmr client
+	// Inline the overlay shim first so `window.__aflareShowError` is
+	// installed before the WebSocket can land an error. The shim is
+	// idempotent — auto-injecting it twice (host re-emits + user code)
+	// is harmless because each call replaces the overlay body.
+	return `${ERROR_OVERLAY_CLIENT_SOURCE}
+// astroflare hmr client
 const loc = globalThis.location;
 const protocol = loc && loc.protocol === "https:" ? "wss:" : "ws:";
 const host = loc ? loc.host : "";
 const ws = new WebSocket(protocol + "//" + host + ${pathLiteral});
+function __aflareDismiss() {
+	const host = document.getElementById("aflare-error-overlay");
+	if (host) host.remove();
+}
+function __aflareReportError(err) {
+	const where = err.path ? err.path : "compile";
+	const parts = [];
+	if (err.codeFrame && err.codeFrame.text) parts.push(err.codeFrame.text);
+	else if (err.snippet) parts.push(err.snippet);
+	if (err.diagnostics && err.diagnostics.length > 1) {
+		const more = err.diagnostics.length - 1;
+		parts.push("(+" + more + " more diagnostic" + (more === 1 ? "" : "s") + ")");
+	}
+	const sourceWithLine = err.line !== undefined
+		? where + ":" + err.line + (err.column !== undefined ? ":" + err.column : "")
+		: err.path;
+	const report = { title: err.message };
+	if (sourceWithLine) report.source = sourceWithLine;
+	if (parts.length > 0) report.detail = parts.join("\\n\\n");
+	if (typeof window !== "undefined" && typeof window.__aflareShowError === "function") {
+		window.__aflareShowError(report);
+	}
+}
 ws.addEventListener("message", (ev) => {
 	let msg;
 	try { msg = JSON.parse(typeof ev.data === "string" ? ev.data : ""); }
 	catch { console.warn("[astroflare hmr] received malformed message"); return; }
 	if (msg.type === "update" || msg.type === "prune" || msg.type === "full-reload") {
+		__aflareDismiss();
 		loc.reload();
 	} else if (msg.type === "error") {
 		console.error("[astroflare hmr] " + msg.error.message + (msg.error.path ? " (" + msg.error.path + ")" : ""));
+		__aflareReportError(msg.error);
 	}
 });
 ws.addEventListener("error", () => console.warn("[astroflare hmr] socket error"));

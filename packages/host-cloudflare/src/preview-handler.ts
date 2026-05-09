@@ -253,13 +253,13 @@ export function createPreviewHandler(opts: CreatePreviewHandlerOptions): Preview
 					const asset = await tryServePublicAsset(opts.site, url.pathname);
 					if (asset) return asset;
 				}
-				return notFound();
+				return notFound(hmrClientSource);
 			}
 			// Endpoints (`.js` / `.ts` under `/src/pages/`) aren't part of
 			// the Mode A surface this handler covers — hosts that want
 			// them route those paths separately before reaching us.
 			if (resolution.kind === "endpoint") {
-				return notFound();
+				return notFound(hmrClientSource);
 			}
 			return renderRoute(opts, moduleGraph, staticPathsCache, resolution, req, hmrClientSource);
 		},
@@ -371,7 +371,7 @@ async function renderRoute(
 	// table for one request after the prune; statFile is the
 	// authoritative check.
 	const stat = await opts.site.statFile(sourcePath);
-	if (!stat) return notFound();
+	if (!stat) return notFound(hmrClientSource);
 
 	let closure: Awaited<ReturnType<ModuleGraph["closure"]>>;
 	try {
@@ -381,10 +381,7 @@ async function renderRoute(
 			path: sourcePath,
 			message: (err as Error).message,
 		});
-		return new Response(`compile failed: ${(err as Error).message}`, {
-			status: 500,
-			headers: { "content-type": "text/plain;charset=utf-8" },
-		});
+		return errorResponse(500, `compile failed: ${(err as Error).message}`, hmrClientSource);
 	}
 
 	// `taskFactory` is shared between the optional `getStaticPaths` call
@@ -414,20 +411,21 @@ async function renderRoute(
 				path: sourcePath,
 				message: (err as Error).message,
 			});
-			return new Response(`getStaticPaths failed: ${(err as Error).message}`, {
-				status: 500,
-				headers: { "content-type": "text/plain;charset=utf-8" },
-			});
+			return errorResponse(
+				500,
+				`getStaticPaths failed: ${(err as Error).message}`,
+				hmrClientSource,
+			);
 		}
 		if (staticPaths === null) {
 			// Dynamic route file with no `getStaticPaths` export. SSR-style
 			// pass-through dynamic routing is a Phase-N follow-up; for now
 			// the URL doesn't resolve.
 			opts.logger?.event("preview.static-paths.missing", { path: sourcePath });
-			return notFound();
+			return notFound(hmrClientSource);
 		}
 		const matched = findMatchingPath(staticPaths, params);
-		if (!matched) return notFound();
+		if (!matched) return notFound(hmrClientSource);
 		params = matched.params;
 		props = matched.props;
 	}
@@ -448,10 +446,7 @@ async function renderRoute(
 			path: sourcePath,
 			message: (err as Error).message,
 		});
-		return new Response(`render failed: ${(err as Error).message}`, {
-			status: 500,
-			headers: { "content-type": "text/plain;charset=utf-8" },
-		});
+		return errorResponse(500, `render failed: ${(err as Error).message}`, hmrClientSource);
 	}
 
 	if (result.kind === "response") {
@@ -480,11 +475,56 @@ async function renderRoute(
 	return new Response(html, { status: 200, headers });
 }
 
-function notFound(): Response {
-	return new Response("Not found", {
-		status: 404,
-		headers: { "content-type": "text/plain;charset=utf-8" },
+function notFound(hmrClientSource: string | null): Response {
+	return errorResponse(404, "Not found", hmrClientSource);
+}
+
+/**
+ * HTML envelope for error / not-found responses. Wraps the message in
+ * a small `<!doctype>`-prefixed page that re-injects the HMR client
+ * `<script>` so a stranded iframe (manual reload onto a broken page,
+ * fresh navigation, host without compile pre-flight) still holds an
+ * open WebSocket and recovers as soon as the next clean change ships.
+ *
+ * Skips injection only when the host opted out (`hmr: false`); the
+ * minimal `text/html` body is kept either way so browsers render the
+ * same message rather than a generic plain-text 404/500.
+ */
+function errorResponse(status: number, message: string, hmrClientSource: string | null): Response {
+	const body = renderErrorEnvelope(status, message, hmrClientSource);
+	return new Response(body, {
+		status,
+		headers: { "content-type": "text/html;charset=utf-8" },
 	});
+}
+
+function renderErrorEnvelope(
+	status: number,
+	message: string,
+	hmrClientSource: string | null,
+): string {
+	const escapedMessage = escapeHtml(message);
+	const title = status === 404 ? "Not found" : "Astroflare error";
+	const script = hmrClientSource ? `<script type="module">${hmrClientSource}</script>` : "";
+	return `<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<title>${escapeHtml(title)}</title>
+	</head>
+	<body>
+		<pre style="white-space:pre-wrap;font-family:ui-monospace,monospace;padding:16px;margin:0;color:#7f1d1d;background:#fef2f2">${escapedMessage}</pre>
+		${script}
+	</body>
+</html>`;
+}
+
+function escapeHtml(s: string): string {
+	return s
+		.replace(/&/g, "&amp;")
+		.replace(/</g, "&lt;")
+		.replace(/>/g, "&gt;")
+		.replace(/"/g, "&quot;");
 }
 
 /**

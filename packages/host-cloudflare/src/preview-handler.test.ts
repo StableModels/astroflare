@@ -470,16 +470,31 @@ describe("createPreviewHandler: TypeScript frontmatter on workerd", () => {
 
 	it("surfaces a TS syntax error as a named compile failure (not a downstream V8 error)", async () => {
 		const { handler } = bootSiteWithTSFrontmatter(
-			["---", "const x: = 5;", "---", "<p>broken</p>"].join("\n"),
+			["---", "const x: <Bad> = 5;", "---", "<p>broken</p>"].join("\n"),
 		);
 		const res = await handler.fetch(new Request("https://app/"));
 		expect(res.status).toBe(500);
+		expect(res.headers.get("content-type")).toContain("text/html");
 		const body = await res.text();
 		// Source path is named, and the failure mode is identified as a
 		// compile-stage problem — not the opaque "Unexpected strict
 		// mode reserved word" V8 syntax error embedders saw before.
 		expect(body).toMatch(/index\.astro/);
 		expect(body).toMatch(/compile|TypeScript transform/i);
+		// HTML envelope + the same HMR client script the 200 path injects
+		// — so the iframe holds an open WebSocket and recovers when the
+		// next clean change ships.
+		expect(body).toContain("<!doctype html>");
+		expect(body).toContain('<script type="module">');
+		expect(body).toContain("/_aflare/hmr");
+		expect(body).toContain("WebSocket");
+		// And the original message shows through in a `<pre>` so the
+		// operator can still read it.
+		expect(body).toMatch(/<pre[^>]*>/);
+		expect(body).toContain("compile failed");
+		// User-supplied bytes (the `<Bad>` placeholder above) are HTML-
+		// escaped inside the `<pre>` so the wrapper can't be broken out of.
+		expect(body).not.toMatch(/<pre[^>]*><Bad>/);
 	});
 });
 

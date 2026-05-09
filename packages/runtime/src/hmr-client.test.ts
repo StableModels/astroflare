@@ -32,11 +32,15 @@ function setup(): {
 	socket: FakeWebSocket;
 	reload: ReturnType<typeof vi.fn>;
 	onError: ReturnType<typeof vi.fn>;
+	showError: ReturnType<typeof vi.fn>;
+	dismissError: ReturnType<typeof vi.fn>;
 	dispose: () => void;
 } {
 	let socket!: FakeWebSocket;
 	const reload = vi.fn();
 	const onError = vi.fn();
+	const showError = vi.fn();
+	const dismissError = vi.fn();
 	function wsCtor(url: string): FakeWebSocket {
 		socket = new FakeWebSocket(url);
 		return socket;
@@ -46,8 +50,10 @@ function setup(): {
 		wsCtor: wsCtor as unknown as typeof WebSocket,
 		reload,
 		onError,
+		showError,
+		dismissError,
 	});
-	return { socket, reload, onError, dispose: client.dispose };
+	return { socket, reload, onError, showError, dismissError, dispose: client.dispose };
 }
 
 describe("installHmrClient — message handling", () => {
@@ -83,6 +89,31 @@ describe("installHmrClient — message handling", () => {
 		expect(onError).toHaveBeenCalledTimes(1);
 		expect(consoleError).toHaveBeenCalled();
 		consoleError.mockRestore();
+	});
+
+	it("invokes the overlay shim on `error` messages", () => {
+		const { socket, showError } = setup();
+		const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+		const errMsg = {
+			type: "error" as const,
+			error: { message: "Compile failed", path: "/src/pages/x.astro" },
+		};
+		socket.emit(errMsg);
+		expect(showError).toHaveBeenCalledWith(errMsg);
+		consoleError.mockRestore();
+	});
+
+	it("dismisses the overlay before reloading on `update`/`prune`/`full-reload`", () => {
+		const { socket, dismissError, reload } = setup();
+		socket.emit({ type: "update", updates: [{ path: "/x", hash: "h", kind: "module" }] });
+		expect(dismissError).toHaveBeenCalledTimes(1);
+		expect(reload).toHaveBeenCalledTimes(1);
+		// And again on a prune.
+		socket.emit({ type: "prune", paths: ["/x"] });
+		expect(dismissError).toHaveBeenCalledTimes(2);
+		// And again on a full-reload.
+		socket.emit({ type: "full-reload", reason: "config" });
+		expect(dismissError).toHaveBeenCalledTimes(3);
 	});
 
 	it("ignores malformed payloads", () => {
@@ -142,8 +173,23 @@ describe("HMR_CLIENT_SOURCE constant", () => {
 		expect(HMR_CLIENT_SOURCE).toContain("full-reload");
 	});
 
-	it("stays lean (under 3 KB per the brief target)", () => {
-		expect(HMR_CLIENT_SOURCE.length).toBeLessThan(3072);
+	it("inlines the overlay shim so error events surface a modal", () => {
+		// `ERROR_OVERLAY_CLIENT_SOURCE` defines `window.__aflareShowError`
+		// and the projector inside the HMR loop calls into it on each
+		// `error` message. Same behaviour as `installHmrClient` ↔
+		// `showAstroflareError`.
+		expect(HMR_CLIENT_SOURCE).toContain("window.__aflareShowError");
+		expect(HMR_CLIENT_SOURCE).toContain("aflare-error-overlay");
+	});
+
+	it("stays lean (under 6 KB — protocol client + inlined overlay shim)", () => {
+		// Original target was 3 KB for the bare HMR loop. The default-
+		// injected client now bundles `ERROR_OVERLAY_CLIENT_SOURCE` and
+		// the structured-error projector so the iframe surfaces compile
+		// failures end-to-end without any host-side wiring; that pushes
+		// the budget up but keeps it well under one HTTP buffer's worth
+		// of bytes.
+		expect(HMR_CLIENT_SOURCE.length).toBeLessThan(6 * 1024);
 	});
 
 	it("equals buildHmrClientSource() with default options", () => {

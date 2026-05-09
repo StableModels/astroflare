@@ -36,15 +36,31 @@
  * hibernation — re-subscribed on wake.
  */
 
+import { isCompileError } from "@astroflare/compiler";
 import type {
+	HmrError,
 	HmrMessage,
 	HmrUpdate,
 	ModuleNode,
 	Site,
 	SiteChangeEvent,
+	SnapshotErrorDiagnostic,
 	Subscription,
 } from "@astroflare/core";
+import { buildCodeFrame, snippetFor } from "@astroflare/core";
 import type { SqlBackend } from "./sql-cache.js";
+
+/**
+ * Optional compile pre-flight hook for {@link AstroflareCoordinator.notifyChanged}.
+ * Receives the workspace path of the changed file and resolves on a
+ * clean compile; rejects with a `CompileError` (or any other `Error`)
+ * when the new bytes don't compile.
+ *
+ * The framework's `ModuleGraph.compile(path)` satisfies this signature
+ * directly — hosts pass `compile: (p) => moduleGraph.compile(p).then(() => {})`
+ * to wire the framework's own compiler in. Tests can supply a stub.
+ */
+export type CompilePreflight = (path: string) => Promise<unknown>;
 
 /**
  * Subset of `DurableObjectState` we use. Letting the host pass any compatible
@@ -88,6 +104,21 @@ export interface CreateCoordinatorOptions {
 	 * graph operations without sockets.
 	 */
 	ctx?: CoordinatorContext;
+	/**
+	 * Optional compile pre-flight. When supplied, callers may pass
+	 * `{ verifyCompile: true }` to {@link AstroflareCoordinator.notifyChanged}
+	 * for the coordinator to drive the compile *before* deciding what
+	 * to publish — clean compiles fall through to the existing HMR
+	 * `update` path; failures publish an HMR `error` carrying the
+	 * structured diagnostics. Lets every embedder pull the
+	 * "stop-stranding-the-iframe" guarantee in for free instead of
+	 * shipping a host-side substitute.
+	 *
+	 * The framework's `ModuleGraph.compile(path)` is the canonical
+	 * supplier — wire it as
+	 * `compile: (p) => moduleGraph.compile(p).then(() => {})`.
+	 */
+	compile?: CompilePreflight;
 }
 
 /**
@@ -106,9 +137,29 @@ export interface HmrEventRecord {
 /** Default cap for the recent-HMR-events ring buffer. */
 const HMR_RING_CAP = 32;
 
+/**
+ * Per-call options for {@link AstroflareCoordinator.notifyChanged}.
+ *
+ * When `verifyCompile` is `true` and the coordinator was constructed with
+ * a `compile` pre-flight (see {@link CreateCoordinatorOptions.compile}),
+ * the coordinator drives the compile against the changed file *before*
+ * deciding which HMR message to publish. Clean compiles flow through the
+ * existing reverse-edge `update` walk; `CompileError`s (or any other
+ * pre-flight throw) publish an HMR `error` carrying structured
+ * diagnostics so the iframe overlay can render the failure on top of the
+ * previous good page.
+ *
+ * Strictly opt-in. Callers that don't pass it (existing embedders) get
+ * the historical behaviour. Without a `compile` hook the flag is a
+ * no-op so a host can flip it on speculatively without crashing.
+ */
+export interface NotifyChangedOptions {
+	verifyCompile?: boolean;
+}
+
 export interface AstroflareCoordinator {
 	// Change pipeline
-	notifyChanged(event: SiteChangeEvent): Promise<void>;
+	notifyChanged(event: SiteChangeEvent, opts?: NotifyChangedOptions): Promise<void>;
 	notifyRemoved(path: string): Promise<void>;
 
 	// Module graph
@@ -152,9 +203,13 @@ export interface AstroflareCoordinator {
 	simulateChange(event: SiteChangeEvent): Promise<void>;
 }
 
+/** Workspace extensions the optional compile pre-flight runs against. */
+const COMPILABLE_EXTENSIONS = [".astro", ".md", ".mdx"] as const;
+
 export function createCoordinator(opts: CreateCoordinatorOptions): AstroflareCoordinator {
 	const sql = opts.sql;
 	const ctx = opts.ctx;
+	const compilePreflight = opts.compile;
 	let initialized = false;
 	const subs = new Map<string, Set<(m: HmrMessage) => void>>();
 	// Ring buffer of recent HMR events. In-isolate state — resets on
@@ -376,7 +431,10 @@ export function createCoordinator(opts: CreateCoordinatorOptions): AstroflareCoo
 		}
 	}
 
-	async function notifyChanged(event: SiteChangeEvent): Promise<void> {
+	async function notifyChanged(
+		event: SiteChangeEvent,
+		notifyOpts?: NotifyChangedOptions,
+	): Promise<void> {
 		if (event.kind === "delete") {
 			return notifyRemoved(event.path);
 		}
@@ -387,6 +445,23 @@ export function createCoordinator(opts: CreateCoordinatorOptions): AstroflareCoo
 		} else {
 			await graphPut({ path, hash, imports: [], importedBy: [] });
 		}
+
+		// Optional compile pre-flight: if the host wired one in (and
+		// the change touches a compilable file), run it before
+		// deciding what to publish. A clean compile falls through to
+		// the historical update; a `CompileError` swaps the broadcast
+		// for an HMR `error` so the iframe overlay can surface the
+		// failure on top of the previous good render.
+		if (notifyOpts?.verifyCompile === true && compilePreflight && isCompilablePath(path)) {
+			try {
+				await compilePreflight(path);
+			} catch (err) {
+				const errorMessage: HmrError = projectCompileError(path, err);
+				await publish("hmr", { type: "error", error: errorMessage });
+				return;
+			}
+		}
+
 		const importers = await transitiveImporters(path);
 		const updates: HmrUpdate[] = [path, ...importers].map((p) => ({
 			path: p,
@@ -430,8 +505,11 @@ export function createCoordinator(opts: CreateCoordinatorOptions): AstroflareCoo
 		return ctx.getWebSockets(HMR_TAG).length;
 	}
 
-	async function simulateChange(event: SiteChangeEvent): Promise<void> {
-		await notifyChanged(event);
+	async function simulateChange(
+		event: SiteChangeEvent,
+		notifyOpts?: NotifyChangedOptions,
+	): Promise<void> {
+		await notifyChanged(event, notifyOpts);
 	}
 
 	return {
@@ -451,4 +529,59 @@ export function createCoordinator(opts: CreateCoordinatorOptions): AstroflareCoo
 		recentHmrEvents,
 		simulateChange,
 	};
+}
+
+function isCompilablePath(path: string): boolean {
+	for (const ext of COMPILABLE_EXTENSIONS) {
+		if (path.endsWith(ext)) return true;
+	}
+	return false;
+}
+
+/**
+ * Project a pre-flight error onto an `HmrError`. `CompileError` payloads
+ * fan out into the structured `diagnostics` / `codeFrame` / `snippet`
+ * fields the dev overlay knows how to render; everything else lands as
+ * a bare message + stack so the iframe still surfaces _something_.
+ *
+ * Mirrors `buildError()` in `@astroflare/build` (PR #15) so a
+ * `CompileError` looks identical whether it came from `buildSite`'s
+ * snapshot pipeline or the live preview's pre-flight.
+ */
+function projectCompileError(path: string, err: unknown): HmrError {
+	if (isCompileError(err)) {
+		const source = err.source;
+		const diagnostics: SnapshotErrorDiagnostic[] = err.diagnostics.map((d) => {
+			const location = {
+				line: d.start.line,
+				column: d.start.column,
+				offset: d.start.offset,
+				...(d.end ? { end: { line: d.end.line, column: d.end.column, offset: d.end.offset } } : {}),
+			};
+			const diag: SnapshotErrorDiagnostic = { message: d.message, location };
+			const snippet = snippetFor(source, location);
+			if (snippet) diag.snippet = snippet;
+			const frame = buildCodeFrame(source, location);
+			if (frame) diag.codeFrame = frame;
+			return diag;
+		});
+		const primary = diagnostics[0];
+		const out: HmrError = {
+			message: primary?.message ?? err.message,
+			path,
+		};
+		if (primary?.location) {
+			out.line = primary.location.line;
+			out.column = primary.location.column;
+		}
+		if (primary?.snippet) out.snippet = primary.snippet;
+		if (primary?.codeFrame) out.codeFrame = primary.codeFrame;
+		if (diagnostics.length > 0) out.diagnostics = diagnostics;
+		return out;
+	}
+	const message = (err as Error)?.message ?? String(err);
+	const out: HmrError = { message, path };
+	const stack = (err as { stack?: unknown })?.stack;
+	if (typeof stack === "string" && stack.length > 0) out.stack = stack;
+	return out;
 }

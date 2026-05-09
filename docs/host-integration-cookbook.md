@@ -540,3 +540,51 @@ console.assert(r2.includes(/* v1 marker */), "stale render proves the invariant"
 That test doubles as the rationale for `recordExternalWrite`'s existence:
 the helper is the boundary that keeps `aflare_hash` and the compile
 cache in lock-step.
+
+## Compile-error recovery — keep the iframe alive
+
+The host-side workaround Ember shipped (`AstroflareHost` runs
+`ModuleGraph.compile` against incoming bytes and substitutes an HMR
+`error` for `update` on failure) is now built in. Two pieces:
+
+1. **Wire the framework's compiler into the coordinator** so the
+   pre-flight runs at `notifyChanged` time:
+
+   ```ts
+   import { ModuleGraph } from "@astroflare/preview/module-graph";
+
+   const moduleGraph = new ModuleGraph(
+     { site, cache, coordinator },
+     { runtimeImport: "./runtime/index.js" },
+   );
+
+   const coordinator = createCoordinator({
+     sql,
+     compile: async (path) => {
+       await moduleGraph.compile(path);
+     },
+   });
+   ```
+
+2. **Pass `verifyCompile: true` from your write path** so the
+   coordinator drives the pre-flight before deciding what to publish:
+
+   ```ts
+   await coordinator.notifyChanged(
+     { kind: "write", path, hash },
+     { verifyCompile: true },
+   );
+   ```
+
+   On a clean compile the historical `update` walk runs unchanged.
+   On a `CompileError` the broadcast becomes
+   `{ type: "error", error: { message, path, line, column, codeFrame, diagnostics, ... } }`
+   — the connected iframe stays on the previous good render and the
+   auto-injected client surfaces a modal overlay with the code frame.
+
+The pre-flight is strictly opt-in; embedders that don't pass
+`verifyCompile` get the historical behaviour and can flip the flag on
+when they're ready. `createPreviewHandler` independently wraps every
+500/404 in an HTML envelope that re-injects the HMR client `<script>`
+(gated only by `hmr !== false`) so a manual reload onto a broken page
+still gets a live socket.
