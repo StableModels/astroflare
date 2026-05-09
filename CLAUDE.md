@@ -205,6 +205,28 @@ build cleanly into deployable bundles.
   is the new flexible builder backing the per-handler HMR-script
   injection (the legacy `HMR_CLIENT_SOURCE` const stays as a
   zero-argument call for back-compat).
+- **Compile-error recovery: the iframe never strands.** Three
+  defenses keep the preview HMR loop alive across compile failures
+  so embedders don't have to re-implement them:
+  (1) `coordinator.notifyChanged(event, { verifyCompile: true })`
+  pre-flights the compile when the host wires a `compile` hook into
+  `createCoordinator({ compile })` — clean compiles flow through the
+  existing `update` walk; `CompileError`s publish an HMR `error`
+  with structured `diagnostics` / `codeFrame` / `snippet` projected
+  off `CompileError.diagnostics`. (2) `createPreviewHandler` wraps
+  every 5xx + 404 in an HTML envelope that re-injects the HMR
+  client `<script>` (gated by `hmr !== false`), so a manual reload
+  onto a broken page still attaches a live socket and recovers on
+  the next clean change. (3) The auto-injected client now bundles
+  `ERROR_OVERLAY_CLIENT_SOURCE` and routes `error` messages through
+  `window.__aflareShowError`, so the iframe surfaces a modal with
+  the code frame on top of the previous good render rather than a
+  silent `console.error`. `HmrError` grew optional `diagnostics` /
+  `codeFrame` / `snippet` fields to carry the projection (mirrors
+  `SnapshotError`'s shape from PR #15). All three are
+  backwards-compatible — `verifyCompile` is opt-in, error-response
+  injection follows the existing `hmr !== false` gate, and the
+  structured `HmrError` fields are optional.
 
 Phase plans:
 [`docs/phases/phase-26-host-driven-preview.md`](docs/phases/phase-26-host-driven-preview.md),

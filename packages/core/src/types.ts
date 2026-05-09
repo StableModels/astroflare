@@ -443,6 +443,23 @@ export interface HmrError {
 	line?: number;
 	column?: number;
 	stack?: string;
+	/**
+	 * Every diagnostic the parser/compiler produced for `path`. Mirrors
+	 * `SnapshotError.diagnostics` so the same projection helper can fan
+	 * a `CompileError` onto either shape. Optional — non-compile error
+	 * messages (e.g. a render throw surfaced as an HMR error) leave it
+	 * absent.
+	 */
+	diagnostics?: readonly SnapshotErrorDiagnostic[];
+	/**
+	 * Pre-formatted multi-line excerpt of the source surrounding the
+	 * error location, with line numbers and a caret pointer. Same shape
+	 * as `SnapshotError.codeFrame` so the dev overlay can render it
+	 * verbatim.
+	 */
+	codeFrame?: SnapshotErrorCodeFrame;
+	/** The exact source span the compiler flagged, trimmed at the first newline. */
+	snippet?: string;
 }
 
 // -----------------------------------------------------------------------------

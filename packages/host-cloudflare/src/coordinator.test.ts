@@ -1,3 +1,5 @@
+import { CompileError } from "@astroflare/compiler";
+import type { HmrMessage } from "@astroflare/core";
 import { describe, expect, it } from "vitest";
 import { createCoordinator } from "./coordinator.js";
 import type { SqlBackend } from "./sql-cache.js";
@@ -209,6 +211,129 @@ describe("createCoordinator", () => {
 		});
 		// And the ring buffer recorded the same event.
 		expect(c.recentHmrEvents()).toHaveLength(1);
+	});
+
+	describe("verifyCompile pre-flight", () => {
+		it("publishes HMR error with structured diagnostics on CompileError", async () => {
+			const source = "---\nconst x: = 5;\n---\n<p>broken</p>\n";
+			const compile = async (path: string) => {
+				throw new CompileError({
+					filename: path,
+					source,
+					diagnostics: [
+						{
+							message: "Unexpected token",
+							start: { line: 2, column: 9, offset: 13 },
+							end: { line: 2, column: 10, offset: 14 },
+						},
+					],
+				});
+			};
+			const c = createCoordinator({ sql: makeMockSql(), compile });
+			const seen: HmrMessage[] = [];
+			c.subscribe("hmr", (m) => seen.push(m));
+
+			await c.notifyChanged(
+				{ kind: "write", path: "/src/pages/x.astro", hash: "h" },
+				{ verifyCompile: true },
+			);
+
+			expect(seen).toHaveLength(1);
+			const msg = seen[0];
+			expect(msg?.type).toBe("error");
+			if (msg?.type !== "error") throw new Error("expected error");
+			expect(msg.error.message).toBe("Unexpected token");
+			expect(msg.error.path).toBe("/src/pages/x.astro");
+			expect(msg.error.line).toBe(2);
+			expect(msg.error.column).toBe(9);
+			expect(msg.error.diagnostics).toBeDefined();
+			expect(msg.error.diagnostics?.[0]?.codeFrame?.text).toContain("const x: = 5;");
+			expect(msg.error.codeFrame?.text).toContain("const x: = 5;");
+			// Ring buffer captures the same event so operator tools can
+			// inspect it without a live socket.
+			const ring = c.recentHmrEvents();
+			expect(ring).toHaveLength(1);
+			expect(ring[0]?.message.type).toBe("error");
+		});
+
+		it("falls through to update on a clean compile", async () => {
+			let invocations = 0;
+			const compile = async () => {
+				invocations++;
+			};
+			const c = createCoordinator({ sql: makeMockSql(), compile });
+			const seen: HmrMessage[] = [];
+			c.subscribe("hmr", (m) => seen.push(m));
+
+			await c.notifyChanged(
+				{ kind: "write", path: "/src/pages/x.astro", hash: "h" },
+				{ verifyCompile: true },
+			);
+			expect(invocations).toBe(1);
+			expect(seen[0]).toMatchObject({ type: "update", trigger: "/src/pages/x.astro" });
+		});
+
+		it("treats verifyCompile as a no-op without a compile hook", async () => {
+			const c = createCoordinator({ sql: makeMockSql() });
+			const seen: HmrMessage[] = [];
+			c.subscribe("hmr", (m) => seen.push(m));
+
+			await c.notifyChanged(
+				{ kind: "write", path: "/src/pages/x.astro", hash: "h" },
+				{ verifyCompile: true },
+			);
+			expect(seen[0]).toMatchObject({ type: "update", trigger: "/src/pages/x.astro" });
+		});
+
+		it("skips pre-flight for non-compilable paths even when requested", async () => {
+			let invocations = 0;
+			const compile = async () => {
+				invocations++;
+			};
+			const c = createCoordinator({ sql: makeMockSql(), compile });
+			const seen: HmrMessage[] = [];
+			c.subscribe("hmr", (m) => seen.push(m));
+
+			await c.notifyChanged(
+				{ kind: "write", path: "/src/styles/site.css", hash: "h" },
+				{ verifyCompile: true },
+			);
+			expect(invocations).toBe(0);
+			expect(seen[0]).toMatchObject({ type: "update", trigger: "/src/styles/site.css" });
+		});
+
+		it("projects a non-CompileError throw as a bare-message HMR error", async () => {
+			const compile = async () => {
+				throw new Error("boom");
+			};
+			const c = createCoordinator({ sql: makeMockSql(), compile });
+			const seen: HmrMessage[] = [];
+			c.subscribe("hmr", (m) => seen.push(m));
+
+			await c.notifyChanged(
+				{ kind: "write", path: "/src/pages/x.astro", hash: "h" },
+				{ verifyCompile: true },
+			);
+			const msg = seen[0];
+			if (msg?.type !== "error") throw new Error("expected error");
+			expect(msg.error.message).toBe("boom");
+			expect(msg.error.path).toBe("/src/pages/x.astro");
+			expect(msg.error.diagnostics).toBeUndefined();
+		});
+
+		it("still updates without verifyCompile even when the compile would fail", async () => {
+			const compile = async () => {
+				throw new Error("would fail");
+			};
+			const c = createCoordinator({ sql: makeMockSql(), compile });
+			const seen: HmrMessage[] = [];
+			c.subscribe("hmr", (m) => seen.push(m));
+
+			// No verifyCompile flag — pre-flight is skipped, historical
+			// behaviour preserved for embedders that haven't opted in.
+			await c.notifyChanged({ kind: "write", path: "/src/pages/x.astro", hash: "h" });
+			expect(seen[0]).toMatchObject({ type: "update", trigger: "/src/pages/x.astro" });
+		});
 	});
 
 	it("notifyRemoved publishes hmr prune and removes the node", async () => {

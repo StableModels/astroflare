@@ -481,7 +481,94 @@ describe("createPreviewHandler: TypeScript frontmatter on workerd", () => {
 		expect(body).toMatch(/index\.astro/);
 		expect(body).toMatch(/compile|TypeScript transform/i);
 	});
+
+	it("compile-failure 500 carries an HTML envelope + HMR client script", async () => {
+		const { handler } = bootSiteWithTSFrontmatter(
+			["---", "const x: = 5;", "---", "<p>broken</p>"].join("\n"),
+		);
+		const res = await handler.fetch(new Request("https://app/"));
+		expect(res.status).toBe(500);
+		expect(res.headers.get("content-type")).toContain("text/html");
+		const body = await res.text();
+		// HTML envelope + the same HMR client script the 200 path injects
+		// — so the iframe holds an open WebSocket and recovers when the
+		// next clean change ships.
+		expect(body).toContain("<!doctype html>");
+		expect(body).toContain('<script type="module">');
+		expect(body).toContain("/_aflare/hmr");
+		expect(body).toContain("WebSocket");
+		// And the original message shows through in a `<pre>` so the
+		// operator can still read it.
+		expect(body).toMatch(/<pre[^>]*>/);
+		expect(body).toContain("compile failed");
+	});
+
+	it("404 responses also carry the HMR client script", async () => {
+		const { handler } = bootHarnessWithMissingPage();
+		const res = await handler.fetch(new Request("https://app/does-not-exist"));
+		expect(res.status).toBe(404);
+		expect(res.headers.get("content-type")).toContain("text/html");
+		const body = await res.text();
+		expect(body).toContain('<script type="module">');
+		expect(body).toContain("/_aflare/hmr");
+	});
+
+	it("HTML-escapes the error message body", async () => {
+		const { handler } = bootSiteWithTSFrontmatter(
+			["---", "const x: <Bad> = 5;", "---", "<p>broken</p>"].join("\n"),
+		);
+		const res = await handler.fetch(new Request("https://app/"));
+		expect(res.status).toBe(500);
+		const body = await res.text();
+		// Anything resembling `<Bad>` from the message is escaped (the
+		// envelope wraps the message in `<pre>`; user input goes through
+		// our escapeHtml).
+		expect(body).not.toMatch(/<pre[^>]*><Bad>/);
+	});
+
+	it("hmr: false produces a plain HTML envelope without the script", async () => {
+		const site = new MemorySite();
+		site.write(
+			"/src/pages/index.astro",
+			new TextEncoder().encode(["---", "const x: = 5;", "---", "<p>broken</p>"].join("\n")),
+		);
+		const cache = new MemoryCache();
+		const sql = makeMockSql();
+		const coordinator = createCoordinator({ sql });
+		const executor = createWorkerdExecutor({
+			loader: env.LOADER,
+			compatibilityDate: "2025-09-01",
+			compatibilityFlags: ["nodejs_compat"],
+			runtime: runtimeModules,
+		});
+		const handler = createPreviewHandler({ site, coordinator, executor, cache, hmr: false });
+
+		const res = await handler.fetch(new Request("https://app/"));
+		expect(res.status).toBe(500);
+		expect(res.headers.get("content-type")).toContain("text/html");
+		const body = await res.text();
+		expect(body).toContain("<!doctype html>");
+		// Opt-out: no script inlined and no `/_aflare/hmr` reference.
+		expect(body).not.toContain('<script type="module">');
+		expect(body).not.toContain("/_aflare/hmr");
+	});
 });
+
+function bootHarnessWithMissingPage(): Harness {
+	// Empty pages/ — every URL 404s through `notFound()`.
+	const site = new MemorySite();
+	const cache = new MemoryCache();
+	const sql = makeMockSql();
+	const coordinator = createCoordinator({ sql });
+	const executor = createWorkerdExecutor({
+		loader: env.LOADER,
+		compatibilityDate: "2025-09-01",
+		compatibilityFlags: ["nodejs_compat"],
+		runtime: runtimeModules,
+	});
+	const handler = createPreviewHandler({ site, coordinator, executor, cache });
+	return { site, cache, coordinator, handler };
+}
 
 /**
  * Brace-scanner JSX-tag heuristic, end-to-end: any `.astro` page whose
