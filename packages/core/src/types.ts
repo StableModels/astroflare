@@ -812,7 +812,7 @@ export type RenderResult =
 
 /**
  * Astroflare project configuration. Astro-shaped: users author `defineConfig({...})`
- * in `astroflare.config.{ts,mjs,js}`. Phase 6+ will grow the schema as Tier 1
+ * in `astro.config.{ts,mjs,js}`. Phase 6+ will grow the schema as Tier 1
  * features land. Until then, `unknown` typed integration objects are accepted.
  */
 export interface AstroflareConfig {

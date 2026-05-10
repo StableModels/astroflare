@@ -18,17 +18,17 @@ describe("initProject", () => {
 		// child directory to mimic the real CLI's behaviour.
 		const target = `${dir}/site`;
 		const result = initProject({ dir: target });
-		expect(result.created).toContain("aflare.config.json");
+		expect(result.created).toContain("astro.config.json");
 		expect(result.created).toContain("package.json");
 		expect(result.created).toContain("src/pages/index.astro");
 		expect(result.created).toContain("src/pages/about.astro");
 		expect(result.created).toContain(".gitignore");
 	});
 
-	it("aflare.config.json is valid JSON with the project's site URL", () => {
+	it("astro.config.json is valid JSON with the project's site URL", () => {
 		const target = `${dir}/site`;
 		initProject({ dir: target, site: "https://my.example/" });
-		const cfg = JSON.parse(readFileSync(`${target}/aflare.config.json`, "utf8"));
+		const cfg = JSON.parse(readFileSync(`${target}/astro.config.json`, "utf8"));
 		expect(cfg.site).toBe("https://my.example/");
 		expect(cfg.output).toBe("static");
 	});

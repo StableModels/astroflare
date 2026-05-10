@@ -17,7 +17,7 @@ describe("newProject (af new)", () => {
 		const target = `${dir}/site`;
 		const result = newProject({ dir: target });
 		// Spot-check the headline files of the canonical starter.
-		expect(result.created).toContain("astroflare.config.ts");
+		expect(result.created).toContain("astro.config.ts");
 		expect(result.created).toContain("package.json");
 		expect(result.created).toContain("src/layouts/Base.astro");
 		expect(result.created).toContain("src/pages/index.astro");

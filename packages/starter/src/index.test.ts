@@ -24,7 +24,7 @@ const TEMPLATE = join(__dirname, "../template");
 const CANONICAL_PATHS = [
 	".gitignore",
 	"README.md",
-	"astroflare.config.ts",
+	"astro.config.ts",
 	"package.json",
 	"public/favicon.svg",
 	"src/content/blog/hello-world.md",

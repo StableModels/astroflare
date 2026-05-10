@@ -60,7 +60,7 @@ export interface ResolveConfigInput {
 
 /**
  * Resolve a `DeployConfig` from CLI flags, environment variables, and an
- * optional `aflare.config.json` in the project root. Flags take priority
+ * optional `astro.config.json` in the project root. Flags take priority
  * over env, which takes priority over the config file.
  */
 export async function resolveConfig(input: ResolveConfigInput): Promise<DeployConfig> {
@@ -81,7 +81,7 @@ export async function resolveConfig(input: ResolveConfigInput): Promise<DeployCo
 	if (!deployToken) missing.push("deployToken (DEPLOY_TOKEN)");
 	if (missing.length > 0) {
 		throw new Error(
-			`aflare: missing config — ${missing.join(", ")}. Set via flag, env var, or aflare.config.json.`,
+			`aflare: missing config — ${missing.join(", ")}. Set via flag, env var, or astro.config.json.`,
 		);
 	}
 
@@ -97,7 +97,7 @@ export async function resolveConfig(input: ResolveConfigInput): Promise<DeployCo
 
 async function readConfigFile(projectDir: string): Promise<Partial<DeployConfig>> {
 	try {
-		const raw = await fs.readFile(join(projectDir, "aflare.config.json"), "utf8");
+		const raw = await fs.readFile(join(projectDir, "astro.config.json"), "utf8");
 		return JSON.parse(raw) as Partial<DeployConfig>;
 	} catch {
 		return {};
