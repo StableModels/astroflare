@@ -3,7 +3,7 @@
 Cloudflare-native, Astro-compatible content framework.
 
 Run an Astro-shaped project (`src/pages/`, `.astro` / `.md` / `.mdx`,
-`astroflare.config.*`) on Cloudflare's isolate primitives — live
+`astro.config.*`) on Cloudflare's isolate primitives — live
 preview with HMR + production-deploy snapshots, no Node, no Vite,
 no native code anywhere.
 

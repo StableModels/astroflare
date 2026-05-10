@@ -5,7 +5,7 @@
  * deploys cleanly:
  *
  *   <dir>/
- *     aflare.config.json     — site URL placeholder, output: "static"
+ *     astro.config.json      — site URL placeholder, output: "static"
  *     package.json           — pinned @astroflare/cli dep + aflare scripts
  *     .gitignore             — node_modules, dist, .wrangler, .dev.vars
  *     src/
@@ -26,7 +26,7 @@ export interface InitOptions {
 	force?: boolean;
 	/** Project name baked into package.json. Defaults to the dir's basename. */
 	name?: string;
-	/** Pre-fill aflare.config.json's `site`. Defaults to a placeholder. */
+	/** Pre-fill astro.config.json's `site`. Defaults to a placeholder. */
 	site?: string;
 }
 
@@ -66,7 +66,7 @@ export function initProject(opts: InitOptions): InitResult {
 
 function scaffoldFiles(name: string, site: string): Record<string, string> {
 	return {
-		"aflare.config.json": `${JSON.stringify(
+		"astro.config.json": `${JSON.stringify(
 			{
 				site,
 				output: "static",

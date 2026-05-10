@@ -31,7 +31,7 @@
  *
  * Configuration resolves in priority order: CLI flags →
  * environment (CLOUDFLARE_*, AFLARE_*, DEPLOY_TOKEN) →
- * `aflare.config.json`.
+ * `astro.config.json`.
  *
  * Output: stdout is one-line JSON (scriptable); stderr is human
  * progress.

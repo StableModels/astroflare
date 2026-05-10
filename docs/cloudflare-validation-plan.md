@@ -242,7 +242,7 @@ Each fixture is a tiny *real* Astroflare project. Source layout:
 
 ```
 tests/e2e/fixtures/<name>/
-  aflare.config.json      # site URL, output mode, i18n config, etc.
+  astro.config.json       # site URL, output mode, i18n config, etc.
   src/
     pages/...             # the routes
     components/...        # any imports

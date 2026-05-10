@@ -24,7 +24,7 @@ function seedFile(rel: string, contents: string): void {
 describe("resolveConfig", () => {
 	it("merges flags > env > config file", async () => {
 		seedFile(
-			"aflare.config.json",
+			"astro.config.json",
 			JSON.stringify({
 				accountId: "from-file",
 				bucket: "from-file",

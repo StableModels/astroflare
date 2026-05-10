@@ -36,7 +36,7 @@
  *   - User remark/rehype plugin chains. The compiler accepts the same
  *     `remarkPlugins` / `rehypePlugins` shape for internal use (Shiki
  *     rides in this way) but doesn't yet thread them through from
- *     `astroflare.config.ts`.
+ *     `astro.config.ts`.
  *   - MDX layout/wrapper components-from-config (Astro's
  *     `MDXProvider`-style API).
  *   - JSX in `.astro` frontmatter (different surface; would need its
