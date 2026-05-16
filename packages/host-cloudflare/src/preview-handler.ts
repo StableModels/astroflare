@@ -222,7 +222,9 @@ export function createPreviewHandler(opts: CreatePreviewHandlerOptions): Preview
 
 	function ensureContent(): Promise<ContentRuntimeModule | null> {
 		if (!contentReady) {
-			contentReady = createContentRuntimeModule(opts.site);
+			contentReady = createContentRuntimeModule(opts.site, {
+				...(opts.markdown ? { markdown: opts.markdown } : {}),
+			});
 			ensureContentInvalidation();
 		}
 		return contentReady;

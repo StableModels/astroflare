@@ -15,6 +15,7 @@
     "test": "vitest run --project content"
   },
   "dependencies": {
+    "@astroflare/compiler": "workspace:*",
     "@astroflare/core": "workspace:*",
     "yaml": "^2.6.0",
     "zod": "^3.23.8"

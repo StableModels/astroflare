@@ -762,6 +762,82 @@ const posts = await getCollection('blog');
 		expect(byRoute.get("/blog")).toContain("The Third");
 	});
 
+	it("renders entry.rendered.html (set:html) end-to-end through buildSite, Shiki on a fence", async () => {
+		const RENDERED_ROUTE = `---
+import { getCollection } from 'astro:content';
+export async function getStaticPaths() {
+	const posts = await getCollection('blog');
+	return posts.map((p) => ({ params: { slug: p.slug }, props: { post: p } }));
+}
+const { post } = Astro.props;
+---
+<h1>{post.data.title}</h1>
+<article set:html={post.rendered.html} />`;
+
+		const site = new MemorySite();
+		site.write("/src/pages/blog/[slug].astro", enc(RENDERED_ROUTE));
+		site.write(
+			"/src/content/blog/article.md",
+			enc(
+				"---\ntitle: The Article\n---\n" +
+					"## Section\n\n" +
+					"Body with **bold** and a [link](https://example.com).\n\n" +
+					"```js\nconst x = 1;\n```\n",
+			),
+		);
+
+		const executor = makeExecutor();
+		const produced = (
+			await collect(buildSite({ site, executor, markdown: { shiki: true } }))
+		).filter((x): x is SnapshotEntry => "bytes" in x);
+		const html = new Map(produced.map((e) => [e.route, new TextDecoder().decode(e.bytes)])).get(
+			"/blog/article",
+		) as string;
+
+		expect(html).toContain("<h1>The Article</h1>");
+		expect(html).toContain("<h2>Section</h2>");
+		expect(html).toContain("<strong>bold</strong>");
+		expect(html).toContain('<a href="https://example.com">link</a>');
+		// Shiki highlighting flowed through buildSite's markdown config.
+		expect(html).toContain("<span style=");
+		// Not the literal markdown source.
+		expect(html).not.toContain("## Section");
+	});
+
+	it("editing an entry body re-renders rendered.html on the next build (digest fold)", async () => {
+		const RENDERED_ROUTE = `---
+import { getCollection } from 'astro:content';
+export async function getStaticPaths() {
+	const posts = await getCollection('blog');
+	return posts.map((p) => ({ params: { slug: p.slug }, props: { post: p } }));
+}
+const { post } = Astro.props;
+---
+<article set:html={post.rendered.html} />`;
+		const executor = makeExecutor();
+		const site = new MemorySite();
+		site.write("/src/pages/blog/[slug].astro", enc(RENDERED_ROUTE));
+		site.write("/src/content/blog/p.md", enc("---\ntitle: P\n---\noriginal body\n"));
+
+		const first = new Map(
+			(await collect(buildSite({ site, executor })))
+				.filter((x): x is SnapshotEntry => "bytes" in x)
+				.map((e) => [e.route, new TextDecoder().decode(e.bytes)]),
+		);
+		expect(first.get("/blog/p")).toContain("<p>original body</p>");
+
+		// Same route bytes; only the entry body changed. The content
+		// digest fold must bust the cached isolate so the new HTML wins.
+		site.write("/src/content/blog/p.md", enc("---\ntitle: P\n---\n**updated** body\n"));
+		const second = new Map(
+			(await collect(buildSite({ site, executor })))
+				.filter((x): x is SnapshotEntry => "bytes" in x)
+				.map((e) => [e.route, new TextDecoder().decode(e.bytes)]),
+		);
+		expect(second.get("/blog/p")).toContain("<strong>updated</strong> body");
+		expect(second.get("/blog/p")).not.toContain("original body");
+	});
+
 	it("is zero-cost when the project has no /src/content/", async () => {
 		const site = new MemorySite();
 		site.write("/src/pages/index.astro", enc("---\nconst x = 'plain';\n---\n<h1>{x}</h1>"));

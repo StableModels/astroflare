@@ -235,11 +235,13 @@ build cleanly into deployable bundles.
   same seam used for `@astroflare/runtime/*`: the host bakes
   `/src/content/**` into a serialisable snapshot and Astroflare
   injects a synchronous data module the isolate imports.
-  `createContentRuntimeModule(site) → { source, digest } | null`
-  (defined in `@astroflare/content`, re-exported from
-  `@astroflare/host-cloudflare`) is the single shared helper; both
-  `createPreviewHandler` (Mode A) and the workers `buildSite`
-  (Mode B) bake it, pass `inlineBundle(..., "./content.js")` +
+  `createContentRuntimeModule(site, { markdown? }) → { source,
+  digest } | null` (defined in `@astroflare/content`, re-exported
+  from `@astroflare/host-cloudflare`) is the single shared helper;
+  both `createPreviewHandler` (Mode A) and the workers `buildSite`
+  (Mode B) bake it (threading their own `markdown` option through so
+  collection bodies match `.md` pages), pass
+  `inlineBundle(..., "./content.js")` +
   `buildClosureRenderTask({ contentModuleSource })`, and fold the
   snapshot `digest` into the per-bundle execution cache key so a
   `/src/content/**` add/edit/delete busts the isolate even though
@@ -247,7 +249,17 @@ build cleanly into deployable bundles.
   the HMR `update`/`prune` that touches `/src/content/`. v1 is
   **schema-less auto-discovery** (every `/src/content/<name>/`
   directory is a collection; `entry.data` = raw frontmatter; no
-  in-Worker `config.ts` eval). No new isolate capability — the
+  in-Worker `config.ts` eval). Each entry's markdown **body is
+  pre-rendered host-side** through the same `compileMarkdown`
+  (`@astroflare/compiler`) the `.md`/`.mdx` page compiler uses —
+  exposed as `entry.rendered.html` for `<article
+  set:html={entry.rendered.html} />`; raw `entry.body` stays
+  (backward compatible). The markdown-config identity (Shiki on/off)
+  is folded into the snapshot `digest` so a theme/config change
+  busts the isolate too. JSX/islands inside `.mdx` entry bodies are
+  a documented v1 non-goal (markdown subset only); a hydrating
+  `Content` component is also deferred — `set:html` is the static
+  contract. No new isolate capability — the
   sandbox imports only the generated data module. On by default
   when `/src/content/` exists, zero-cost (returns `null`) when not.
   End-to-end coverage (createContentRuntimeModule → inlineBundle's

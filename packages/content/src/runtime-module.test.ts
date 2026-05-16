@@ -102,6 +102,66 @@ describe("createContentRuntimeModule", () => {
 		]);
 	});
 
+	it("pre-renders entry bodies to HTML while keeping the raw body", async () => {
+		const site = siteWith({
+			"/src/content/blog/rich.md":
+				"---\ntitle: Rich\n---\n" +
+				"# Heading\n\n" +
+				"Some **bold** and *italic* and a [link](https://example.com).\n\n" +
+				"- one\n- two\n\n" +
+				"```js\nconst x = 1;\n```\n",
+		});
+		const mod = await createContentRuntimeModule(site);
+		const { getEntry } = await loadModule((mod as { source: string }).source);
+		const entry = getEntry("blog", "rich") as {
+			body: string;
+			rendered: { html: string };
+		};
+
+		// Raw body is still present (backward compatible).
+		expect(entry.body).toContain("# Heading");
+		expect(entry.body).toContain("```js");
+
+		// rendered.html is real HTML, not literal markdown.
+		const html = entry.rendered.html;
+		expect(html).toContain("<h1>Heading</h1>");
+		expect(html).toContain("<strong>bold</strong>");
+		expect(html).toContain("<em>italic</em>");
+		expect(html).toContain('<a href="https://example.com">link</a>');
+		expect(html).toContain("<li>one</li>");
+		expect(html).toContain("<li>two</li>");
+		expect(html).toContain("<pre><code");
+		expect(html).not.toContain("# Heading");
+	});
+
+	it("Shiki highlights fenced code when markdown.shiki is on, and folds into the digest", async () => {
+		const files = {
+			"/src/content/blog/code.md": "---\ntitle: Code\n---\n```js\nconst x = 1;\n```\n",
+		};
+		const plain = await createContentRuntimeModule(siteWith(files));
+		const shiki = await createContentRuntimeModule(siteWith(files), {
+			markdown: { shiki: true },
+		});
+
+		const plainEntry = (await loadModule((plain as { source: string }).source)).getEntry(
+			"blog",
+			"code",
+		) as { rendered: { html: string } };
+		const shikiEntry = (await loadModule((shiki as { source: string }).source)).getEntry(
+			"blog",
+			"code",
+		) as { rendered: { html: string } };
+
+		// Shiki emits inline color styles via <span style="color:…">.
+		expect(shikiEntry.rendered.html).toContain("<span style=");
+		expect(plainEntry.rendered.html).not.toContain("<span style=");
+
+		// The markdown-config identity is folded into the digest, so the
+		// isolate cache key moves when Shiki toggles even though the
+		// /src/content bytes are identical.
+		expect(shiki?.digest).not.toBe(plain?.digest);
+	});
+
 	it("digest is stable for identical content and changes when content changes", async () => {
 		const a = await createContentRuntimeModule(siteWith(BLOG));
 		const b = await createContentRuntimeModule(siteWith(BLOG));

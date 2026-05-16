@@ -162,7 +162,9 @@ async function* buildSiteImpl(opts: WorkersBuildSiteOptions): AsyncIterable<Buil
 	// the snapshot digest is folded into each page's execution cache
 	// key so a content change can't serve a stale isolate. `null` when
 	// the project has no `/src/content/` (zero-cost when unused).
-	const contentModule = await createContentRuntimeModule(opts.site);
+	const contentModule = await createContentRuntimeModule(opts.site, {
+		...(opts.markdown ? { markdown: opts.markdown } : {}),
+	});
 	const moduleGraph = new ModuleGraph(
 		{ site: opts.site, cache, logger: opts.logger },
 		{
