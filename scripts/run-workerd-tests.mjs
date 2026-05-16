@@ -54,8 +54,15 @@ function runOnce() {
 	});
 }
 
-function classify(code, out) {
+// CI sets CI=true, which makes vitest emit ANSI colour codes even when
+// its stdout is a pipe (not a TTY). Strip them before matching so the
+// markers ("✓ |workerd|", " FAIL ", …) aren't split by escape sequences.
+// biome-ignore lint/suspicious/noControlCharactersInRegex: matching ANSI SGR escapes is the point.
+const ANSI = /\u001B\[[0-9;]*m/g;
+
+function classify(code, rawOut) {
 	if (code === 0) return "pass";
+	const out = rawOut.replace(ANSI, "");
 	if (REAL_FAILURE.test(out)) return "real-failure";
 	if (TEARDOWN_SIG.test(out) && PASS_MARKS.test(out)) return "teardown-only";
 	// Non-zero with no recognised signature — fail closed.
