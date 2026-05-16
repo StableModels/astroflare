@@ -250,10 +250,18 @@ build cleanly into deployable bundles.
   in-Worker `config.ts` eval). No new isolate capability — the
   sandbox imports only the generated data module. On by default
   when `/src/content/` exists, zero-cost (returns `null`) when not.
-  Lock-step coverage:
-  [`tests/workerd/content-collections-getstaticpaths.test.ts`](tests/workerd/content-collections-getstaticpaths.test.ts);
-  bake-helper unit coverage:
+  End-to-end coverage (createContentRuntimeModule → inlineBundle's
+  `astro:content` rewrite → `content.js` injection → execKey digest
+  fold) runs through `buildSite` on the in-process executor in
+  [`packages/build/src/build-site-workers.test.ts`](packages/build/src/build-site-workers.test.ts)
+  (the "host-driven content collections" describe) — Node pool, no
+  added Layer-B isolates; `createPreviewHandler` shares the identical
+  bundler/executor seam. Bake-helper unit coverage:
   [`packages/content/src/runtime-module.test.ts`](packages/content/src/runtime-module.test.ts).
+  (A Layer-B file is deliberately not added: the combined
+  `singleWorker` workerd pool trips a teardown assertion when any
+  extra isolate-spawning Layer-B file is introduced — pre-existing
+  harness fragility tracked separately.)
 
 Phase plans:
 [`docs/phases/phase-26-host-driven-preview.md`](docs/phases/phase-26-host-driven-preview.md),
