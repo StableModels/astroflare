@@ -102,6 +102,9 @@ export function buildRenderTask(opts: BuildRenderTaskOptions): TaskBundle {
 	};
 }
 
+/** The module path the bundle imports the baked content snapshot from. */
+export const CONTENT_MODULE_PATH = "content.js";
+
 export interface BuildClosureRenderTaskOptions {
 	/**
 	 * The pre-bundled ESM produced by `inlineBundle()` from
@@ -110,6 +113,17 @@ export interface BuildClosureRenderTaskOptions {
 	 * the call into `render(...)`.
 	 */
 	bundleCode: string;
+	/**
+	 * Host-baked content snapshot module source (from
+	 * `createContentRuntimeModule(site).source`). When present it's
+	 * added to the bundle as `content.js`, which the inline bundler's
+	 * `import * as __aflareContent from "./content.js"` resolves
+	 * against — this is what makes `import { getCollection } from
+	 * "astro:content"` work inside `.astro` frontmatter and
+	 * `getStaticPaths()`. Pass `inlineBundle(..., "./content.js")` when
+	 * you set this so the bundle actually references it.
+	 */
+	contentModuleSource?: string;
 }
 
 /**
@@ -148,11 +162,13 @@ export function buildClosureRenderTask(opts: BuildClosureRenderTaskOptions): Tas
 		"};",
 	].join("\n");
 
-	return {
-		mainModule: "main.js",
-		modules: {
-			"main.js": shim,
-			"bundle.js": opts.bundleCode,
-		},
+	const modules: Record<string, string> = {
+		"main.js": shim,
+		"bundle.js": opts.bundleCode,
 	};
+	if (opts.contentModuleSource !== undefined) {
+		modules[CONTENT_MODULE_PATH] = opts.contentModuleSource;
+	}
+
+	return { mainModule: "main.js", modules };
 }

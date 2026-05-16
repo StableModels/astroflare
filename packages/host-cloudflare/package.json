@@ -23,6 +23,7 @@
     "@astroflare/core": "workspace:*",
     "@astroflare/build": "workspace:*",
     "@astroflare/compiler": "workspace:*",
+    "@astroflare/content": "workspace:*",
     "@astroflare/preview": "workspace:*",
     "@astroflare/runtime": "workspace:*"
   },

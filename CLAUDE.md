@@ -227,6 +227,33 @@ build cleanly into deployable bundles.
   backwards-compatible — `verifyCompile` is opt-in, error-response
   injection follows the existing `hmr !== false` gate, and the
   structured `HmrError` fields are optional.
+- **Host-driven content collections (`astro:content`).**
+  `createContentReader` needs a `Site` the spawned isolate doesn't
+  have, and the inline bundler only walks `.astro`/`.md`/`.mdx`
+  imports — so `import { getCollection } from "astro:content"` in
+  frontmatter / `getStaticPaths()` couldn't resolve. Fixed by the
+  same seam used for `@astroflare/runtime/*`: the host bakes
+  `/src/content/**` into a serialisable snapshot and Astroflare
+  injects a synchronous data module the isolate imports.
+  `createContentRuntimeModule(site) → { source, digest } | null`
+  (defined in `@astroflare/content`, re-exported from
+  `@astroflare/host-cloudflare`) is the single shared helper; both
+  `createPreviewHandler` (Mode A) and the workers `buildSite`
+  (Mode B) bake it, pass `inlineBundle(..., "./content.js")` +
+  `buildClosureRenderTask({ contentModuleSource })`, and fold the
+  snapshot `digest` into the per-bundle execution cache key so a
+  `/src/content/**` add/edit/delete busts the isolate even though
+  the route's `.astro` closure is unchanged. Preview re-bakes on
+  the HMR `update`/`prune` that touches `/src/content/`. v1 is
+  **schema-less auto-discovery** (every `/src/content/<name>/`
+  directory is a collection; `entry.data` = raw frontmatter; no
+  in-Worker `config.ts` eval). No new isolate capability — the
+  sandbox imports only the generated data module. On by default
+  when `/src/content/` exists, zero-cost (returns `null`) when not.
+  Lock-step coverage:
+  [`tests/workerd/content-collections-getstaticpaths.test.ts`](tests/workerd/content-collections-getstaticpaths.test.ts);
+  bake-helper unit coverage:
+  [`packages/content/src/runtime-module.test.ts`](packages/content/src/runtime-module.test.ts).
 
 Phase plans:
 [`docs/phases/phase-26-host-driven-preview.md`](docs/phases/phase-26-host-driven-preview.md),

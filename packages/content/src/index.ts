@@ -28,18 +28,19 @@
  * `tests/workerd/content-collections-workspace.test.ts` for the
  * WorkspaceSite-shaped end-to-end coverage.
  *
- * ## Note on calling from inside `.astro` frontmatter
+ * ## Calling from inside `.astro` frontmatter / `getStaticPaths()`
  *
- * The framework's preview module-graph walks `.astro`/`.md`/`.mdx`
- * imports but does NOT bundle the framework's own npm packages
- * (`@astroflare/content`, etc.) into the spawned compile/render
- * isolate. Hosts that want `import { getCollection } from
- * "@astroflare/content"` to work inside `.astro` frontmatter need to
- * thread the package's source into `createWorkerdExecutor({ runtime })`
- * the same way `runtimeModules` does. The recommended pattern is to
- * call `createContentReader(site, registry)` from a worker route or
- * endpoint and pass the resulting entries into the page render as
- * `Astro.props`.
+ * `createContentReader` needs a `Site`; the spawned compile/render
+ * isolate has none, and the inline bundler only walks
+ * `.astro`/`.md`/`.mdx` imports — so a bare `import { getCollection }
+ * from "astro:content"` can't resolve there on its own. The supported
+ * path is {@link createContentRuntimeModule} (see `./runtime-module.ts`,
+ * re-exported below): the host bakes collections into a serialisable
+ * snapshot and the framework injects a synchronous data module the
+ * isolate imports. Both `createPreviewHandler` (Mode A) and the
+ * workers `buildSite` (Mode B) consume the same baked module keyed
+ * the same way, so preview ↔ publish stay in lock-step. Hosts opt in
+ * with one call (on by default when `/src/content/` exists).
  *
  * Carve-outs (in retro):
  *   - Content-layer custom loaders (`loader: () => …`) — Astro's API for
@@ -203,6 +204,12 @@ async function loadEntry<TData>(
 		digest,
 	};
 }
+
+export {
+	createContentRuntimeModule,
+	type ContentRuntimeModule,
+	type ContentSnapshot,
+} from "./runtime-module.js";
 
 function slugFor(collectionName: string, filePath: string): string {
 	const prefix = `${COLLECTIONS_PREFIX}/${collectionName}/`;

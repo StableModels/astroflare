@@ -21,6 +21,7 @@
   "dependencies": {
     "@astroflare/core": "workspace:*",
     "@astroflare/compiler": "workspace:*",
+    "@astroflare/content": "workspace:*",
     "@astroflare/preview": "workspace:*",
     "@astroflare/runtime": "workspace:*"
   },

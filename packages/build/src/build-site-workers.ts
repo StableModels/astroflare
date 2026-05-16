@@ -36,6 +36,7 @@
  */
 
 import { isCompileError } from "@astroflare/compiler";
+import { createContentRuntimeModule } from "@astroflare/content";
 import type {
 	BuildSiteOutput,
 	Cache,
@@ -143,10 +144,25 @@ export function buildSite(opts: WorkersBuildSiteOptions): AsyncIterable<BuildSit
 	return buildSiteImpl(opts);
 }
 
+/**
+ * Module specifier the bundle imports the baked content snapshot from.
+ * Relative form of `CONTENT_MODULE_PATH` (`content.js`) — resolves the
+ * same way the runtime import (`./runtime/index.js`) does.
+ */
+const CONTENT_IMPORT = "./content.js";
+
 async function* buildSiteImpl(opts: WorkersBuildSiteOptions): AsyncIterable<BuildSiteOutput> {
 	const enc = new TextEncoder();
 	const cache = opts.cache ?? createNoopCache();
 	const continueOnError = opts.continueOnError === true;
+
+	// Host-side content bake (feature: host-driven content collections).
+	// Done once per build so every dynamic route's `getStaticPaths()`
+	// and every page's frontmatter see the same frozen snapshot — and
+	// the snapshot digest is folded into each page's execution cache
+	// key so a content change can't serve a stale isolate. `null` when
+	// the project has no `/src/content/` (zero-cost when unused).
+	const contentModule = await createContentRuntimeModule(opts.site);
 	const moduleGraph = new ModuleGraph(
 		{ site: opts.site, cache, logger: opts.logger },
 		{
@@ -188,9 +204,24 @@ async function* buildSiteImpl(opts: WorkersBuildSiteOptions): AsyncIterable<Buil
 		}
 
 		const taskFactory = () => {
-			const code = inlineBundle(closure.modules, DEFAULT_RUNTIME_IMPORT);
-			return buildClosureRenderTask({ bundleCode: code });
+			const code = inlineBundle(
+				closure.modules,
+				DEFAULT_RUNTIME_IMPORT,
+				contentModule ? CONTENT_IMPORT : undefined,
+			);
+			return buildClosureRenderTask({
+				bundleCode: code,
+				...(contentModule ? { contentModuleSource: contentModule.source } : {}),
+			});
 		};
+
+		// Fold the content digest into the execution cache key so a
+		// content add/edit/delete busts the isolate even though the
+		// route's `.astro` closure (and thus `closure.bundleKey`) is
+		// unchanged. Lock-step with `createPreviewHandler`.
+		const execKey = contentModule
+			? `${closure.bundleKey}:c:${contentModule.digest}`
+			: closure.bundleKey;
 
 		const localRoute = pageRoute(sourcePath);
 		if (localRoute !== null) {
@@ -199,7 +230,7 @@ async function* buildSiteImpl(opts: WorkersBuildSiteOptions): AsyncIterable<Buil
 			try {
 				const html = await renderRoute(
 					opts.executor,
-					closure.bundleKey,
+					execKey,
 					taskFactory,
 					sourcePath,
 					route,
@@ -227,7 +258,7 @@ async function* buildSiteImpl(opts: WorkersBuildSiteOptions): AsyncIterable<Buil
 		try {
 			staticPaths = await fetchStaticPaths(
 				opts.executor,
-				closure.bundleKey,
+				execKey,
 				taskFactory,
 				sourcePath,
 				opts.logger,
@@ -261,7 +292,7 @@ async function* buildSiteImpl(opts: WorkersBuildSiteOptions): AsyncIterable<Buil
 			try {
 				const html = await renderRoute(
 					opts.executor,
-					closure.bundleKey,
+					execKey,
 					taskFactory,
 					sourcePath,
 					route,

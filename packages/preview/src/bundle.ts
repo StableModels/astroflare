@@ -94,6 +94,23 @@ const ANY_IMPORT_LINE_RE =
 const COMPILABLE_IMPORT_RE =
 	/^[ \t]*import[ \t]+([^"';\n]+?)[ \t]+from[ \t]+["']([^"']+\.(?:astro|md|mdx))["'];?[ \t]*\r?\n?/gm;
 
+/**
+ * Match a top-level `import` of the virtual content module — either
+ * Astro's canonical `astro:content` specifier or the equivalent
+ * `@astroflare/content` package name. Captures the import clause
+ * (group 1) so `parseImportClause` can split it into default /
+ * namespace / named bindings.
+ *
+ * Unlike every other bare specifier (which step 2 strips), this one is
+ * rewritten to bind against the bundle-scope `__aflareContent`
+ * namespace — the host-baked snapshot module injected as `content.js`.
+ * Only active when `inlineBundle` is given a `contentImport`; otherwise
+ * the import falls through to the generic strip (unchanged behaviour
+ * for projects with no `/src/content/`).
+ */
+const CONTENT_IMPORT_RE =
+	/^[ \t]*import[ \t]+([^"';\n]+?)[ \t]+from[ \t]+["'](?:astro:content|@astroflare\/content)["'];?[ \t]*\r?\n?/gm;
+
 /** Match `export default <expr>;` at line start (markdown compiler output). */
 const EXPORT_DEFAULT_RE = /^[ \t]*export[ \t]+default[ \t]+/m;
 
@@ -132,7 +149,23 @@ const EXPORT_LIST_RE = /^[ \t]*export[ \t]*\{([^}]*)\}[ \t]*;?[ \t]*$/gm;
  */
 const IDENT_RE = /^[A-Za-z_$][\w$]*$/;
 
-export function inlineBundle(modules: readonly ModuleInfo[], runtimeImport: string): string {
+/**
+ * `inlineBundle(modules, runtimeImport, contentImport?)`.
+ *
+ * `contentImport` (e.g. `"./content.js"`) opts the bundle into
+ * host-driven content collections: a bundle-scope `import * as
+ * __aflareContent from <contentImport>` is hoisted alongside the
+ * runtime import, and every `astro:content` / `@astroflare/content`
+ * import in user frontmatter is rewritten to bind against it instead
+ * of being stripped. The caller is responsible for adding the matching
+ * `content.js` module to the task bundle (see `buildClosureRenderTask`)
+ * — typically the `{ source }` from `createContentRuntimeModule`.
+ */
+export function inlineBundle(
+	modules: readonly ModuleInfo[],
+	runtimeImport: string,
+	contentImport?: string,
+): string {
 	if (modules.length === 0) throw new Error("inlineBundle: empty closure");
 
 	const ordered = topoSort(modules);
@@ -146,14 +179,18 @@ export function inlineBundle(modules: readonly ModuleInfo[], runtimeImport: stri
 		throw new Error(`inlineBundle: route ${route.path} missing from topo sort`);
 	}
 
-	let out = `import { ${BUNDLE_RUNTIME_SYMBOLS.join(", ")} } from ${JSON.stringify(runtimeImport)};\n\n`;
+	let out = `import { ${BUNDLE_RUNTIME_SYMBOLS.join(", ")} } from ${JSON.stringify(runtimeImport)};\n`;
+	if (contentImport) {
+		out += `import * as __aflareContent from ${JSON.stringify(contentImport)};\n`;
+	}
+	out += "\n";
 
 	for (let i = 0; i < ordered.length; i++) {
 		const mod = ordered[i] as ModuleInfo;
 		out += `// Module ${i}: ${mod.path}\n`;
 		out += `const __m_${i} = (() => {\n`;
 		out += "  let __default;\n";
-		const { body: rendered, namedExports } = renderModuleBody(mod, idxByPath);
+		const { body: rendered, namedExports } = renderModuleBody(mod, idxByPath, contentImport);
 		out += rendered;
 		const namedFields = namedExports.length > 0 ? `, ${namedExports.join(", ")}` : "";
 		out += `  return { default: __default${namedFields} };\n`;
@@ -183,7 +220,11 @@ interface RenderedModule {
 	namedExports: string[];
 }
 
-function renderModuleBody(mod: ModuleInfo, idxByPath: Map<string, number>): RenderedModule {
+function renderModuleBody(
+	mod: ModuleInfo,
+	idxByPath: Map<string, number>,
+	contentImport: string | undefined,
+): RenderedModule {
 	let body = mod.compiled;
 	const namedExports: string[] = [];
 
@@ -216,6 +257,25 @@ function renderModuleBody(mod: ModuleInfo, idxByPath: Map<string, number>): Rend
 		}
 		return `${lines.join("\n")}\n`;
 	});
+
+	// 1b. Rewrite the virtual content import (`astro:content` /
+	//     `@astroflare/content`) into destructuring against the
+	//     bundle-scope `__aflareContent` namespace. Only when the
+	//     caller wired a content module — otherwise it falls through
+	//     to step 2's strip (a project with no `/src/content/`).
+	if (contentImport) {
+		body = body.replace(CONTENT_IMPORT_RE, (_, clause: string) => {
+			const parsed = parseImportClause(clause);
+			const lines: string[] = [];
+			if (parsed.default) lines.push(`  const ${parsed.default} = __aflareContent.default;`);
+			if (parsed.namespace) lines.push(`  const ${parsed.namespace} = __aflareContent;`);
+			if (parsed.named.length > 0) {
+				const parts = parsed.named.map((b) => (b.from === b.to ? b.from : `${b.from}: ${b.to}`));
+				lines.push(`  const { ${parts.join(", ")} } = __aflareContent;`);
+			}
+			return lines.length > 0 ? `${lines.join("\n")}\n` : "";
+		});
+	}
 
 	// 2. Strip every remaining top-level `import ...` line. The runtime import
 	//    is now provided by the bundle's outer scope; non-compilable user
