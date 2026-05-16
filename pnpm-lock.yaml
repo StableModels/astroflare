@@ -199,6 +199,9 @@ importers:
 
   packages/content:
     dependencies:
+      '@astroflare/compiler':
+        specifier: workspace:*
+        version: link:../compiler
       '@astroflare/core':
         specifier: workspace:*
         version: link:../core

@@ -35,13 +35,33 @@
  */
 
 import { type Site, contentId, stableStringify } from "@astroflare/core";
-import { type CollectionEntry, createContentReader, defineCollection } from "./index.js";
+import {
+	type CollectionEntry,
+	type ContentMarkdownOptions,
+	createContentReader,
+	defineCollection,
+} from "./index.js";
 
 const CONTENT_PREFIX = "/src/content";
 const ENTRY_EXTENSIONS = [".md", ".mdx"] as const;
 
 /** Serialisable, frozen view of every collection. Keyed by name. */
 export type ContentSnapshot = Record<string, CollectionEntry[]>;
+
+export interface CreateContentRuntimeModuleOptions {
+	/**
+	 * Markdown options used to pre-render every entry body to
+	 * `entry.rendered.html`. Thread the **same** options the host
+	 * passes to the `.md`/`.mdx` page compiler (e.g.
+	 * `createPreviewHandler({ markdown })` / `buildSite({ markdown })`)
+	 * so a collection body and an equivalent `.md` page produce
+	 * identical HTML. Its identity is folded into {@link
+	 * ContentRuntimeModule.digest} so a Shiki/markdown-config change
+	 * busts the isolate cache even when no `/src/content/` file
+	 * changed.
+	 */
+	markdown?: ContentMarkdownOptions;
+}
 
 export interface ContentRuntimeModule {
 	/**
@@ -66,7 +86,10 @@ export interface ContentRuntimeModule {
  * carries no entries — callers treat that as "no content module,
  * nothing to inject" so the feature is zero-cost when unused.
  */
-export async function createContentRuntimeModule(site: Site): Promise<ContentRuntimeModule | null> {
+export async function createContentRuntimeModule(
+	site: Site,
+	opts: CreateContentRuntimeModuleOptions = {},
+): Promise<ContentRuntimeModule | null> {
 	const collectionNames = new Set<string>();
 	for (const ext of ENTRY_EXTENSIONS) {
 		for await (const path of site.glob(`${CONTENT_PREFIX}/**/*${ext}`)) {
@@ -76,18 +99,26 @@ export async function createContentRuntimeModule(site: Site): Promise<ContentRun
 	}
 	if (collectionNames.size === 0) return null;
 
+	const markdown = opts.markdown ?? {};
 	const sortedNames = Array.from(collectionNames).sort();
 	const registry = {
 		collections: Object.fromEntries(sortedNames.map((n) => [n, defineCollection({})])),
 	};
-	const reader = createContentReader(site, registry);
+	const reader = createContentReader(site, registry, { markdown });
 
 	const snapshot: ContentSnapshot = {};
 	for (const name of sortedNames) {
 		snapshot[name] = await reader.getCollection(name);
 	}
 
-	const digest = await contentId(stableStringify(snapshot));
+	// `rendered.html` is in the snapshot, so the digest already moves
+	// when a body or Shiki toggle changes the output. Folding the
+	// markdown-config identity in explicitly keeps the cache key honest
+	// even if a compiler/theme change leaves the same config string —
+	// preview and the next build both re-render.
+	const digest = await contentId(
+		stableStringify({ snapshot, markdown: { shiki: markdown.shiki === true } }),
+	);
 	return { source: renderModuleSource(snapshot), digest };
 }
 

@@ -52,6 +52,7 @@
  *     `slug` in frontmatter, or via filename; we always use filename).
  */
 
+import { compileMarkdown } from "@astroflare/compiler";
 import { type Site, contentId } from "@astroflare/core";
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
@@ -66,6 +67,29 @@ const COLLECTIONS_PREFIX = "/src/content";
 // Order matters: `.mdx` is checked first so a file matching both suffixes
 // (rare but possible during migration) resolves the longer extension.
 const ENTRY_EXTENSIONS = [".mdx", ".md"] as const;
+
+/**
+ * Markdown rendering options for collection-entry bodies. Mirrors the
+ * `markdown` surface threaded into the `.md`/`.mdx` *page* compiler
+ * (`@astroflare/preview`'s `MarkdownOptions`, `compileMarkdown`'s
+ * `shiki` flag) so an entry body and an equivalent `.md` page produce
+ * byte-identical HTML — preview ↔ publish stay in lock-step. Only
+ * `shiki` is exposed; the WASM Oniguruma engine is intentionally not a
+ * selectable path (Workers-only rule).
+ */
+export interface ContentMarkdownOptions {
+	/** Highlight fenced code blocks via Shiki's pure-JS regex engine. Default off. */
+	shiki?: boolean;
+}
+
+export interface ContentReaderOptions {
+	/**
+	 * Markdown options used to pre-render every entry's body to
+	 * `entry.rendered.html`. Pass the same options the host threads into
+	 * the page compiler so collection bodies and `.md` pages match.
+	 */
+	markdown?: ContentMarkdownOptions;
+}
 
 export interface CollectionDefinition<T extends z.ZodTypeAny = z.ZodTypeAny> {
 	type?: "content" | "data";
@@ -100,6 +124,14 @@ export interface CollectionEntry<TData = Record<string, unknown>> {
 	data: TData;
 	/** Raw markdown body (after frontmatter). */
 	body: string;
+	/**
+	 * Body pre-rendered to HTML host-side through the framework's
+	 * `.md`/`.mdx` page compiler (same remark/rehype set, same Shiki
+	 * engine). Consume with Astro's standard `set:html` — `<article
+	 * set:html={entry.rendered.html} />`. Deterministic from `body` +
+	 * the markdown config; the snapshot digest covers it.
+	 */
+	rendered: { html: string };
 	/** Content hash of the entry's source bytes. */
 	digest: string;
 }
@@ -113,7 +145,13 @@ export interface CollectionRegistry {
  * Build a content-collection reader bound to a `Site` and a registry.
  * Returns the public `getCollection`/`getEntry` API.
  */
-export function createContentReader(site: Site, registry: CollectionRegistry) {
+export function createContentReader(
+	site: Site,
+	registry: CollectionRegistry,
+	opts: ContentReaderOptions = {},
+) {
+	const markdown = opts.markdown ?? {};
+
 	async function getCollection<TData = Record<string, unknown>>(
 		name: string,
 	): Promise<CollectionEntry<TData>[]> {
@@ -124,7 +162,7 @@ export function createContentReader(site: Site, registry: CollectionRegistry) {
 		const out: CollectionEntry<TData>[] = [];
 		for (const ext of ENTRY_EXTENSIONS) {
 			for await (const filePath of site.glob(`${COLLECTIONS_PREFIX}/${name}/**/*${ext}`)) {
-				const entry = await loadEntry<TData>(site, name, filePath, def);
+				const entry = await loadEntry<TData>(site, name, filePath, def, markdown);
 				out.push(entry);
 			}
 		}
@@ -143,7 +181,7 @@ export function createContentReader(site: Site, registry: CollectionRegistry) {
 		for (const ext of ENTRY_EXTENSIONS) {
 			const filePath = `${COLLECTIONS_PREFIX}/${name}/${slug}${ext}`;
 			const stat = await site.statFile(filePath);
-			if (stat) return loadEntry<TData>(site, name, filePath, def);
+			if (stat) return loadEntry<TData>(site, name, filePath, def, markdown);
 		}
 		return null;
 	}
@@ -156,6 +194,7 @@ async function loadEntry<TData>(
 	collectionName: string,
 	filePath: string,
 	def: DefinedCollection,
+	markdown: ContentMarkdownOptions,
 ): Promise<CollectionEntry<TData>> {
 	const bytes = await site.readFile(filePath);
 	if (!bytes) {
@@ -195,12 +234,24 @@ async function loadEntry<TData>(
 		data = result.data;
 	}
 
+	// Pre-render the body through the *same* compiler the host uses for
+	// `.md`/`.mdx` pages. Passing the full `source` (not the sliced
+	// `body`) makes `compileMarkdown` strip frontmatter with its own
+	// identical regex, so an entry and an equivalent `.md` page produce
+	// byte-identical HTML — and a body that legitimately begins with a
+	// `---` thematic break can't be mistaken for frontmatter.
+	const { html } = await compileMarkdown(source, {
+		shiki: markdown.shiki === true,
+		filename: filePath,
+	});
+
 	const slug = slugFor(collectionName, filePath);
 	return {
 		slug,
 		id: filePath,
 		data: data as TData,
 		body,
+		rendered: { html },
 		digest,
 	};
 }
