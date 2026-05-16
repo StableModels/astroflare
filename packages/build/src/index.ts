@@ -37,6 +37,7 @@ export type { BuildSiteOutput, SnapshotError } from "@astroflare/core";
 export {
 	buildRenderTask,
 	buildClosureRenderTask,
+	CONTENT_MODULE_PATH,
 	DEFAULT_RUNTIME_IMPORT,
 	type BuildRenderTaskOptions,
 	type BuildClosureRenderTaskOptions,

@@ -10,6 +10,7 @@
   "references": [
     { "path": "../core" },
     { "path": "../compiler" },
+    { "path": "../content" },
     { "path": "../preview" },
     { "path": "../runtime" },
     { "path": "../test-utils" }

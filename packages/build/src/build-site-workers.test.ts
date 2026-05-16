@@ -656,3 +656,120 @@ export async function getStaticPaths() { throw new Error("paths boom"); }
 		expect(err.stack).toContain("paths boom");
 	});
 });
+
+/**
+ * Host-driven content collections, end-to-end through the real
+ * `buildSite` pipeline (createContentRuntimeModule → inlineBundle's
+ * `astro:content` rewrite → buildClosureRenderTask's `content.js`
+ * injection → execKey digest fold). Runs on the in-process executor —
+ * the same Node substrate as the rest of this file, so it adds zero
+ * Worker Loader / workerd-pool isolates. (The workerd runtime exercises
+ * the identical bundler/executor seam; a separate Layer-B file is
+ * deliberately avoided — see PR #19 discussion: the combined
+ * `singleWorker` pool trips a workerd teardown assertion when any
+ * additional isolate-spawning Layer-B file is added.)
+ *
+ * `createPreviewHandler` (Mode A) shares this exact machinery — same
+ * `createContentRuntimeModule`, same `inlineBundle(..., "./content.js")`,
+ * same `buildClosureRenderTask({ contentModuleSource })`, same execKey
+ * fold — so proving it here proves both modes' content path.
+ */
+describe("buildSite (workers-runtime) — host-driven content collections", () => {
+	const SLUG_ROUTE = `---
+import { getCollection } from 'astro:content';
+export async function getStaticPaths() {
+	const posts = await getCollection('blog');
+	return posts.map((p) => ({ params: { slug: p.slug }, props: { post: p } }));
+}
+const { post } = Astro.props;
+---
+<h1>{post.data.title}</h1>
+<article>{post.body}</article>`;
+
+	const LIST_PAGE = `---
+import { getCollection } from 'astro:content';
+const posts = await getCollection('blog');
+---
+<ul>{posts.map((p) => (<li>{p.data.title}</li>))}</ul>`;
+
+	function seedSite(): MemorySite {
+		const site = new MemorySite();
+		site.write("/src/pages/blog/[slug].astro", enc(SLUG_ROUTE));
+		site.write("/src/pages/blog/index.astro", enc(LIST_PAGE));
+		site.write(
+			"/src/content/blog/hello-world.md",
+			enc("---\ntitle: Hello, World\n---\nthe hello body\n"),
+		);
+		site.write(
+			"/src/content/blog/second-post.md",
+			enc("---\ntitle: A Second Post\n---\nthe second body\n"),
+		);
+		return site;
+	}
+
+	it("enumerates a [slug] route via getStaticPaths(getCollection) and renders frontmatter getCollection", async () => {
+		const executor = makeExecutor();
+		const produced = (await collect(buildSite({ site: seedSite(), executor }))).filter(
+			(x): x is SnapshotEntry => "bytes" in x,
+		);
+
+		const byRoute = new Map(produced.map((e) => [e.route, new TextDecoder().decode(e.bytes)]));
+		expect([...byRoute.keys()].sort()).toEqual(["/blog", "/blog/hello-world", "/blog/second-post"]);
+		// getStaticPaths(getCollection('blog')) → one page per entry,
+		// `post` prop threaded into the render.
+		expect(byRoute.get("/blog/hello-world")).toContain("Hello, World");
+		expect(byRoute.get("/blog/hello-world")).toContain("the hello body");
+		expect(byRoute.get("/blog/second-post")).toContain("A Second Post");
+		// list page used getCollection in frontmatter.
+		expect(byRoute.get("/blog")).toContain("Hello, World");
+		expect(byRoute.get("/blog")).toContain("A Second Post");
+	});
+
+	it("folds the content digest into the execution cache key — a new /src/content file busts the cache", async () => {
+		// One executor across two builds. `runCached` is keyed by
+		// execKey (closure bundleKey + content digest). The route
+		// `.astro` source is byte-identical between runs, so without
+		// the digest fold the second build would reuse the stale
+		// cached isolate and never see `third-post`. Seeing it proves
+		// the digest is recomputed and folded.
+		const executor = makeExecutor();
+		const site = seedSite();
+
+		const first = (await collect(buildSite({ site, executor }))).filter(
+			(x): x is SnapshotEntry => "bytes" in x,
+		);
+		expect(first.map((e) => e.route).sort()).toEqual([
+			"/blog",
+			"/blog/hello-world",
+			"/blog/second-post",
+		]);
+
+		site.write("/src/content/blog/third-post.md", enc("---\ntitle: The Third\n---\nthird body\n"));
+
+		const second = (await collect(buildSite({ site, executor }))).filter(
+			(x): x is SnapshotEntry => "bytes" in x,
+		);
+		const byRoute = new Map(second.map((e) => [e.route, new TextDecoder().decode(e.bytes)]));
+		expect([...byRoute.keys()].sort()).toEqual([
+			"/blog",
+			"/blog/hello-world",
+			"/blog/second-post",
+			"/blog/third-post",
+		]);
+		expect(byRoute.get("/blog/third-post")).toContain("The Third");
+		expect(byRoute.get("/blog/third-post")).toContain("third body");
+		// The list page (same source bytes) re-baked with the new entry.
+		expect(byRoute.get("/blog")).toContain("The Third");
+	});
+
+	it("is zero-cost when the project has no /src/content/", async () => {
+		const site = new MemorySite();
+		site.write("/src/pages/index.astro", enc("---\nconst x = 'plain';\n---\n<h1>{x}</h1>"));
+		const executor = makeExecutor();
+		const produced = (await collect(buildSite({ site, executor }))).filter(
+			(x): x is SnapshotEntry => "bytes" in x,
+		);
+		expect(produced.map((e) => e.route)).toEqual(["/"]);
+		expect(new TextDecoder().decode(produced[0]?.bytes ?? new Uint8Array())).toContain("plain");
+	});
+});

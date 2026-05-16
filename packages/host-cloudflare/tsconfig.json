@@ -11,6 +11,7 @@
   "references": [
     { "path": "../core" },
     { "path": "../runtime" },
+    { "path": "../content" },
     { "path": "../preview" },
     { "path": "../build" }
   ]

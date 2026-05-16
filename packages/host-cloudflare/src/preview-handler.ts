@@ -50,6 +50,7 @@ import {
 	type StaticPathsResult,
 	buildClosureRenderTask,
 } from "@astroflare/build";
+import { type ContentRuntimeModule, createContentRuntimeModule } from "@astroflare/content";
 import type {
 	Cache,
 	Executor,
@@ -72,6 +73,17 @@ const PAGES_PREFIX = "/src/pages";
 
 /** Subpath of the workspace where the public-asset fallback looks up files. */
 const PUBLIC_PREFIX = "/public";
+
+/** Subpath of the workspace where content collections live. */
+const CONTENT_PREFIX = "/src/content";
+
+/**
+ * Module specifier the bundle imports the host-baked content snapshot
+ * from. Relative form of `content.js` — resolves like the runtime
+ * import. Only referenced when the project actually has
+ * `/src/content/` entries.
+ */
+const CONTENT_IMPORT = "./content.js";
 
 /**
  * Module specifier the compiled `.astro`/`.md`/`.mdx` modules import the
@@ -200,6 +212,34 @@ export function createPreviewHandler(opts: CreatePreviewHandlerOptions): Preview
 	let routesReady: Promise<void> | null = null;
 	let routeInvalidationSub: Subscription | null = null;
 
+	// Host-side content bake (feature: host-driven content collections).
+	// Memoised across requests; busted when an HMR event touches
+	// `/src/content/`, so an add/edit/delete of a `.md` is reflected on
+	// the next render with no source edit to the route. `null` resolve
+	// means the project has no `/src/content/` — zero-cost when unused.
+	let contentReady: Promise<ContentRuntimeModule | null> | null = null;
+	let contentInvalidationSub: Subscription | null = null;
+
+	function ensureContent(): Promise<ContentRuntimeModule | null> {
+		if (!contentReady) {
+			contentReady = createContentRuntimeModule(opts.site);
+			ensureContentInvalidation();
+		}
+		return contentReady;
+	}
+
+	function ensureContentInvalidation(): void {
+		if (contentInvalidationSub) return;
+		const touchesContent = (p: string): boolean => p.startsWith(`${CONTENT_PREFIX}/`);
+		contentInvalidationSub = opts.coordinator.subscribe("hmr", (msg: HmrMessage) => {
+			if (msg.type === "update") {
+				if (msg.trigger && touchesContent(msg.trigger)) contentReady = null;
+			} else if (msg.type === "prune") {
+				if (msg.paths.some(touchesContent)) contentReady = null;
+			}
+		});
+	}
+
 	function ensureRoutes(): Promise<void> {
 		if (!router) return Promise.resolve();
 		if (!routesReady) {
@@ -261,7 +301,16 @@ export function createPreviewHandler(opts: CreatePreviewHandlerOptions): Preview
 			if (resolution.kind === "endpoint") {
 				return notFound(hmrClientSource);
 			}
-			return renderRoute(opts, moduleGraph, staticPathsCache, resolution, req, hmrClientSource);
+			const content = await ensureContent();
+			return renderRoute(
+				opts,
+				moduleGraph,
+				staticPathsCache,
+				resolution,
+				req,
+				hmrClientSource,
+				content,
+			);
 		},
 	};
 }
@@ -361,6 +410,7 @@ async function renderRoute(
 	resolution: RouteResolution,
 	request: Request,
 	hmrClientSource: string | null,
+	content: ContentRuntimeModule | null,
 ): Promise<Response> {
 	const { sourcePath, isDynamic } = resolution;
 	let { params } = resolution;
@@ -388,9 +438,22 @@ async function renderRoute(
 	// and the render call below — both go through the same bundleKey'd
 	// isolate, so the executor only ever spawns once per closure.
 	const taskFactory = () => {
-		const code = inlineBundle(closure.modules, RUNTIME_IMPORT);
-		return buildClosureRenderTask({ bundleCode: code });
+		const code = inlineBundle(
+			closure.modules,
+			RUNTIME_IMPORT,
+			content ? CONTENT_IMPORT : undefined,
+		);
+		return buildClosureRenderTask({
+			bundleCode: code,
+			...(content ? { contentModuleSource: content.source } : {}),
+		});
 	};
+
+	// Fold the content digest into the execution cache key so a
+	// content add/edit/delete busts the isolate even though the
+	// route's `.astro` closure (`closure.bundleKey`) is unchanged.
+	// Lock-step with the workers `buildSite` path.
+	const execKey = content ? `${closure.bundleKey}:c:${content.digest}` : closure.bundleKey;
 
 	// Dynamic routes: call `getStaticPaths()` to validate the URL params
 	// and pick up the entry's `props`. A URL whose params don't appear
@@ -400,12 +463,7 @@ async function renderRoute(
 	if (isDynamic) {
 		let staticPaths: StaticPathsResult;
 		try {
-			staticPaths = await fetchStaticPaths(
-				opts.executor,
-				staticPathsCache,
-				closure.bundleKey,
-				taskFactory,
-			);
+			staticPaths = await fetchStaticPaths(opts.executor, staticPathsCache, execKey, taskFactory);
 		} catch (err) {
 			opts.logger?.event("preview.static-paths.failed", {
 				path: sourcePath,
@@ -440,7 +498,7 @@ async function renderRoute(
 
 	let result: RenderResult;
 	try {
-		result = await opts.executor.runCached<RenderResult>(closure.bundleKey, taskFactory, input);
+		result = await opts.executor.runCached<RenderResult>(execKey, taskFactory, input);
 	} catch (err) {
 		opts.logger?.event("preview.render.failed", {
 			path: sourcePath,

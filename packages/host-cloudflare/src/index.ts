@@ -22,4 +22,16 @@ export * from "./runtime-bundled-executor.js";
 export * from "./r2-snapshots.js";
 export * from "./workspace-site.js";
 
+// Host-driven content collections: bake `/src/content/` into an
+// injectable snapshot module. Surfaced here so hosts opt in with one
+// call; consumed identically by `createPreviewHandler` (Mode A) and
+// the workers `buildSite` (Mode B) so preview ↔ publish stay in
+// lock-step. (Defined in `@astroflare/content`; re-exported for
+// host ergonomics.)
+export {
+	createContentRuntimeModule,
+	type ContentRuntimeModule,
+	type ContentSnapshot,
+} from "@astroflare/content";
+
 export const HOST_CLOUDFLARE_VERSION = "0.0.0";
