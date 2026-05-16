@@ -258,10 +258,15 @@ build cleanly into deployable bundles.
   added Layer-B isolates; `createPreviewHandler` shares the identical
   bundler/executor seam. Bake-helper unit coverage:
   [`packages/content/src/runtime-module.test.ts`](packages/content/src/runtime-module.test.ts).
-  (A Layer-B file is deliberately not added: the combined
-  `singleWorker` workerd pool trips a teardown assertion when any
-  extra isolate-spawning Layer-B file is introduced — pre-existing
-  harness fragility tracked separately.)
+  (Adding extra isolate-spawning Layer-B files perturbs the timing of
+  an **upstream** workerd teardown race —
+  [`cloudflare/workerd#6506`](https://github.com/cloudflare/workerd/issues/6506):
+  ephemeral Worker Loader isolates dropped while the parent isolate is
+  already in `DROPPING` abort the runtime with
+  `jsg/setup.c++:235 … defer destruction during isolate shutdown`,
+  AFTER every test has passed. It can only produce a false RED, never a
+  false GREEN, and is unfixed upstream with no good workerd/pool
+  version. Mitigated, not masked — see "workerd teardown crash" below.)
 
 Phase plans:
 [`docs/phases/phase-26-host-driven-preview.md`](docs/phases/phase-26-host-driven-preview.md),
@@ -297,7 +302,40 @@ Next-phase backlog: [`docs/next-phases.md`](docs/next-phases.md).
 
 ## Test layers
 
-Run everything: `pnpm test`. Run one project: `pnpm vitest run --project <name>`.
+Run everything: `pnpm test` (= `pnpm build && pnpm test:node &&
+pnpm test:workerd`). Run one project: `pnpm vitest run --project <name>`.
+
+`pnpm test` is split by pool on purpose. `test:node` runs every
+Node-pool project (enumerated; a repo meta-test —
+[`tests/repo/test-script-covers-all-projects.test.ts`](tests/repo/test-script-covers-all-projects.test.ts)
+— fails if any workspace project is missing from `test:node` or the
+workerd list). `test:workerd` runs the two workerd-pool projects
+(`workerd` + `host-cloudflare`) through the fail-closed guard
+`scripts/run-workerd-tests.mjs`. CI runs the two pools as **parallel
+jobs** (`.github/workflows/ci.yml`).
+
+### workerd teardown crash (upstream, mitigated not masked)
+
+Layer B intermittently hits an **unfixed upstream** workerd bug
+([`cloudflare/workerd#6506`](https://github.com/cloudflare/workerd/issues/6506)):
+ephemeral Worker Loader isolates (`WorkerdExecutor.runOnce` →
+`loader.get(null, …)`) torn down while the parent isolate is in
+`DROPPING` abort the runtime with `jsg/setup.c++:235 … defer
+destruction during isolate shutdown`, **after every test has already
+passed**. It only surfaces under the cumulative isolate/timing
+pressure of a large run, can only produce a false RED (never a false
+GREEN), and has no good workerd/pool version (pool 0.12+ drops the
+`singleWorker`/`isolatedStorage` we deliberately rely on).
+
+`scripts/run-workerd-tests.mjs` contains it: it runs the workerd pool
+and is **fail-closed** — a non-zero exit with any real-failure marker
+(or no recognised signature) is propagated immediately and is never
+retried. Only an all-green run whose sole defect is the workerd
+teardown signature is retried (bounded, N=3) and, if it never once
+shows a real failure, treated as green with a loud `::warning::`
+citing the upstream issue. Set `AFLARE_NO_WORKERD_RETRY=1` for raw
+behaviour. This keeps Layer B running under real workerd with full
+assertion fidelity; it does not weaken the signal.
 
 | Layer | Where | Pool | Purpose |
 | --- | --- | --- | --- |

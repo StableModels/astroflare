@@ -15,7 +15,9 @@
     "typecheck": "tsc -b",
     "lint": "biome check .",
     "format": "biome format --write .",
-    "test": "pnpm build && vitest run",
+    "test": "pnpm build && pnpm test:node && pnpm test:workerd",
+    "test:node": "vitest run --project core --project compiler --project runtime --project preview --project build --project test-utils --project content --project cli --project cli-lib --project starter --project e2e --project repo --project conformance --project minimal-blog",
+    "test:workerd": "node scripts/run-workerd-tests.mjs",
     "test:watch": "vitest",
     "test:coverage": "pnpm build && vitest run --coverage",
     "prepare": "husky"
