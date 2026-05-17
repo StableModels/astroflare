@@ -1,4 +1,3 @@
-import { CompileError } from "@astroflare/compiler";
 import type { HmrMessage } from "@astroflare/core";
 import { MemoryCache, MemorySite } from "@astroflare/test-utils/in-memory";
 import { describe, expect, it } from "vitest";
@@ -216,136 +215,6 @@ describe("createCoordinator", () => {
 		expect(c.recentHmrEvents()).toHaveLength(1);
 	});
 
-	describe("verifyCompile pre-flight", () => {
-		it("publishes HMR error with structured diagnostics on CompileError", async () => {
-			const source = "---\nconst x: = 5;\n---\n<p>broken</p>\n";
-			const compile = async (path: string) => {
-				throw new CompileError({
-					filename: path,
-					source,
-					diagnostics: [
-						{
-							message: "Unexpected token",
-							start: { line: 2, column: 9, offset: 13 },
-							end: { line: 2, column: 10, offset: 14 },
-						},
-					],
-				});
-			};
-			const c = createCoordinator({ sql: makeMockSql(), compile });
-			const seen: HmrMessage[] = [];
-			c.subscribe("hmr", (m) => seen.push(m));
-
-			await c.notifyChanged(
-				{ kind: "write", path: "/src/pages/x.astro", hash: "h" },
-				{ verifyCompile: true },
-			);
-
-			expect(seen).toHaveLength(1);
-			const msg = seen[0];
-			expect(msg?.type).toBe("error");
-			if (msg?.type !== "error") throw new Error("expected error");
-			expect(msg.error.message).toBe("Unexpected token");
-			expect(msg.error.path).toBe("/src/pages/x.astro");
-			expect(msg.error.line).toBe(2);
-			expect(msg.error.column).toBe(9);
-			expect(msg.error.diagnostics).toBeDefined();
-			expect(msg.error.diagnostics?.[0]?.codeFrame?.text).toContain("const x: = 5;");
-			expect(msg.error.codeFrame?.text).toContain("const x: = 5;");
-			// Ring buffer captures the same event so operator tools can
-			// inspect it without a live socket.
-			const ring = c.recentHmrEvents();
-			expect(ring).toHaveLength(1);
-			expect(ring[0]?.message.type).toBe("error");
-		});
-
-		it("falls through to update on a clean compile", async () => {
-			let invocations = 0;
-			const compile = async () => {
-				invocations++;
-			};
-			const c = createCoordinator({ sql: makeMockSql(), compile });
-			const seen: HmrMessage[] = [];
-			c.subscribe("hmr", (m) => seen.push(m));
-
-			await c.notifyChanged(
-				{ kind: "write", path: "/src/pages/x.astro", hash: "h" },
-				{ verifyCompile: true },
-			);
-			expect(invocations).toBe(1);
-			expect(seen[0]).toMatchObject({ type: "update", trigger: "/src/pages/x.astro" });
-		});
-
-		it("treats verifyCompile as a no-op without a compile hook", async () => {
-			const c = createCoordinator({ sql: makeMockSql() });
-			const seen: HmrMessage[] = [];
-			c.subscribe("hmr", (m) => seen.push(m));
-
-			await c.notifyChanged(
-				{ kind: "write", path: "/src/pages/x.astro", hash: "h" },
-				{ verifyCompile: true },
-			);
-			expect(seen[0]).toMatchObject({ type: "update", trigger: "/src/pages/x.astro" });
-		});
-
-		it("skips pre-flight for non-compilable paths even when requested", async () => {
-			let invocations = 0;
-			const compile = async () => {
-				invocations++;
-			};
-			const c = createCoordinator({ sql: makeMockSql(), compile });
-			const seen: HmrMessage[] = [];
-			c.subscribe("hmr", (m) => seen.push(m));
-
-			await c.notifyChanged(
-				{ kind: "write", path: "/src/styles/site.css", hash: "h" },
-				{ verifyCompile: true },
-			);
-			expect(invocations).toBe(0);
-			expect(seen[0]).toMatchObject({ type: "update", trigger: "/src/styles/site.css" });
-		});
-
-		it("projects a non-CompileError throw as a bare-message HMR error", async () => {
-			const compile = async () => {
-				throw new Error("boom");
-			};
-			const c = createCoordinator({ sql: makeMockSql(), compile });
-			const seen: HmrMessage[] = [];
-			c.subscribe("hmr", (m) => seen.push(m));
-
-			await c.notifyChanged(
-				{ kind: "write", path: "/src/pages/x.astro", hash: "h" },
-				{ verifyCompile: true },
-			);
-			const msg = seen[0];
-			if (msg?.type !== "error") throw new Error("expected error");
-			expect(msg.error.message).toBe("boom");
-			expect(msg.error.path).toBe("/src/pages/x.astro");
-			expect(msg.error.diagnostics).toBeUndefined();
-		});
-
-		it("still updates without verifyCompile even when the compile would fail", async () => {
-			const compile = async () => {
-				throw new Error("would fail");
-			};
-			const c = createCoordinator({ sql: makeMockSql(), compile });
-			const seen: HmrMessage[] = [];
-			c.subscribe("hmr", (m) => seen.push(m));
-
-			// No verifyCompile flag — pre-flight is skipped, historical
-			// behaviour preserved for embedders that haven't opted in.
-			await c.notifyChanged({ kind: "write", path: "/src/pages/x.astro", hash: "h" });
-			expect(seen[0]).toMatchObject({ type: "update", trigger: "/src/pages/x.astro" });
-		});
-	});
-
-	// `notifyRemoved` is the low-level prune primitive — it stays
-	// unconditional. The "deletes prune unconditionally" *contract* is
-	// the bug: the symmetric guard lives one layer up, in
-	// `notifyChanged`'s delete branch, gated on `verifyCompile` + the
-	// route-aware capability (see "verifyReachableRoutes" below). Without
-	// that opt-in, `notifyChanged({ kind: "delete" })` still flows
-	// straight here and prunes — historical behaviour preserved.
 	it("notifyRemoved publishes hmr prune and removes the node", async () => {
 		const c = createCoordinator({ sql: makeMockSql() });
 		await c.graphPut({ path: "/b.astro", hash: "h2", imports: [], importedBy: [] });
@@ -364,65 +233,44 @@ describe("createCoordinator", () => {
 		expect(await c.graphGet("/b.astro")).toBeNull();
 	});
 
-	it("delete without verifyCompile still prunes unconditionally (back-compat)", async () => {
-		const site = new MemorySite();
-		const cache = new MemoryCache();
-		site.write("/src/components/Header.astro", enc("<header>h</header>"));
-		site.write(
-			"/src/pages/index.astro",
-			enc('---\nimport Header from "../components/Header.astro";\n---\n<Header />'),
-		);
-		const c = createCoordinator({
-			sql: makeMockSql(),
-			site,
-			verifyReachableRoutes: { cache },
-		});
-		await c.notifyChanged(
-			{ kind: "write", path: "/src/pages/index.astro", hash: "h" },
-			{ verifyCompile: true },
-		);
+	// Without `site` + `cache` the coordinator can't compile, so it
+	// degrades to the plain reverse-edge walk: write → unconditional
+	// `update`, delete → unconditional `prune`. (Pure-graph unit tests
+	// and the preview-handler suite rely on this — they wire the cache
+	// into `createPreviewHandler`, not the coordinator.)
+	it("no site/cache → plain update/prune (no pre-flight)", async () => {
+		const c = createCoordinator({ sql: makeMockSql() });
+		await c.graphPut({ path: "/b.astro", hash: "h2", imports: [], importedBy: [] });
+		await c.graphPut({ path: "/a.astro", hash: "h1", imports: ["/b.astro"], importedBy: [] });
 		const seen: HmrMessage[] = [];
 		c.subscribe("hmr", (m) => seen.push(m));
 
-		// No `verifyCompile` on the delete — the guard never runs, prune
-		// fires even though `index` still imports `Header`.
-		site.remove("/src/components/Header.astro");
-		await c.notifyChanged({ kind: "delete", path: "/src/components/Header.astro" });
+		await c.notifyChanged({ kind: "write", path: "/b.astro", hash: "h2b" });
+		await c.notifyChanged({ kind: "delete", path: "/b.astro" });
 
-		expect(seen).toHaveLength(1);
-		expect(seen[0]?.type).toBe("prune");
+		expect(seen[0]).toMatchObject({ type: "update", trigger: "/b.astro" });
+		expect(seen[1]?.type).toBe("prune");
 	});
 
-	describe("verifyReachableRoutes (closure/route-aware pre-flight)", () => {
+	// The closure/route-aware compile pre-flight is **on by default**
+	// whenever the coordinator has `site` + `cache` — no opt-in flag, no
+	// host-side substitute. These exercise the contract end to end
+	// against a real `MemorySite` + `MemoryCache` + the framework's own
+	// `ModuleGraph`/`Router`.
+	describe("closure/route-aware pre-flight (default-on with site + cache)", () => {
 		function boot() {
 			const site = new MemorySite();
 			const cache = new MemoryCache();
-			const c = createCoordinator({
-				sql: makeMockSql(),
-				site,
-				verifyReachableRoutes: { cache },
-			});
+			const c = createCoordinator({ sql: makeMockSql(), site, cache });
 			const seen: HmrMessage[] = [];
 			c.subscribe("hmr", (m) => seen.push(m));
 			return { site, cache, c, seen };
 		}
 
-		it("requires `site` when verifyReachableRoutes is configured", () => {
-			expect(() =>
-				createCoordinator({
-					sql: makeMockSql(),
-					verifyReachableRoutes: { cache: new MemoryCache() },
-				}),
-			).toThrow(/verifyReachableRoutes requires `site`/);
-		});
-
 		it("clean write → update", async () => {
 			const { site, c, seen } = boot();
 			site.write("/src/pages/index.astro", enc("<p>hello</p>"));
-			await c.notifyChanged(
-				{ kind: "write", path: "/src/pages/index.astro", hash: "h1" },
-				{ verifyCompile: true },
-			);
+			await c.notifyChanged({ kind: "write", path: "/src/pages/index.astro", hash: "h1" });
 			expect(seen).toHaveLength(1);
 			expect(seen[0]).toMatchObject({ type: "update", trigger: "/src/pages/index.astro" });
 		});
@@ -433,10 +281,7 @@ describe("createCoordinator", () => {
 				"/src/pages/index.astro",
 				enc('---\nimport SiteHeader from "../components/SiteHeader.astro";\n---\n<SiteHeader />'),
 			);
-			await c.notifyChanged(
-				{ kind: "write", path: "/src/pages/index.astro", hash: "h1" },
-				{ verifyCompile: true },
-			);
+			await c.notifyChanged({ kind: "write", path: "/src/pages/index.astro", hash: "h1" });
 			expect(seen).toHaveLength(1);
 			const msg = seen[0];
 			if (msg?.type !== "error") throw new Error("expected error");
@@ -448,10 +293,7 @@ describe("createCoordinator", () => {
 		it("broken syntax → error with structured diagnostics", async () => {
 			const { site, c, seen } = boot();
 			site.write("/src/pages/index.astro", enc("---\nconst x: = 5;\n---\n<p>broken</p>"));
-			await c.notifyChanged(
-				{ kind: "write", path: "/src/pages/index.astro", hash: "h1" },
-				{ verifyCompile: true },
-			);
+			await c.notifyChanged({ kind: "write", path: "/src/pages/index.astro", hash: "h1" });
 			const msg = seen[0];
 			if (msg?.type !== "error") throw new Error("expected error");
 			expect(msg.error.path).toBe("/src/pages/index.astro");
@@ -466,20 +308,18 @@ describe("createCoordinator", () => {
 				"/src/pages/index.astro",
 				enc('---\nimport SiteHeader from "../components/SiteHeader.astro";\n---\n<SiteHeader />'),
 			);
-			await c.notifyChanged(
-				{ kind: "write", path: "/src/pages/index.astro", hash: "h1" },
-				{ verifyCompile: true },
-			);
+			await c.notifyChanged({ kind: "write", path: "/src/pages/index.astro", hash: "h1" });
 			expect(seen[0]?.type).toBe("error");
 
 			// The component lands — pre-flight follows the reverse edge
 			// (SiteHeader → index, recorded during the failed closure walk)
 			// back to the page, re-walks its closure clean, and updates.
 			site.write("/src/components/SiteHeader.astro", enc("<header>site</header>"));
-			await c.notifyChanged(
-				{ kind: "write", path: "/src/components/SiteHeader.astro", hash: "h2" },
-				{ verifyCompile: true },
-			);
+			await c.notifyChanged({
+				kind: "write",
+				path: "/src/components/SiteHeader.astro",
+				hash: "h2",
+			});
 			expect(seen).toHaveLength(2);
 			expect(seen[1]).toMatchObject({
 				type: "update",
@@ -489,10 +329,7 @@ describe("createCoordinator", () => {
 
 		it("non-compilable path skips the check → update", async () => {
 			const { c, seen } = boot();
-			await c.notifyChanged(
-				{ kind: "write", path: "/src/styles/site.css", hash: "h1" },
-				{ verifyCompile: true },
-			);
+			await c.notifyChanged({ kind: "write", path: "/src/styles/site.css", hash: "h1" });
 			expect(seen[0]).toMatchObject({ type: "update", trigger: "/src/styles/site.css" });
 		});
 
@@ -501,10 +338,7 @@ describe("createCoordinator", () => {
 			// A component nobody imports yet, with a syntax error. No
 			// reachable route → single-file compile still catches it.
 			site.write("/src/components/Orphan.astro", enc("---\nconst y: = 1;\n---\n<p>o</p>"));
-			await c.notifyChanged(
-				{ kind: "write", path: "/src/components/Orphan.astro", hash: "h1" },
-				{ verifyCompile: true },
-			);
+			await c.notifyChanged({ kind: "write", path: "/src/components/Orphan.astro", hash: "h1" });
 			const msg = seen[0];
 			if (msg?.type !== "error") throw new Error("expected error");
 			expect(msg.error.path).toBe("/src/components/Orphan.astro");
@@ -514,27 +348,18 @@ describe("createCoordinator", () => {
 		it("orphan module that compiles clean → update", async () => {
 			const { site, c, seen } = boot();
 			site.write("/src/components/Lonely.astro", enc("<aside>ok</aside>"));
-			await c.notifyChanged(
-				{ kind: "write", path: "/src/components/Lonely.astro", hash: "h1" },
-				{ verifyCompile: true },
-			);
+			await c.notifyChanged({ kind: "write", path: "/src/components/Lonely.astro", hash: "h1" });
 			expect(seen[0]).toMatchObject({ type: "update", trigger: "/src/components/Lonely.astro" });
 		});
 
 		it("delete of a file nothing imports → prune", async () => {
 			const { site, c, seen } = boot();
 			site.write("/src/pages/old.astro", enc("<p>old</p>"));
-			await c.notifyChanged(
-				{ kind: "write", path: "/src/pages/old.astro", hash: "h1" },
-				{ verifyCompile: true },
-			);
+			await c.notifyChanged({ kind: "write", path: "/src/pages/old.astro", hash: "h1" });
 			expect(seen[0]?.type).toBe("update");
 
 			site.remove("/src/pages/old.astro");
-			await c.notifyChanged(
-				{ kind: "delete", path: "/src/pages/old.astro" },
-				{ verifyCompile: true },
-			);
+			await c.notifyChanged({ kind: "delete", path: "/src/pages/old.astro" });
 			expect(seen).toHaveLength(2);
 			expect(seen[1]).toMatchObject({
 				type: "prune",
@@ -550,10 +375,7 @@ describe("createCoordinator", () => {
 				"/src/pages/index.astro",
 				enc('---\nimport SiteHeader from "../components/SiteHeader.astro";\n---\n<SiteHeader />'),
 			);
-			await c.notifyChanged(
-				{ kind: "write", path: "/src/pages/index.astro", hash: "h1" },
-				{ verifyCompile: true },
-			);
+			await c.notifyChanged({ kind: "write", path: "/src/pages/index.astro", hash: "h1" });
 			expect(seen[0]?.type).toBe("update");
 
 			// Reference-host flow: remove the bytes, then notify. The guard
@@ -561,10 +383,7 @@ describe("createCoordinator", () => {
 			// `index`'s closure, hits the missing import, publishes `error`,
 			// and skips the prune.
 			site.remove("/src/components/SiteHeader.astro");
-			await c.notifyChanged(
-				{ kind: "delete", path: "/src/components/SiteHeader.astro" },
-				{ verifyCompile: true },
-			);
+			await c.notifyChanged({ kind: "delete", path: "/src/components/SiteHeader.astro" });
 			expect(seen).toHaveLength(2);
 			const msg = seen[1];
 			if (msg?.type !== "error") throw new Error(`expected error, got ${msg?.type}`);

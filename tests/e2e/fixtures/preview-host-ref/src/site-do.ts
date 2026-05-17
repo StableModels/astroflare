@@ -74,14 +74,15 @@ export class SiteDurableObject extends DurableObject<Env> {
 			sql: ctx.storage.sql,
 			site: this.#site,
 			ctx,
-			// Closure/route-aware compile pre-flight. Shares the same
-			// `SqlCache` the preview handler reads, so a successful
-			// pre-flight closure warms the render's cache (free on the
-			// happy path). With `verifyCompile: true` on the write/delete
-			// path below, a page importing a not-yet-created / just-moved
-			// / just-deleted component publishes an HMR `error` instead of
-			// reloading the iframe into the destructive 500 envelope.
-			verifyReachableRoutes: { cache: this.#cache },
+			// `site` + `cache` together turn on the closure/route-aware
+			// compile pre-flight automatically (no opt-in flag). Passing
+			// the same `SqlCache` the preview handler reads means a
+			// successful pre-flight closure warms the render's cache (free
+			// on the happy path). A page importing a not-yet-created /
+			// just-moved / just-deleted component now publishes an HMR
+			// `error` instead of reloading the iframe into the destructive
+			// 500 envelope.
+			cache: this.#cache,
 		});
 	}
 
@@ -135,12 +136,12 @@ export class SiteDurableObject extends DurableObject<Env> {
 		if (req.method === "POST") {
 			const bytes = new Uint8Array(await req.arrayBuffer());
 			const { hash, event } = await this.#site.write(path, bytes);
-			await this.#coordinator.notifyChanged(event, { verifyCompile: true });
+			await this.#coordinator.notifyChanged(event);
 			return Response.json({ path, size: bytes.byteLength, hash });
 		}
 		if (req.method === "DELETE") {
 			const { existed, event } = await this.#site.remove(path);
-			if (existed) await this.#coordinator.notifyChanged(event, { verifyCompile: true });
+			if (existed) await this.#coordinator.notifyChanged(event);
 			return Response.json({ path, deleted: existed });
 		}
 		return new Response("method not allowed", { status: 405 });

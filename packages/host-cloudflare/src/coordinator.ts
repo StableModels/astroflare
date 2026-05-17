@@ -55,18 +55,6 @@ import { routeFromFilePath } from "@astroflare/preview/router";
 import type { SqlBackend } from "./sql-cache.js";
 
 /**
- * Optional compile pre-flight hook for {@link AstroflareCoordinator.notifyChanged}.
- * Receives the workspace path of the changed file and resolves on a
- * clean compile; rejects with a `CompileError` (or any other `Error`)
- * when the new bytes don't compile.
- *
- * The framework's `ModuleGraph.compile(path)` satisfies this signature
- * directly — hosts pass `compile: (p) => moduleGraph.compile(p).then(() => {})`
- * to wire the framework's own compiler in. Tests can supply a stub.
- */
-export type CompilePreflight = (path: string) => Promise<unknown>;
-
-/**
  * Subset of `DurableObjectState` we use. Letting the host pass any compatible
  * shape keeps the factory testable without `cloudflare:workers`.
  */
@@ -109,82 +97,40 @@ export interface CreateCoordinatorOptions {
 	 */
 	ctx?: CoordinatorContext;
 	/**
-	 * Optional compile pre-flight. When supplied, callers may pass
-	 * `{ verifyCompile: true }` to {@link AstroflareCoordinator.notifyChanged}
-	 * for the coordinator to drive the compile *before* deciding what
-	 * to publish — clean compiles fall through to the existing HMR
-	 * `update` path; failures publish an HMR `error` carrying the
-	 * structured diagnostics. Lets every embedder pull the
-	 * "stop-stranding-the-iframe" guarantee in for free instead of
-	 * shipping a host-side substitute.
+	 * Compile cache. When set together with `site`, the coordinator runs
+	 * the **closure/route-aware compile pre-flight** automatically on
+	 * every `notifyChanged` — there is no opt-in flag and no host-side
+	 * substitute.
 	 *
-	 * The framework's `ModuleGraph.compile(path)` is the canonical
-	 * supplier — wire it as
-	 * `compile: (p) => moduleGraph.compile(p).then(() => {})`.
+	 * On a write it verifies the import closures of the **routes a reload
+	 * would actually render**: the changed file when it is itself a route,
+	 * plus its transitive importers that are routes (route classification
+	 * is the framework's own `routeFromFilePath` — `[slug]` dynamic and
+	 * content-collection-backed route files included). Orphan modules with
+	 * no reachable route fall back to a single-file compile so genuine
+	 * syntax errors are still caught. A clean result flows through the
+	 * normal reverse-edge `update` walk; a failure (a page importing a
+	 * not-yet-created / just-moved component — which only throws at
+	 * closure-walk time, never in a single-file compile) publishes an HMR
+	 * `error` with structured diagnostics so the iframe overlay surfaces
+	 * it on top of the previous good render instead of the client
+	 * reloading into `createPreviewHandler`'s destructive 500 envelope.
 	 *
-	 * Superseded by {@link CreateCoordinatorOptions.verifyReachableRoutes}
-	 * when that capability is configured: a single-file compile cannot
-	 * see a missing/moved import (the failure only exists at
-	 * import-closure-walk time), so the route-aware pre-flight is used
-	 * instead. The bare `compile` hook stays the supported path for
-	 * embedders that haven't supplied the graph capability.
-	 */
-	compile?: CompilePreflight;
-	/**
-	 * Capabilities for the **closure/route-aware** compile pre-flight.
+	 * The delete path is symmetric: before pruning, the closures of the
+	 * routes that (transitively) imported the deleted file are
+	 * pre-flighted (reverse edges read *before* the prune mutates them).
+	 * A delete that strands a still-imported reachable route publishes an
+	 * HMR `error` and **skips the prune**; a delete nothing reachable
+	 * imports falls through to the normal unconditional prune.
 	 *
-	 * A single-file `compile` pre-flight structurally cannot honor the
-	 * "stop-stranding-the-iframe" guarantee: a page whose own frontmatter
-	 * is valid but which imports a not-yet-created / just-moved component
-	 * compiles fine in isolation — the `source not found` throw only
-	 * surfaces during the import-closure walk a render does. So the broken
-	 * state passes a single-file pre-flight, the coordinator broadcasts
-	 * `update`, the HMR client reloads, and the reload lands in
-	 * `createPreviewHandler`'s destructive 500 envelope.
-	 *
-	 * When this is supplied, `notifyChanged(..., { verifyCompile: true })`
-	 * instead verifies the import closures of the **routes a reload would
-	 * actually render**: the changed file when it is itself a route, plus
-	 * its transitive importers that are routes (route classification is
-	 * the framework's own `routeFromFilePath` — `[slug]` dynamic and
-	 * content-collection-backed route files included). Orphan modules
-	 * with no reachable route fall back to a single-file compile so
-	 * genuine syntax errors are still caught. Successful closures warm
-	 * the supplied `cache`, so the subsequent render is a cache hit (no
-	 * extra cost on the happy path — exactly the work the render does
-	 * anyway).
-	 *
-	 * The delete path becomes symmetric: before pruning, the closures of
-	 * the routes that (transitively) imported the deleted file are
-	 * pre-flighted (read from the reverse-edge graph *before* the prune
-	 * mutates it). A delete that strands a still-imported reachable route
-	 * publishes an HMR `error` and **skips the prune** — no reload into a
-	 * 500. A delete nothing reachable imports falls through to the normal
-	 * unconditional `prune` (graph cleanup, expected reload).
-	 *
-	 * Strictly opt-in and backward compatible. Pass the **same** `Cache`
-	 * instance the host hands `createPreviewHandler` so the pre-flight
-	 * closure warms the cache the render reads. Requires `site` to be
-	 * set. Without `verifyCompile: true` the historical behaviour is
-	 * unchanged (including unconditional delete prune).
-	 */
-	verifyReachableRoutes?: ReachableRoutesConfig;
-}
-
-/**
- * Capabilities the closure/route-aware compile pre-flight runs against.
- * The host supplies only the instances/config it already constructs for
- * `createPreviewHandler` — never the reachability algorithm, which lives
- * in the coordinator.
- */
-export interface ReachableRoutesConfig {
-	/**
-	 * Compile cache — pass the **same** instance handed to
+	 * Pass the **same** `Cache` instance the host hands
 	 * `createPreviewHandler` so a successful pre-flight closure warms the
-	 * cache the subsequent render reads (the pre-flight is then free on
-	 * the happy path).
+	 * cache the render reads (the pre-flight is then free on the happy
+	 * path — it is exactly the work the render does anyway). When `cache`
+	 * or `site` is absent the coordinator can't compile, so it falls back
+	 * to the plain `update`/`prune` walk (used by pure-graph unit tests).
 	 */
-	cache: Cache;
+	cache?: Cache;
 	/**
 	 * Module specifier the compiled output imports the runtime from.
 	 * Default `"./runtime/index.js"` — matches `createPreviewHandler`'s
@@ -194,8 +140,8 @@ export interface ReachableRoutesConfig {
 	runtimeImport?: string;
 	/**
 	 * Markdown / MDX compilation options. Keep in step with the
-	 * `markdown` option passed to `createPreviewHandler` so the
-	 * pre-flight compiles `.md`/`.mdx` exactly as the render will.
+	 * `markdown` option passed to `createPreviewHandler` so the pre-flight
+	 * compiles `.md`/`.mdx` exactly as the render will.
 	 */
 	markdown?: MarkdownOptions;
 	/** Optional structured logger; forwarded to the internal `ModuleGraph`. */
@@ -218,39 +164,12 @@ export interface HmrEventRecord {
 /** Default cap for the recent-HMR-events ring buffer. */
 const HMR_RING_CAP = 32;
 
-/**
- * Per-call options for {@link AstroflareCoordinator.notifyChanged}.
- *
- * When `verifyCompile` is `true` and the coordinator was constructed with
- * a `compile` pre-flight (see {@link CreateCoordinatorOptions.compile}),
- * the coordinator drives the compile against the changed file *before*
- * deciding which HMR message to publish. Clean compiles flow through the
- * existing reverse-edge `update` walk; `CompileError`s (or any other
- * pre-flight throw) publish an HMR `error` carrying structured
- * diagnostics so the iframe overlay can render the failure on top of the
- * previous good page.
- *
- * When the coordinator was constructed with
- * {@link CreateCoordinatorOptions.verifyReachableRoutes}, `verifyCompile`
- * upgrades to the closure/route-aware pre-flight (verifies the closures
- * of the routes a reload would render, not just the changed file in
- * isolation) and the **delete** path becomes symmetric — a delete that
- * strands a still-imported reachable route publishes an HMR `error` and
- * skips the prune instead of unconditionally pruning.
- *
- * Strictly opt-in. Callers that don't pass it (existing embedders) get
- * the historical behaviour — including unconditional delete prune.
- * Without a `compile` hook *and* without `verifyReachableRoutes` the
- * flag is a no-op so a host can flip it on speculatively without
- * crashing.
- */
-export interface NotifyChangedOptions {
-	verifyCompile?: boolean;
-}
-
 export interface AstroflareCoordinator {
-	// Change pipeline
-	notifyChanged(event: SiteChangeEvent, opts?: NotifyChangedOptions): Promise<void>;
+	// Change pipeline. When the coordinator has `site` + `cache`, this
+	// runs the closure/route-aware compile pre-flight automatically (see
+	// {@link CreateCoordinatorOptions.cache}); otherwise it does the plain
+	// reverse-edge `update`/`prune` walk.
+	notifyChanged(event: SiteChangeEvent): Promise<void>;
 	notifyRemoved(path: string): Promise<void>;
 
 	// Module graph
@@ -300,33 +219,29 @@ const COMPILABLE_EXTENSIONS = [".astro", ".md", ".mdx"] as const;
 export function createCoordinator(opts: CreateCoordinatorOptions): AstroflareCoordinator {
 	const sql = opts.sql;
 	const ctx = opts.ctx;
-	const compilePreflight = opts.compile;
-	const reachConfig = opts.verifyReachableRoutes;
-	if (reachConfig && !opts.site) {
-		throw new Error(
-			"createCoordinator: verifyReachableRoutes requires `site` — the route-aware pre-flight reads source through the host's Site capability",
-		);
-	}
-	// Closure/route-aware pre-flight graph. Built once, shares the host's
-	// `Site` + the *same* `Cache` the preview handler reads, and writes
-	// back through this coordinator's own `graphPut` (so reverse edges
-	// the delete guard walks stay in step). A successful closure here
-	// warms `cache`, so the render that follows the HMR `update` is a
-	// cache hit — the pre-flight is free on the happy path.
-	const reachGraph: ModuleGraph | null = reachConfig
-		? new ModuleGraph(
-				{
-					site: opts.site as Site,
-					cache: reachConfig.cache,
-					...(reachConfig.logger ? { logger: reachConfig.logger } : {}),
-					coordinator: { graphPut: (node) => graphPut(node) },
-				},
-				{
-					runtimeImport: reachConfig.runtimeImport ?? "./runtime/index.js",
-					...(reachConfig.markdown ? { markdown: reachConfig.markdown } : {}),
-				},
-			)
-		: null;
+	// Closure/route-aware pre-flight graph. Built once when the host
+	// supplied both `site` and `cache`; shares that *same* `Cache` with
+	// the preview handler and writes back through this coordinator's own
+	// `graphPut` (so the reverse edges the delete guard walks stay in
+	// step). A successful closure here warms `cache`, so the render that
+	// follows the HMR `update` is a cache hit — the pre-flight is free on
+	// the happy path. Absent `site`/`cache` (pure-graph unit tests) it
+	// stays `null` and the pipeline does the plain `update`/`prune` walk.
+	const reachGraph: ModuleGraph | null =
+		opts.site && opts.cache
+			? new ModuleGraph(
+					{
+						site: opts.site,
+						cache: opts.cache,
+						...(opts.logger ? { logger: opts.logger } : {}),
+						coordinator: { graphPut: (node) => graphPut(node) },
+					},
+					{
+						runtimeImport: opts.runtimeImport ?? "./runtime/index.js",
+						...(opts.markdown ? { markdown: opts.markdown } : {}),
+					},
+				)
+			: null;
 	let initialized = false;
 	const subs = new Map<string, Set<(m: HmrMessage) => void>>();
 	// Ring buffer of recent HMR events. In-isolate state — resets on
@@ -548,10 +463,7 @@ export function createCoordinator(opts: CreateCoordinatorOptions): AstroflareCoo
 		}
 	}
 
-	async function notifyChanged(
-		event: SiteChangeEvent,
-		notifyOpts?: NotifyChangedOptions,
-	): Promise<void> {
+	async function notifyChanged(event: SiteChangeEvent): Promise<void> {
 		if (event.kind === "delete") {
 			// Symmetric delete guard. The reverse-edge graph must be read
 			// *before* `notifyRemoved` mutates it, so the guard runs here
@@ -559,10 +471,10 @@ export function createCoordinator(opts: CreateCoordinatorOptions): AstroflareCoo
 			// still-imported reachable route publishes an HMR `error` and
 			// skips the prune (no reload into a 500); a delete nothing
 			// reachable imports falls through to the normal unconditional
-			// prune (graph cleanup, expected reload). Only active when the
-			// caller opts in *and* the route-aware capability is wired —
-			// historical embedders keep unconditional prune.
-			if (notifyOpts?.verifyCompile === true && reachGraph && isCompilablePath(event.path)) {
+			// prune (graph cleanup, expected reload). Active whenever the
+			// coordinator can compile (`site` + `cache`); without that it
+			// degrades to the plain unconditional prune.
+			if (reachGraph && isCompilablePath(event.path)) {
 				const strandError = await preflightDeleteStrands(reachGraph, event.path);
 				if (strandError) {
 					await publish("hmr", { type: "error", error: strandError });
@@ -579,38 +491,22 @@ export function createCoordinator(opts: CreateCoordinatorOptions): AstroflareCoo
 			await graphPut({ path, hash, imports: [], importedBy: [] });
 		}
 
-		// Optional compile pre-flight: if the host opted in (and the
-		// change touches a compilable file), verify before deciding what
-		// to publish. A clean result falls through to the historical
-		// update; a failure swaps the broadcast for an HMR `error` so the
-		// iframe overlay surfaces the failure on top of the previous good
+		// Closure/route-aware compile pre-flight. Runs automatically when
+		// the coordinator can compile (`site` + `cache`) and the change
+		// touches a compilable file: verify the import closures of the
+		// routes a reload would actually render (the changed file if it is
+		// a route, plus its transitive importers that are routes; orphans
+		// fall back to a single-file compile). A clean result falls
+		// through to the normal `update` walk; a failure (incl. a missing/
+		// moved import — which only throws at closure-walk time, never in
+		// a single-file compile) swaps the broadcast for an HMR `error` so
+		// the iframe overlay surfaces it on top of the previous good
 		// render instead of the client reloading into a 500.
-		//
-		// Two pre-flight strategies, route-aware preferred:
-		//   - `reachGraph` wired → verify the import closures of the
-		//     routes a reload would actually render (the changed file if
-		//     it is a route, plus its transitive importers that are
-		//     routes; orphans fall back to a single-file compile). This
-		//     is the only strategy that catches a missing/moved import —
-		//     the failure only exists at closure-walk time.
-		//   - else `compile` hook → single-file compile (legacy; cannot
-		//     see a missing import, kept for embedders that haven't
-		//     supplied the graph capability).
-		if (notifyOpts?.verifyCompile === true && isCompilablePath(path)) {
-			if (reachGraph) {
-				const reachError = await preflightReachableRoutes(reachGraph, path);
-				if (reachError) {
-					await publish("hmr", { type: "error", error: reachError });
-					return;
-				}
-			} else if (compilePreflight) {
-				try {
-					await compilePreflight(path);
-				} catch (err) {
-					const errorMessage: HmrError = projectCompileError(path, err);
-					await publish("hmr", { type: "error", error: errorMessage });
-					return;
-				}
+		if (reachGraph && isCompilablePath(path)) {
+			const reachError = await preflightReachableRoutes(reachGraph, path);
+			if (reachError) {
+				await publish("hmr", { type: "error", error: reachError });
+				return;
 			}
 		}
 
@@ -739,11 +635,8 @@ export function createCoordinator(opts: CreateCoordinatorOptions): AstroflareCoo
 		return ctx.getWebSockets(HMR_TAG).length;
 	}
 
-	async function simulateChange(
-		event: SiteChangeEvent,
-		notifyOpts?: NotifyChangedOptions,
-	): Promise<void> {
-		await notifyChanged(event, notifyOpts);
+	async function simulateChange(event: SiteChangeEvent): Promise<void> {
+		await notifyChanged(event);
 	}
 
 	return {
