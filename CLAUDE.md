@@ -208,25 +208,46 @@ build cleanly into deployable bundles.
 - **Compile-error recovery: the iframe never strands.** Three
   defenses keep the preview HMR loop alive across compile failures
   so embedders don't have to re-implement them:
-  (1) `coordinator.notifyChanged(event, { verifyCompile: true })`
-  pre-flights the compile when the host wires a `compile` hook into
-  `createCoordinator({ compile })` — clean compiles flow through the
-  existing `update` walk; `CompileError`s publish an HMR `error`
-  with structured `diagnostics` / `codeFrame` / `snippet` projected
-  off `CompileError.diagnostics`. (2) `createPreviewHandler` wraps
-  every 5xx + 404 in an HTML envelope that re-injects the HMR
-  client `<script>` (gated by `hmr !== false`), so a manual reload
-  onto a broken page still attaches a live socket and recovers on
-  the next clean change. (3) The auto-injected client now bundles
+  (1) The **closure/route-aware compile pre-flight is on by
+  default** — `createCoordinator({ sql, site, cache })` (pass the
+  *same* `Cache` as `createPreviewHandler` so the warmed closure
+  makes the render a cache hit) runs it automatically on every
+  `notifyChanged`. No opt-in flag, no host-side substitute, no
+  legacy single-file hook. On a write it verifies the import
+  *closures of the routes a reload would render* (the changed file
+  if it is a route via `routeFromFilePath` — `[slug]`/collection
+  files included — plus its route-importers; orphans fall back to a
+  single-file compile). This is the only strategy that catches a
+  page importing a not-yet-created / just-moved / just-**deleted**
+  component, since `module-graph.compile: source not found` only
+  throws at closure-walk time, not in a single-file compile. The
+  **delete path is symmetric**: a delete that strands a still-
+  imported reachable route publishes an HMR `error` and skips the
+  prune (reverse edges read *before* the prune mutates them); a
+  delete nothing reachable imports prunes. Absent `site`/`cache`
+  the coordinator can't compile and degrades to the plain
+  `update`/`prune` walk (pure-graph unit tests, the
+  `createPreviewHandler` suite). Clean results flow through the
+  `update`/`prune` walk; failures publish an HMR `error` with
+  structured `diagnostics` / `codeFrame` / `snippet` (projected by
+  `projectCompileError`, **exported** from
+  `@astroflare/host-cloudflare` — one implementation, host never
+  re-projects; all `error` publishing stays in the coordinator).
+  (2) `createPreviewHandler` wraps every 5xx + 404 in an HTML
+  envelope that re-injects the HMR client `<script>` (gated by
+  `hmr !== false`), so a manual reload onto a broken page still
+  attaches a live socket and recovers on the next clean change.
+  (3) The auto-injected client now bundles
   `ERROR_OVERLAY_CLIENT_SOURCE` and routes `error` messages through
   `window.__aflareShowError`, so the iframe surfaces a modal with
   the code frame on top of the previous good render rather than a
   silent `console.error`. `HmrError` grew optional `diagnostics` /
   `codeFrame` / `snippet` fields to carry the projection (mirrors
-  `SnapshotError`'s shape from PR #15). All three are
-  backwards-compatible — `verifyCompile` is opt-in, error-response
-  injection follows the existing `hmr !== false` gate, and the
-  structured `HmrError` fields are optional.
+  `SnapshotError`'s shape from PR #15). Coverage:
+  [`packages/host-cloudflare/src/coordinator.test.ts`](packages/host-cloudflare/src/coordinator.test.ts)
+  (`closure/route-aware pre-flight` describe — clean/missing-import/
+  syntax/recovery/orphan/delete-prunes/delete-strands, plus the
+  no-site/cache degrade-to-plain case).
 - **Host-driven content collections (`astro:content`).**
   `createContentReader` needs a `Site` the spawned isolate doesn't
   have, and the inline bundler only walks `.astro`/`.md`/`.mdx`

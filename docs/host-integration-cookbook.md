@@ -545,46 +545,59 @@ cache in lock-step.
 
 The host-side workaround Ember shipped (`AstroflareHost` runs
 `ModuleGraph.compile` against incoming bytes and substitutes an HMR
-`error` for `update` on failure) is now built in. Two pieces:
+`error` for `update` on failure) is now built in, **on by default**.
+There is no opt-in flag and no host-side substitute — wire `site` +
+`cache` and the coordinator does the rest:
 
-1. **Wire the framework's compiler into the coordinator** so the
-   pre-flight runs at `notifyChanged` time:
+```ts
+const coordinator = createCoordinator({
+  sql,
+  site,
+  cache, // the SAME Cache instance you hand createPreviewHandler
+});
 
-   ```ts
-   import { ModuleGraph } from "@astroflare/preview/module-graph";
+// Just notify — the pre-flight runs automatically on every change.
+await coordinator.notifyChanged({ kind: "write", path, hash });
+await coordinator.notifyChanged({ kind: "delete", path });
+```
 
-   const moduleGraph = new ModuleGraph(
-     { site, cache, coordinator },
-     { runtimeImport: "./runtime/index.js" },
-   );
+Passing the **same** `Cache` the preview handler reads means a
+successful pre-flight closure warms the cache the render hits, so the
+pre-flight is free on the happy path (it is exactly the work the render
+does anyway). When `site` or `cache` is absent the coordinator can't
+compile and degrades to the plain `update`/`prune` walk — that's how the
+pure-graph unit tests and the `createPreviewHandler` suite (which wire
+the cache into the handler, not the coordinator) keep working.
 
-   const coordinator = createCoordinator({
-     sql,
-     compile: async (path) => {
-       await moduleGraph.compile(path);
-     },
-   });
-   ```
+On a **write** the coordinator verifies the import **closures of the
+routes a reload would actually render** — the changed file when it is
+itself a route, plus its transitive importers that are routes (route
+classification is the framework's own `routeFromFilePath`, so `[slug]`
+dynamic and content-collection-backed route files are covered). This is
+the only strategy that catches a page importing a not-yet-created /
+just-moved / just-deleted component: that failure
+(`module-graph.compile: source not found: …`) exists **only** at
+import-closure-walk time — a single-file compile of the page passes,
+then the reload lands in `createPreviewHandler`'s destructive 500
+envelope. Orphan modules with no reachable route fall back to a
+single-file compile so genuine syntax errors are still caught. A clean
+closure flows through the normal `update` walk; a failure broadcasts
+`{ type: "error", error: { message, path, line, column, codeFrame, diagnostics, ... } }`
+— the connected iframe stays on the previous good render and the
+auto-injected client surfaces a modal overlay.
 
-2. **Pass `verifyCompile: true` from your write path** so the
-   coordinator drives the pre-flight before deciding what to publish:
+The **delete** path is symmetric: before the prune, the closures of the
+routes that (transitively) imported the deleted file are pre-flighted
+(reverse edges read *before* the prune mutates them). A delete that
+strands a still-imported reachable route publishes an HMR `error` and
+**skips the prune** (no reload into a 500); a delete nothing reachable
+imports falls through to the normal unconditional `prune`.
 
-   ```ts
-   await coordinator.notifyChanged(
-     { kind: "write", path, hash },
-     { verifyCompile: true },
-   );
-   ```
-
-   On a clean compile the historical `update` walk runs unchanged.
-   On a `CompileError` the broadcast becomes
-   `{ type: "error", error: { message, path, line, column, codeFrame, diagnostics, ... } }`
-   — the connected iframe stays on the previous good render and the
-   auto-injected client surfaces a modal overlay with the code frame.
-
-The pre-flight is strictly opt-in; embedders that don't pass
-`verifyCompile` get the historical behaviour and can flip the flag on
-when they're ready. `createPreviewHandler` independently wraps every
-500/404 in an HTML envelope that re-injects the HMR client `<script>`
-(gated only by `hmr !== false`) so a manual reload onto a broken page
-still gets a live socket.
+`createPreviewHandler` independently wraps every 500/404 in an HTML
+envelope that re-injects the HMR client `<script>` (gated only by
+`hmr !== false`) so a manual reload onto a broken page still gets a
+live socket. If you need the `CompileError → HmrError` projection
+out-of-band, import `projectCompileError` from
+`@astroflare/host-cloudflare` rather than reimplementing its
+non-`CompileError` branch — but normally you never project: all HMR
+`error` publishing stays inside the coordinator.

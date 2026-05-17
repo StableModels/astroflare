@@ -74,6 +74,15 @@ export class SiteDurableObject extends DurableObject<Env> {
 			sql: ctx.storage.sql,
 			site: this.#site,
 			ctx,
+			// `site` + `cache` together turn on the closure/route-aware
+			// compile pre-flight automatically (no opt-in flag). Passing
+			// the same `SqlCache` the preview handler reads means a
+			// successful pre-flight closure warms the render's cache (free
+			// on the happy path). A page importing a not-yet-created /
+			// just-moved / just-deleted component now publishes an HMR
+			// `error` instead of reloading the iframe into the destructive
+			// 500 envelope.
+			cache: this.#cache,
 		});
 	}
 
