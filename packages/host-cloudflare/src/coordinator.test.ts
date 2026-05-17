@@ -1,8 +1,11 @@
 import { CompileError } from "@astroflare/compiler";
 import type { HmrMessage } from "@astroflare/core";
+import { MemoryCache, MemorySite } from "@astroflare/test-utils/in-memory";
 import { describe, expect, it } from "vitest";
 import { createCoordinator } from "./coordinator.js";
 import type { SqlBackend } from "./sql-cache.js";
+
+const enc = (s: string): Uint8Array => new TextEncoder().encode(s);
 
 /**
  * In-memory `SqlBackend` mock that handles the exact queries
@@ -336,6 +339,13 @@ describe("createCoordinator", () => {
 		});
 	});
 
+	// `notifyRemoved` is the low-level prune primitive — it stays
+	// unconditional. The "deletes prune unconditionally" *contract* is
+	// the bug: the symmetric guard lives one layer up, in
+	// `notifyChanged`'s delete branch, gated on `verifyCompile` + the
+	// route-aware capability (see "verifyReachableRoutes" below). Without
+	// that opt-in, `notifyChanged({ kind: "delete" })` still flows
+	// straight here and prunes — historical behaviour preserved.
 	it("notifyRemoved publishes hmr prune and removes the node", async () => {
 		const c = createCoordinator({ sql: makeMockSql() });
 		await c.graphPut({ path: "/b.astro", hash: "h2", imports: [], importedBy: [] });
@@ -352,5 +362,217 @@ describe("createCoordinator", () => {
 			paths: expect.arrayContaining(["/b.astro", "/a.astro"]),
 		});
 		expect(await c.graphGet("/b.astro")).toBeNull();
+	});
+
+	it("delete without verifyCompile still prunes unconditionally (back-compat)", async () => {
+		const site = new MemorySite();
+		const cache = new MemoryCache();
+		site.write("/src/components/Header.astro", enc("<header>h</header>"));
+		site.write(
+			"/src/pages/index.astro",
+			enc('---\nimport Header from "../components/Header.astro";\n---\n<Header />'),
+		);
+		const c = createCoordinator({
+			sql: makeMockSql(),
+			site,
+			verifyReachableRoutes: { cache },
+		});
+		await c.notifyChanged(
+			{ kind: "write", path: "/src/pages/index.astro", hash: "h" },
+			{ verifyCompile: true },
+		);
+		const seen: HmrMessage[] = [];
+		c.subscribe("hmr", (m) => seen.push(m));
+
+		// No `verifyCompile` on the delete — the guard never runs, prune
+		// fires even though `index` still imports `Header`.
+		site.remove("/src/components/Header.astro");
+		await c.notifyChanged({ kind: "delete", path: "/src/components/Header.astro" });
+
+		expect(seen).toHaveLength(1);
+		expect(seen[0]?.type).toBe("prune");
+	});
+
+	describe("verifyReachableRoutes (closure/route-aware pre-flight)", () => {
+		function boot() {
+			const site = new MemorySite();
+			const cache = new MemoryCache();
+			const c = createCoordinator({
+				sql: makeMockSql(),
+				site,
+				verifyReachableRoutes: { cache },
+			});
+			const seen: HmrMessage[] = [];
+			c.subscribe("hmr", (m) => seen.push(m));
+			return { site, cache, c, seen };
+		}
+
+		it("requires `site` when verifyReachableRoutes is configured", () => {
+			expect(() =>
+				createCoordinator({
+					sql: makeMockSql(),
+					verifyReachableRoutes: { cache: new MemoryCache() },
+				}),
+			).toThrow(/verifyReachableRoutes requires `site`/);
+		});
+
+		it("clean write → update", async () => {
+			const { site, c, seen } = boot();
+			site.write("/src/pages/index.astro", enc("<p>hello</p>"));
+			await c.notifyChanged(
+				{ kind: "write", path: "/src/pages/index.astro", hash: "h1" },
+				{ verifyCompile: true },
+			);
+			expect(seen).toHaveLength(1);
+			expect(seen[0]).toMatchObject({ type: "update", trigger: "/src/pages/index.astro" });
+		});
+
+		it("page importing a missing component → error (not update)", async () => {
+			const { site, c, seen } = boot();
+			site.write(
+				"/src/pages/index.astro",
+				enc('---\nimport SiteHeader from "../components/SiteHeader.astro";\n---\n<SiteHeader />'),
+			);
+			await c.notifyChanged(
+				{ kind: "write", path: "/src/pages/index.astro", hash: "h1" },
+				{ verifyCompile: true },
+			);
+			expect(seen).toHaveLength(1);
+			const msg = seen[0];
+			if (msg?.type !== "error") throw new Error("expected error");
+			expect(msg.error.path).toBe("/src/pages/index.astro");
+			expect(msg.error.message).toContain("source not found");
+			expect(msg.error.message).toContain("SiteHeader.astro");
+		});
+
+		it("broken syntax → error with structured diagnostics", async () => {
+			const { site, c, seen } = boot();
+			site.write("/src/pages/index.astro", enc("---\nconst x: = 5;\n---\n<p>broken</p>"));
+			await c.notifyChanged(
+				{ kind: "write", path: "/src/pages/index.astro", hash: "h1" },
+				{ verifyCompile: true },
+			);
+			const msg = seen[0];
+			if (msg?.type !== "error") throw new Error("expected error");
+			expect(msg.error.path).toBe("/src/pages/index.astro");
+			expect(msg.error.diagnostics).toBeDefined();
+			expect(msg.error.diagnostics?.length ?? 0).toBeGreaterThan(0);
+			expect(msg.error.codeFrame?.text).toContain("const x: = 5;");
+		});
+
+		it("recovers on a follow-up clean edit (missing component is created)", async () => {
+			const { site, c, seen } = boot();
+			site.write(
+				"/src/pages/index.astro",
+				enc('---\nimport SiteHeader from "../components/SiteHeader.astro";\n---\n<SiteHeader />'),
+			);
+			await c.notifyChanged(
+				{ kind: "write", path: "/src/pages/index.astro", hash: "h1" },
+				{ verifyCompile: true },
+			);
+			expect(seen[0]?.type).toBe("error");
+
+			// The component lands — pre-flight follows the reverse edge
+			// (SiteHeader → index, recorded during the failed closure walk)
+			// back to the page, re-walks its closure clean, and updates.
+			site.write("/src/components/SiteHeader.astro", enc("<header>site</header>"));
+			await c.notifyChanged(
+				{ kind: "write", path: "/src/components/SiteHeader.astro", hash: "h2" },
+				{ verifyCompile: true },
+			);
+			expect(seen).toHaveLength(2);
+			expect(seen[1]).toMatchObject({
+				type: "update",
+				trigger: "/src/components/SiteHeader.astro",
+			});
+		});
+
+		it("non-compilable path skips the check → update", async () => {
+			const { c, seen } = boot();
+			await c.notifyChanged(
+				{ kind: "write", path: "/src/styles/site.css", hash: "h1" },
+				{ verifyCompile: true },
+			);
+			expect(seen[0]).toMatchObject({ type: "update", trigger: "/src/styles/site.css" });
+		});
+
+		it("orphan module (no reachable route) falls back to single-file compile", async () => {
+			const { site, c, seen } = boot();
+			// A component nobody imports yet, with a syntax error. No
+			// reachable route → single-file compile still catches it.
+			site.write("/src/components/Orphan.astro", enc("---\nconst y: = 1;\n---\n<p>o</p>"));
+			await c.notifyChanged(
+				{ kind: "write", path: "/src/components/Orphan.astro", hash: "h1" },
+				{ verifyCompile: true },
+			);
+			const msg = seen[0];
+			if (msg?.type !== "error") throw new Error("expected error");
+			expect(msg.error.path).toBe("/src/components/Orphan.astro");
+			expect(msg.error.diagnostics).toBeDefined();
+		});
+
+		it("orphan module that compiles clean → update", async () => {
+			const { site, c, seen } = boot();
+			site.write("/src/components/Lonely.astro", enc("<aside>ok</aside>"));
+			await c.notifyChanged(
+				{ kind: "write", path: "/src/components/Lonely.astro", hash: "h1" },
+				{ verifyCompile: true },
+			);
+			expect(seen[0]).toMatchObject({ type: "update", trigger: "/src/components/Lonely.astro" });
+		});
+
+		it("delete of a file nothing imports → prune", async () => {
+			const { site, c, seen } = boot();
+			site.write("/src/pages/old.astro", enc("<p>old</p>"));
+			await c.notifyChanged(
+				{ kind: "write", path: "/src/pages/old.astro", hash: "h1" },
+				{ verifyCompile: true },
+			);
+			expect(seen[0]?.type).toBe("update");
+
+			site.remove("/src/pages/old.astro");
+			await c.notifyChanged(
+				{ kind: "delete", path: "/src/pages/old.astro" },
+				{ verifyCompile: true },
+			);
+			expect(seen).toHaveLength(2);
+			expect(seen[1]).toMatchObject({
+				type: "prune",
+				paths: expect.arrayContaining(["/src/pages/old.astro"]),
+			});
+			expect(await c.graphGet("/src/pages/old.astro")).toBeNull();
+		});
+
+		it("delete of a file a reachable route still imports → error, no prune", async () => {
+			const { site, c, seen } = boot();
+			site.write("/src/components/SiteHeader.astro", enc("<header>site</header>"));
+			site.write(
+				"/src/pages/index.astro",
+				enc('---\nimport SiteHeader from "../components/SiteHeader.astro";\n---\n<SiteHeader />'),
+			);
+			await c.notifyChanged(
+				{ kind: "write", path: "/src/pages/index.astro", hash: "h1" },
+				{ verifyCompile: true },
+			);
+			expect(seen[0]?.type).toBe("update");
+
+			// Reference-host flow: remove the bytes, then notify. The guard
+			// reads reverse edges before the prune mutates them, re-walks
+			// `index`'s closure, hits the missing import, publishes `error`,
+			// and skips the prune.
+			site.remove("/src/components/SiteHeader.astro");
+			await c.notifyChanged(
+				{ kind: "delete", path: "/src/components/SiteHeader.astro" },
+				{ verifyCompile: true },
+			);
+			expect(seen).toHaveLength(2);
+			const msg = seen[1];
+			if (msg?.type !== "error") throw new Error(`expected error, got ${msg?.type}`);
+			expect(msg.error.path).toBe("/src/components/SiteHeader.astro");
+			expect(msg.error.message).toContain("source not found");
+			// Prune was skipped → graph still holds the (now-stranded) edge,
+			// so a later re-create can recover via the same reverse edge.
+			expect(seen.some((m) => m.type === "prune")).toBe(false);
+		});
 	});
 });

@@ -547,44 +547,75 @@ The host-side workaround Ember shipped (`AstroflareHost` runs
 `ModuleGraph.compile` against incoming bytes and substitutes an HMR
 `error` for `update` on failure) is now built in. Two pieces:
 
-1. **Wire the framework's compiler into the coordinator** so the
-   pre-flight runs at `notifyChanged` time:
+1. **Wire the route-aware pre-flight capability into the coordinator.**
+   Pass the **same** `Cache` instance you hand `createPreviewHandler`
+   so a successful pre-flight closure warms the cache the render reads
+   (the pre-flight is then free on the happy path):
 
    ```ts
-   import { ModuleGraph } from "@astroflare/preview/module-graph";
-
-   const moduleGraph = new ModuleGraph(
-     { site, cache, coordinator },
-     { runtimeImport: "./runtime/index.js" },
-   );
-
    const coordinator = createCoordinator({
      sql,
-     compile: async (path) => {
-       await moduleGraph.compile(path);
-     },
+     site,
+     verifyReachableRoutes: { cache },
    });
    ```
 
-2. **Pass `verifyCompile: true` from your write path** so the
-   coordinator drives the pre-flight before deciding what to publish:
+2. **Pass `verifyCompile: true` from your write *and delete* path** so
+   the coordinator drives the pre-flight before deciding what to
+   publish:
 
    ```ts
+   // write
    await coordinator.notifyChanged(
      { kind: "write", path, hash },
      { verifyCompile: true },
    );
+   // delete (symmetric — the guard runs before the prune)
+   await coordinator.notifyChanged(
+     { kind: "delete", path },
+     { verifyCompile: true },
+   );
    ```
 
-   On a clean compile the historical `update` walk runs unchanged.
-   On a `CompileError` the broadcast becomes
+   With `verifyReachableRoutes` configured, `verifyCompile` verifies the
+   import **closures of the routes a reload would actually render** — the
+   changed file when it is itself a route, plus its transitive importers
+   that are routes (route classification is the framework's own
+   `routeFromFilePath`, so `[slug]` dynamic and content-collection-backed
+   route files are covered). This is the only strategy that catches a
+   page importing a not-yet-created / just-moved / just-deleted
+   component: that failure (`module-graph.compile: source not found: …`)
+   exists **only** at import-closure-walk time — a single-file compile of
+   the page passes, then the reload lands in `createPreviewHandler`'s
+   destructive 500 envelope. Orphan modules with no reachable route fall
+   back to a single-file compile so genuine syntax errors are still
+   caught.
+
+   On a clean closure the historical `update` walk runs unchanged. On a
+   failure the broadcast becomes
    `{ type: "error", error: { message, path, line, column, codeFrame, diagnostics, ... } }`
    — the connected iframe stays on the previous good render and the
-   auto-injected client surfaces a modal overlay with the code frame.
+   auto-injected client surfaces a modal overlay. The **delete** path is
+   symmetric: a delete that strands a still-imported reachable route
+   publishes an HMR `error` and **skips the prune** (no reload into a
+   500); a delete nothing reachable imports falls through to the normal
+   unconditional `prune` (graph cleanup, expected reload).
 
 The pre-flight is strictly opt-in; embedders that don't pass
-`verifyCompile` get the historical behaviour and can flip the flag on
-when they're ready. `createPreviewHandler` independently wraps every
-500/404 in an HTML envelope that re-injects the HMR client `<script>`
-(gated only by `hmr !== false`) so a manual reload onto a broken page
-still gets a live socket.
+`verifyCompile` get the historical behaviour — including unconditional
+delete prune — and can flip the flag on when they're ready.
+`createPreviewHandler` independently wraps every 500/404 in an HTML
+envelope that re-injects the HMR client `<script>` (gated only by
+`hmr !== false`) so a manual reload onto a broken page still gets a
+live socket.
+
+> **Legacy single-file `compile` hook.** The older
+> `createCoordinator({ compile: (p) => moduleGraph.compile(p) })`
+> single-file hook still works for embedders that haven't supplied the
+> graph capability, but it **cannot** see a missing/moved import (the
+> failure only exists at closure-walk time) and the delete path stays
+> unconditional. `verifyReachableRoutes` supersedes it when both are
+> configured. Prefer `verifyReachableRoutes`. If you need the
+> `CompileError → HmrError` projection out-of-band, import
+> `projectCompileError` from `@astroflare/host-cloudflare` rather than
+> reimplementing its non-`CompileError` branch.
