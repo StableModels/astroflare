@@ -7,6 +7,17 @@
  * Used by Mode A (preview) to skip recompiling unchanged source. Bytes are
  * stored inline as BLOB; for the typical compile-cache entry size (a few KB
  * of compiled JS) this is the right shape.
+ *
+ * Size-cap caveat: `SqlCache` inherits Cloudflare DO SQLite's hard
+ * per-row/BLOB limit of 2 MB. A host that can emit large compiled modules
+ * (e.g. a page that bakes fetched data into static consts, compiling to a
+ * >2 MB module) will make `put()` throw `SQLITE_TOOBIG`. The framework
+ * treats a throwing Cache as semantically identical to an empty one — the
+ * `ModuleGraph` warm path swallows get/put failures and degrades to
+ * "recompile uncached" (never escaping into the DO storage layer), so an
+ * oversized entry is slow, not fatal. Hosts that routinely emit large
+ * modules should supply an overflow-capable `Cache` (e.g. an R2-backed
+ * impl, ~5 TiB object cap) instead of `SqlCache`.
  */
 
 import type { Cache } from "@astroflare/core";

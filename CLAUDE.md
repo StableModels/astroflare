@@ -248,6 +248,24 @@ build cleanly into deployable bundles.
   (`closure/route-aware pre-flight` describe — clean/missing-import/
   syntax/recovery/orphan/delete-prunes/delete-strands, plus the
   no-site/cache degrade-to-plain case).
+  (4) **A failing host `Cache` can't brick the DO.** The `Cache`
+  contract (`{get,put}`) has a valid no-op default
+  (`createNoopCache()`), so a throwing cache is semantically an empty
+  one. The single chokepoint — `ModuleGraph.#compileImpl`
+  ([`packages/preview/src/module-graph.ts`](packages/preview/src/module-graph.ts),
+  the warm path every Mode-A render *and* the coordinator
+  closure/route-aware pre-flight funnels through) — wraps both
+  `cache.get` (failure ⇒ treat as miss, recompile) and `cache.put`
+  (failure ⇒ silent skip, log `module-graph.cache.{get,put}.failed`).
+  Rationale: `SqlCache` is backed by the per-site DO's
+  `ctx.storage.sql`; an uncaught `put` throw (e.g. `SQLITE_TOOBIG` on
+  a >2 MB compiled module — the DO-SQLite per-row hard cap, now
+  documented in [`sql-cache.ts`](packages/host-cloudflare/src/sql-cache.ts))
+  escaping into DO storage is a fatal fault Cloudflare resets the
+  object for, and the deterministic pre-flight re-attempt means it
+  never recovers (error 1101 forever). Coverage: the
+  `ModuleGraph cache-failure hardening` describe in
+  [`packages/preview/src/module-graph.test.ts`](packages/preview/src/module-graph.test.ts).
 - **Host-driven content collections (`astro:content`).**
   `createContentReader` needs a `Site` the spawned isolate doesn't
   have, and the inline bundler only walks `.astro`/`.md`/`.mdx`

@@ -159,14 +159,43 @@ export class ModuleGraph {
 		});
 
 		let compiled: string;
-		const cached = await this.#deps.cache.get(compileKey);
+		// A host-supplied Cache is, by contract, equivalent to an empty one
+		// (createNoopCache() is a valid default). A get/put that *throws*
+		// must therefore degrade to "recompile uncached" — never escape
+		// into the host's storage layer. Concretely: SqlCache is backed by
+		// the per-site DO's ctx.storage.sql; an uncaught throw from inside
+		// it (e.g. SQLITE_TOOBIG on a >2 MB compiled module) is treated by
+		// Cloudflare as a fatal storage fault that resets the DO, and
+		// because the pre-flight/render deterministically re-attempts the
+		// same oversized closure on every change the object never recovers
+		// (error 1101 on every subsequent request). Swallowing here is the
+		// load-bearing invariant: a bad/edge Cache degrades to slow, it
+		// cannot brick the DO.
+		let cached: Uint8Array | null = null;
+		try {
+			cached = await this.#deps.cache.get(compileKey);
+		} catch (err) {
+			this.#deps.logger?.event("module-graph.cache.get.failed", {
+				path,
+				compileKey,
+				message: (err as Error).message,
+			});
+		}
 		if (cached) {
 			compiled = dec.decode(cached);
 			this.#deps.logger?.event("module-graph.cache.hit", { path, compileKey });
 		} else {
 			const source = dec.decode(sourceBytes);
 			compiled = await this.#compileSource(path, source);
-			await this.#deps.cache.put(compileKey, enc.encode(compiled));
+			try {
+				await this.#deps.cache.put(compileKey, enc.encode(compiled));
+			} catch (err) {
+				this.#deps.logger?.event("module-graph.cache.put.failed", {
+					path,
+					compileKey,
+					message: (err as Error).message,
+				});
+			}
 			this.#deps.logger?.event("module-graph.compile", { path, compileKey });
 		}
 

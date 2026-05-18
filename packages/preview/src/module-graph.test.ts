@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import type { Cache } from "@astroflare/core";
 import { type TestHost, createTestHost } from "@astroflare/test-utils";
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import { ModuleGraph } from "./module-graph.js";
@@ -196,5 +197,67 @@ describe("ModuleGraph cache persistence (§7.4 brief)", () => {
 
 		// Two new cache hits (one per module).
 		expect(host.logger.byName("module-graph.cache.hit").length).toBe(2);
+	});
+});
+
+describe("ModuleGraph cache-failure hardening", () => {
+	// A host-supplied Cache that throws (the production failure mode:
+	// SqlCache is backed by the per-site DO's ctx.storage.sql, and an
+	// INSERT of a >2 MB compiled module throws SQLITE_TOOBIG). The
+	// framework invariant is that a failing Cache is semantically
+	// identical to an empty one — it must degrade to "recompile
+	// uncached", never escape into the host's storage layer.
+	function makeGraph(files: Record<string, string>, cache: Cache) {
+		const host = createTestHost();
+		active.push(host);
+		for (const [p, body] of Object.entries(files)) {
+			host.site.write(p, enc(body));
+		}
+		const graph = new ModuleGraph(
+			{ site: host.site, cache, logger: host.logger, coordinator: host.coordinator },
+			{ runtimeImport: RUNTIME_URL },
+		);
+		return { host, graph };
+	}
+
+	it("a throwing cache.put is swallowed — compile proceeds uncached", async () => {
+		const { host, graph } = makeGraph(
+			{ "/src/pages/index.astro": "<p>hi</p>" },
+			{
+				get: async () => {
+					throw new Error("SQLITE_TOOBIG: string or blob too big");
+				},
+				put: async () => {
+					throw new Error("SQLITE_TOOBIG: string or blob too big");
+				},
+			},
+		);
+
+		// The throw must NOT escape — the pipeline returns valid compiled
+		// output and the closure walk (the DO pre-flight path) completes.
+		const info = await graph.compile("/src/pages/index.astro");
+		expect(info.compiled).toContain("$component(");
+		await expect(graph.closure("/src/pages/index.astro")).resolves.toBeTruthy();
+
+		// Failure is observable for operators, not silent-and-lost.
+		expect(host.logger.byName("module-graph.cache.get.failed").length).toBeGreaterThan(0);
+		expect(host.logger.byName("module-graph.cache.put.failed").length).toBeGreaterThan(0);
+		// It still recorded a real compile (degraded to uncached, not skipped).
+		expect(host.logger.byName("module-graph.compile").length).toBeGreaterThan(0);
+	});
+
+	it("a throwing cache.get is treated as a miss — recompiles", async () => {
+		const { graph } = makeGraph(
+			{ "/src/pages/index.astro": "<p>hi</p>" },
+			{
+				get: async () => {
+					throw new Error("DO storage reset");
+				},
+				put: async () => {},
+			},
+		);
+
+		const info = await graph.compile("/src/pages/index.astro");
+		expect(info.compiled).toContain("$component(");
 	});
 });
